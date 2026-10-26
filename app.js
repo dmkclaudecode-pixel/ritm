@@ -593,7 +593,8 @@ const LLM_URL = "https://api.deepseek.com/chat/completions";
 const LOCAL_MODEL_URL = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm";
 const llmCfg = () => LS.get("llm") || {};
 const localSize = () => { try{ return NATIVE && NATIVE.llmLocalSize ? +NATIVE.llmLocalSize() : 0; }catch(e){ return 0; } };
-const llmMode = () => llmCfg().mode === "cloud" ? "cloud" : (NATIVE && NATIVE.llmLocalAsk ? "local" : "cloud");
+const hasLocal = () => { try{ return !!(NATIVE && NATIVE.llmLocalAvailable && NATIVE.llmLocalAvailable()); }catch(e){ return false; } };
+const llmMode = () => llmCfg().mode === "cloud" ? "cloud" : (hasLocal() ? "local" : "cloud");
 const llmReady = () => llmMode() === "local" ? localSize() > 1e9 : !!llmCfg().key;
 const llmOn = () => !!(llmCfg().on && llmReady());
 let llmSeq = 0; const llmWait = {};
@@ -648,7 +649,7 @@ function respond(text){
 let llmDl = null;   // {pct, err}
 function renderLlm(){
   const c = llmCfg(), t = $("llmToggle"); if(!t) return;
-  const mode = llmMode(), canLocal = !!(NATIVE && NATIVE.llmLocalAsk), sz = localSize();
+  const mode = llmMode(), canLocal = hasLocal(), sz = localSize();
   $("llmModeLocal").hidden = !canLocal; $("llmModeLocal").classList.toggle("primary", mode === "local"); $("llmModeCloud").classList.toggle("primary", mode === "cloud");
   $("llmLocalBox").hidden = mode !== "local"; $("llmCloudBox").hidden = mode !== "cloud";
   if(document.activeElement !== $("llmKey")) $("llmKey").value = c.key || "";
@@ -656,6 +657,7 @@ function renderLlm(){
   $("llmDl").textContent = llmDl && llmDl.err ? "Повторить скачивание" : "Скачать модель (1,6 ГБ)";
   $("llmBar").hidden = !(llmDl && !llmDl.err); $("llmBarFill").style.width = (llmDl ? llmDl.pct : 0) + "%";
   t.textContent = c.on ? "Включён" : "Выключен"; t.classList.toggle("primary", !!c.on);
+  if(NATIVE && !canLocal && !$("llmNote").textContent) $("llmNote").textContent = "В этой версии приложения нет модели на телефоне. Она есть в отдельном файле ritm-local.apk (только для 64-битных телефонов).";
   if(mode === "local" && !(llmDl && !llmDl.err) && !$("llmNote").textContent) $("llmNote").textContent = sz > 1e9 ? "Модель скачана." : (sz > 0 ? "Скачано не полностью, нажмите «Скачать» ещё раз, докачается." : "");
 }
 function setMode(m){ const c = llmCfg(); c.mode = m; LS.set("llm", c); $("llmNote").textContent = ""; renderLlm(); }

@@ -10,6 +10,7 @@ import java.net.URL
 
 /** Локальная модель на телефоне (Google LiteRT-LM). Файл модели скачивается один раз в память приложения. */
 object LocalLlm {
+    const val AVAILABLE = true
     private const val IDLE_MS = 120_000L
     private var engine: Engine? = null
     private var lastUse = 0L

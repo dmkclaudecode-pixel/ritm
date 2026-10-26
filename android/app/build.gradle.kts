@@ -13,7 +13,12 @@ android {
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
-        ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    flavorDimensions += "model"
+    productFlavors {
+        create("lite") { dimension = "model" }
+        create("full") { dimension = "model"; ndk { abiFilters += listOf("arm64-v8a") } }
     }
 
     signingConfigs {
@@ -45,5 +50,5 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.health.connect:connect-client:1.1.0")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
+    "fullImplementation"("com.google.ai.edge.litertlm:litertlm-android:latest.release")
 }

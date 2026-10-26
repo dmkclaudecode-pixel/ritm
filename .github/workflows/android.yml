@@ -35,7 +35,7 @@ jobs:
       - name: Собрать APK
         run: |
           set -o pipefail
-          gradle -p android assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          gradle -p android assembleLiteRelease assembleFullRelease --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Сохранить хвост лога при сбое
         if: failure()
@@ -52,29 +52,35 @@ jobs:
       - name: Проверить APK
         run: |
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          { echo "== apksigner"; $BT/apksigner verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk 2>&1 | head -20
-            echo "== badging"; $BT/aapt dump badging android/app/build/outputs/apk/release/app-release.apk 2>&1 | grep -E "package:|sdkVersion|targetSdk|native-code|uses-" | head -20
-            echo "== zip"; unzip -tq android/app/build/outputs/apk/release/app-release.apk | tail -2
-            echo "== libs"; unzip -v android/app/build/outputs/apk/release/app-release.apk | grep -E "\.so|AndroidManifest|resources.arsc" | head -30
-            echo "== zipalign"; $BT/zipalign -c -P 16 -v 4 android/app/build/outputs/apk/release/app-release.apk 2>&1 | grep -E "FAIL|Verification" | head -10
+          { echo "== apksigner"; $BT/apksigner verify --verbose --print-certs android/app/build/outputs/apk/full/release/app-full-release.apk 2>&1 | head -20
+            echo "== badging"; $BT/aapt dump badging android/app/build/outputs/apk/full/release/app-full-release.apk 2>&1 | grep -E "package:|sdkVersion|targetSdk|native-code|uses-" | head -20
+            echo "== zip"; unzip -tq android/app/build/outputs/apk/full/release/app-full-release.apk | tail -2
+            echo "== libs"; unzip -v android/app/build/outputs/apk/full/release/app-full-release.apk | grep -E "\.so|AndroidManifest|resources.arsc" | head -30
+            echo "== zipalign"; $BT/zipalign -c -P 16 -v 4 android/app/build/outputs/apk/full/release/app-full-release.apk 2>&1 | grep -E "FAIL|Verification" | head -10
           } > /tmp/apkcheck.txt 2>&1 || true
           git config user.name ci; git config user.email ci@example.com
           git checkout --orphan ci-apk; git rm -rf . -q; cp /tmp/apkcheck.txt apkcheck.txt; git add apkcheck.txt; git commit -qm apkcheck; git push -f origin ci-apk || true
           git checkout -f main || git checkout -f ${{ github.sha }}
 
       - name: Переименовать
-        run: cp android/app/build/outputs/apk/release/app-release.apk ritm.apk
+        run: |
+          cp android/app/build/outputs/apk/lite/release/app-lite-release.apk ritm.apk
+          cp android/app/build/outputs/apk/full/release/app-full-release.apk ritm-local.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: ritm-apk
-          path: ritm.apk
+          path: |
+            ritm.apk
+            ritm-local.apk
 
       - name: Опубликовать для скачивания
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Ритм недели, сборка ${{ github.run_number }}
-          body: Скачайте ritm.apk на телефон и установите.
-          files: ritm.apk
+          body: "ritm.apk — обычная версия. ritm-local.apk — то же и с моделью на телефоне (только 64-битные телефоны, +24 МБ)."
+          files: |
+            ritm.apk
+            ritm-local.apk
           make_latest: true

@@ -234,6 +234,7 @@ class MainActivity : ComponentActivity() {
         }
 
         // ---- локальная модель ----
+        @JavascriptInterface fun llmLocalAvailable(): Boolean = LocalLlm.AVAILABLE
         @JavascriptInterface fun llmLocalSize(): Long = LocalLlm.size(this@MainActivity)
         @JavascriptInterface fun llmLocalDelete() { LocalLlm.delete(this@MainActivity) }
         @JavascriptInterface fun llmLocalDownload(url: String) {
