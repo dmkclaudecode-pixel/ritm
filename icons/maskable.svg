@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs><linearGradient id="g" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#15998E"/><stop offset="1" stop-color="#0A4F4B"/></linearGradient>
+<linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFC95C"/><stop offset="1" stop-color="#EE8E2E"/></linearGradient>
+<radialGradient id="glow"><stop offset="0.55" stop-color="#FFC95C" stop-opacity="0.35"/><stop offset="1" stop-color="#FFC95C" stop-opacity="0"/></radialGradient>
+<clipPath id="above"><rect x="0" y="0" width="512" height="348.0"/></clipPath></defs>
+<rect width="512" height="512" rx="0" fill="url(#g)"/>
+<g clip-path="url(#above)"><circle cx="256" cy="251.3" r="116.1" fill="url(#glow)"/><circle cx="256" cy="251.3" r="74.9" fill="url(#sun)"/></g>
+<rect x="130.4" y="285.6" width="26.5" height="62.4" rx="13.3" fill="#F3FAF8" fill-opacity="0.62"/><rect x="167.9" y="257.6" width="26.5" height="90.5" rx="13.3" fill="#F3FAF8" fill-opacity="0.78"/><rect x="205.3" y="229.5" width="26.5" height="118.6" rx="13.3" fill="#F3FAF8" fill-opacity="0.92"/><rect x="242.7" y="207.6" width="26.5" height="140.4" rx="13.3" fill="#F3FAF8" fill-opacity="1"/><rect x="280.2" y="229.5" width="26.5" height="118.6" rx="13.3" fill="#F3FAF8" fill-opacity="0.92"/><rect x="317.6" y="257.6" width="26.5" height="90.5" rx="13.3" fill="#F3FAF8" fill-opacity="0.78"/><rect x="355.1" y="285.6" width="26.5" height="62.4" rx="13.3" fill="#F3FAF8" fill-opacity="0.62"/>
+<rect x="121.1" y="360.5" width="269.9" height="7.0" rx="3.5" fill="#F3FAF8" fill-opacity="0.4"/>
+</svg>

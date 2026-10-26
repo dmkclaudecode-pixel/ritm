@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ритм недели</title>
+<meta name="description" content="Планировщик недели: движение, сон, свет, общение и отдых.">
+<meta name="theme-color" content="#0F7A73">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand img{width:40px;height:40px;border-radius:11px;flex:none}
+.install{background:var(--accent);color:var(--surface);border:0;border-radius:10px;padding:9px 14px;font-weight:600;font-size:.88rem}
+a.btn{text-decoration:none;display:inline-flex;align-items:center}
+.remrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)}
+.remrow:last-of-type{border-bottom:0}
+.remrow input[type=time]{font:inherit;font-size:16px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.remrow .rl{display:flex;flex-direction:column;gap:1px;min-width:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <img src="icons/icon-192.png" alt="">
+      <div style="min-width:0"><h1>Ритм недели</h1><div class="range" id="range">…</div></div>
+    </div>
+    <div class="weeknav">
+      <button class="iconbtn" id="prev" aria-label="Предыдущая неделя"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button class="iconbtn" id="now" aria-label="Текущая неделя"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/></svg></button>
+      <button class="iconbtn" id="next" aria-label="Следующая неделя"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+    </div>
+  </header>
+
+  <button class="install" id="installBtn" hidden>Установить на главный экран</button>
+
+  <div class="strip" id="strip"></div>
+  <section class="card" id="summary"></section>
+  <section class="card" id="today" hidden></section>
+  <section id="days" style="display:flex;flex-direction:column;gap:14px"></section>
+
+  <section class="card" id="remCard">
+    <h2>Напоминания</h2>
+    <p class="note">Уведомления присылает календарь телефона, поэтому они приходят, даже когда приложение закрыто. Добавьте два ежедневных напоминания один раз, и они будут работать всегда.</p>
+    <div class="remrow"><span class="rl"><b>Утро: план на день</b><span class="note">Каждый день</span></span>
+      <span class="tools"><input type="time" id="remMorning" aria-label="Время утреннего напоминания"><a class="btn" id="gMorning" target="_blank" rel="noopener">В Google Календарь</a></span></div>
+    <div class="remrow"><span class="rl"><b>Вечер: что не сделано</b><span class="note">Каждый день</span></span>
+      <span class="tools"><input type="time" id="remEvening" aria-label="Время вечернего напоминания"><a class="btn" id="gEvening" target="_blank" rel="noopener">В Google Календарь</a></span></div>
+    <div class="tools"><button class="btn" id="icsWeek">Дела недели в календарь (.ics)</button></div>
+    <p class="note">В Google Календаре откроется готовое событие: нажмите «Сохранить». Чтобы уведомление приходило точно в момент события, выберите в нём «Уведомление: в момент начала». Файл .ics открывается в Samsung Календаре и большинстве других календарей.</p>
+  </section>
+
+  <section class="card">
+    <h2>Неделя целиком</h2>
+    <div class="tools">
+      <button class="btn" id="tpl">Заполнить по шаблону</button>
+      <button class="btn" id="copyPrev">Скопировать прошлую</button>
+      <button class="btn" id="goalsBtn">Цели на неделю</button>
+      <button class="btn danger" id="clear">Очистить неделю</button>
+    </div>
+    <h2 style="margin-top:6px">Резервная копия</h2>
+    <p class="note">Все данные хранятся только на этом телефоне. Время от времени сохраняйте копию, чтобы ничего не потерять при смене телефона или очистке браузера.</p>
+    <div class="tools">
+      <button class="btn" id="exportBtn">Сохранить копию</button>
+      <label class="btn" for="importFile" style="cursor:pointer">Восстановить из копии</label>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+  </section>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true"><div class="in" id="sheetIn"></div></div>
+<div class="toast" id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
