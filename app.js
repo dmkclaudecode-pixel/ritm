@@ -413,7 +413,7 @@ function renderStats(){
 
 function renderMore(){
   $("subtitle").textContent = "Цели, уведомления, копия";
-  renderReminders(); renderHealthCard(); renderActs();
+  renderReminders(); renderHealthCard(); renderActs(); renderClaudeCard();
   $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
   if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; $("nTestReview").hidden = !settings.notify;
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
@@ -489,7 +489,7 @@ $("icsWeek").onclick = async () => {
 /* ---------- backup ---------- */
 $("exportBtn").onclick = () => {
   const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}};
-  for(const k of LS.keys()) data.entries[k] = LS.get(k);
+  for(const k of LS.keys()) if(k !== "claudeKey") data.entries[k] = LS.get(k);
   download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); if(!NATIVE) toast("Копия сохранена в загрузках");
 };
 $("importFile").onchange = async e => {
@@ -512,12 +512,13 @@ document.addEventListener("click", e => {
   const t = e.target.closest("button"); if(!t) return;
   const ds = t.dataset;
   if(chatClick(ds)) return;
+  if(memClick(ds)) return;
   if(journalClick(ds, t)) return;
   if(appsClick(ds)) return;
   if(actsClick(ds)) return;
   if(tab==="review" && reviewClick(ds)) return;
   if(ds.openreview){ openReview(); return; }
-  if(ds.tab){ rvState = null; rvResult = null; tab = ds.tab; if(tab==="week") weekStart = mondayOf(new Date()); render(); window.scrollTo({top:0}); return; }
+  if(ds.tab){ rvState = null; rvResult = null; tab = ds.tab; if(tab === "chat") askRoutine(); if(tab==="week") weekStart = mondayOf(new Date()); render(); window.scrollTo({top:0}); return; }
   if(ds.tick){ const k = keyOfItem(ds.tick); mutate(k, w => { const it = findIn(w, ds.tick); it.done = !it.done; if(it.done) toast("Отмечено. Так держать!"); }); }
   else if(ds.edit){ const k = keyOfItem(ds.edit); openItem(k, findIn(getWeek(k), ds.edit)); }
   else if(ds.add){ openItem(ds.week || curKey(), {id:null, day:+ds.add, cat:"walk", t:"", time:""}); }
@@ -662,8 +663,10 @@ function dayFromText(s){
 }
 const FUTURE = / (будет|буду|будем|собираюсь|собираемся|планирую|планируем|пойду|пойдем|поеду|поедем|схожу|сходим|хочу|хотим|запланир|займусь|позанимаюсь|сделаю|поплаваю|побегу|потренируюсь|завтра|послезавтра|вечером пойду|потом пойду)/;
 const PAST_VERB = /(^|\s)[а-я]{2,}(ал|ял|ил|ыл|ел|ол|ул|ла|ли|лся|лась|лись)(?=\s)/;
+const META = / (я )?(писал|написал|говорил|сказал|упоминал|предупреждал|же|ведь)[а-я]* (что|же)? /g;
 const isFutureClause = (clause, whole, e) => {
-  const c = nrm(clause), w = nrm(whole);
+  const c = nrm(clause).replace(META, " "), w = nrm(whole).replace(META, " ");
+  if(e.time && e.time > nowHM() && !/ (утром|днем) /.test(c) && !/ (вчера|позавчера) /.test(c)) return true;
   if(FUTURE.test(c)) return true;
   if(PAST_VERB.test(c)) return false;
   if(FUTURE.test(w) && !PAST_VERB.test(c)) return true;
@@ -729,6 +732,7 @@ function runAction(msgId, i){
   const a = m.acts[i].a; m.chosen = i; saveChat(arr);
   let reply = "";
   if(a.op === "move"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.day = a.day; }); reply = `Перенёс «${a.t}» ${DACC[a.day]}.`; }
+  else if(a.op === "time"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.time = a.time; }); reply = `Поставил «${a.t}» на ${a.time}.`; }
   else if(a.op === "remove"){ mutateQuiet(a.key, w => { w.items = w.items.filter(x=>x.id!==a.id); }); reply = `Убрал «${a.t}» из плана.`; }
   else if(a.op === "rskip"){ const r = getRoutine(); r.asked[a.k] = true; r.pending = null; saveRoutine(r); reply = "Хорошо, пропустим. Расскажешь потом, если захочешь."; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
@@ -779,6 +783,7 @@ function addPlanFromChat(e, date){
   return res;
 }
 
+const pendingIssueDates = [];
 // ---------- understanding a message ----------
 function respond(text){
   const s = nrm(text);
@@ -790,9 +795,10 @@ function respond(text){
   if(/ (спасибо|спс|благодарю) /.test(s) && s.length < 30) return bot(pick(["Пожалуйста!","Обращайся!","Всегда рад помочь."]));
   if(/ (помощь|помоги|что ты умеешь|как пользоваться|help) /.test(s)) return bot(HELP_TEXT);
   if(/ (разбор|подведи итог|подвести итог|итоги дня) /.test(s)) return bot("Давай подведём итоги дня.", [act("Открыть разбор", {op:"review"})]);
-  if(/^ (что|какой|какие|покажи|план)/.test(s) && dayFromText(text) && !RITM.parse(text).some(e=>e.type)) return bot(planText(dayFromText(text)));
-  if(/ (что|какой|какие|покажи) .*(план|сегодня|по плану)|^ план /.test(s) && !/ завтра /.test(s) && !RITM.parse(text).some(e=>e.type && !/ (что|какой|какие) /.test(nrm(e.text)) )) return bot(planText(new Date()));
-  if(/ (что|какой|покажи|план) .*завтра| завтра что /.test(s) && !/ (будет|буду|пойду) /.test(s)) return bot(planText(addDays(new Date(),1)));
+  const mentionsActivity = RITM.parse(text).some(e => e.type && TYPES[e.type].unit !== "event");
+  const isQuestion = /\?|^ (что|какой|какие|покажи|план|расскажи)/.test(text.trim().toLowerCase() + " ") || /^ (что|какой|какие|покажи|план) /.test(s);
+  if(!mentionsActivity && isQuestion && / (что|какой|какие|покажи|план|планы) /.test(s)){
+    const dd = dayFromText(text) || new Date(); return showPlan(dd); }
   if(/ (как|что) .*(недел)| недел[яюи] /.test(s) && / (как|что|итог|цел) /.test(s)) return bot(weekText());
   if(/ (сколько|как|итоги|статистик|как прошел|как дела у меня) /.test(s) && / (вод|кофе|белк|шаг|сегодня|телефон|итог|статистик) /.test(s)) return bot(todayStatsText());
   const mv = /^ (перенеси|сдвинь|передвинь|перенести) (.+?) на (.+) $/.exec(s);
@@ -805,7 +811,7 @@ function respond(text){
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
   const entries = RITM.parse(text);
-  if(!entries.length) return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?».");
+  if(!entries.length){ ruleMiss = true; return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
   const lastBot = getChat().filter(m=>m.who==="bot").slice(-1)[0];
   const ctxKind = lastBot && Date.now() - lastBot.at < 3*3600*1000 ? lastBot.kind : null;
 
@@ -817,6 +823,7 @@ function respond(text){
     const fut = TYPES[e.type].unit === "min" && !e.stepsOnly && (isFutureClause(e.text, text, e) || (cd && dateKeyOf(cd)+dayIdxOf(cd) !== curKey()+todayI()));
     if(fut){ e.future = true; e.date = (cd || new Date()).getTime(); future.push(e); } else past.push(e);
   }
+  if(!past.length && !future.length && unknown.length && ctxKind !== "lunch") ruleMiss = true;
   // answer to the lunch question: make sure the meal itself is recorded
   if(ctxKind === "lunch" && !past.some(e=>e.type==="meal") && (past.length || unknown.length)){
     past.push({type:"meal", name:"Обед: " + text.trim().slice(0,60), time:nowHM(), srv:1, text});
@@ -867,8 +874,10 @@ function respond(text){
     const near = e.time ? w.items.find(i => i.day===d && i.time && i.cat !== e.type && Math.abs((+i.time.slice(0,2)*60 + +i.time.slice(3)) - (+e.time.slice(0,2)*60 + +e.time.slice(3))) < 60) : null;
     if(near) line += ` Рядом по времени стоит «${near.t}» в ${near.time}, проверь, что всё успеваешь.`;
     out.push(line);
+    pendingIssueDates.push(date);
   }
   if(out.length) bot(out.join("\n"));
+  if(pendingIssueDates.length){ postIssues(pendingIssueDates.splice(0), 2); }
   unknown.forEach((u, idx) => {
     const guesses = ["walk","strength","sport","hobby","relax","meal","work","other"].filter(t => TYPES[t]);
     const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
@@ -877,6 +886,69 @@ function respond(text){
     void m;
   });
 }
+function setBedtime(hm){
+  settings.bedtime = hm;
+  const b = toMinHM(hm), bb = b < 6*60 ? b + 1440 : b, o = toMinHM(settings.screensOff || "22:30"), oo = o < 6*60 ? o + 1440 : o;
+  if(oo > bb - 60) settings.screensOff = fromMin(bb - 60);
+  persistSettings();
+  const r = getRoutine(); r.bedSet = true; r.asked.bed = true; saveRoutine(r);
+}
+function planIssues(date){
+  const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key), out = [];
+  const its = w.items.filter(i => i.day===d && !i.done);
+  const bed = toMinHM(usualBedtime().hm), bedM = bed < 6*60 ? bed + 1440 : bed;
+  const off = Math.min(bedM - 60, (o => o < 6*60 ? o + 1440 : o)(toMinHM(settings.screensOff || "22:30")));
+  const wake = toMinHM(wakeFor(d));
+  const isToday = key === curKey() && d === todayI(), nowM = toMinHM(nowHM());
+  for(const it of its){
+    if(!it.time) continue; let t = toMinHM(it.time); if(t < 5*60) t += 1440;
+    if(isToday && t < nowM) continue;
+    const dur = Math.min(defaultMin(it), 120);
+    if(t >= bedM - 15) out.push({it, why:`стоит на ${it.time}, а ложишься ты в ${usualBedtime().hm}`});
+    else if(isScreen(it.cat) && t + Math.min(dur, 60) > off) out.push({it, why:`экраны в ${it.time} — это меньше чем за час до сна (отбой в ${usualBedtime().hm}), заснуть будет труднее`});
+    else if(MAJOR.has(it.cat) && t + dur > bedM - 90) out.push({it, why:`тренировка в ${it.time} слишком близко ко сну (отбой в ${usualBedtime().hm}), пульс не успеет успокоиться`});
+    else if(t < wake) out.push({it, why:`стоит раньше, чем ты встаёшь (${wakeFor(d)})`});
+    else if(busyAt(d, it.time) && !["social","chores","work","walk"].includes(it.cat)) out.push({it, why:`в ${it.time} ты обычно на работе`});
+  }
+  const maj = its.filter(i => MAJOR.has(i.cat));
+  if(maj.length >= 2 && !out.some(x => x.it.id === maj[1].id)) out.push({it:maj[1], why:`в этот день уже есть «${maj[0].t}», две тренировки — многовато`, dbl:true});
+  return out.map(x => ({...x, key, d}));
+}
+function freeSlot(key, d, dur, before, notBefore, selfId){
+  const w = getWeek(key), times = w.items.filter(i => i.day===d && i.time && i.id !== selfId).map(i => { const t = toMinHM(i.time); return t < 5*60 ? t + 1440 : t; });
+  const nowM = key === curKey() && d === todayI() ? toMinHM(nowHM()) + 30 : 0;
+  for(let st = Math.floor((before - dur)/15)*15; st >= Math.max(notBefore, nowM); st -= 15) if(times.every(t => Math.abs(t - st) >= 60)) return fromMin(st);
+  return null;
+}
+function issueActions(x){
+  const it = x.it, acts = [], r = getRoutine();
+  const bed = toMinHM(usualBedtime().hm), bedM = bed < 6*60 ? bed + 1440 : bed;
+  const off = Math.min(bedM - 60, (o => o < 6*60 ? o + 1440 : o)(toMinHM(settings.screensOff || "22:30")));
+  let notBefore = toMinHM(wakeFor(x.d)) + 30;
+  if(r.work && isWorkDay(x.d) && !r.noWork) notBefore = Math.max(notBefore, toMinHM(r.work.to) + (r.commute||0));
+  const dur = Math.min(defaultMin(it), 90);
+  const limit = isScreen(it.cat) ? off : MAJOR.has(it.cat) ? bedM - 90 : bedM - 30;
+  if(!x.dbl){ const slot = freeSlot(x.key, x.d, dur, limit, notBefore, it.id); if(slot) acts.push(act(`Перенести на ${slot}`, {op:"time", key:x.key, id:it.id, time:slot, t:it.t})); }
+  const from = x.key === curKey() ? Math.max(todayI(), x.d === todayI() ? todayI() + 1 : todayI()) : 0;
+  const bd = bestDayInWeek(x.key, it.cat, from, x.d);
+  if(bd >= 0) acts.push(act(`Перенести ${DACC[bd]}`, {op:"move", key:x.key, id:it.id, day:bd, t:it.t}));
+  acts.push(act("Убрать из плана", {op:"remove", key:x.key, id:it.id, t:it.t}), act("Оставить", {op:"keep"}));
+  return acts;
+}
+function postIssues(dates, max){
+  let n = 0;
+  for(const dt of dates) for(const x of planIssues(dt)){
+    if(n >= (max||3)) return n;
+    bot(`«${x.it.t}» ${whenWord(dt)}: ${x.why}. Что сделать?`, issueActions(x)); n++;
+  }
+  return n;
+}
+function showPlan(date){
+  bot(planText(date));
+  const n = postIssues([date], 3);
+  if(!n){ const w = getWeek(dateKeyOf(date)), d = dayIdxOf(date); if(w.items.some(i=>i.day===d && !i.done)) bot("Если что-то поменялось, просто напиши, например: «сегодня вместо силовой бассейн в 18» или «перенеси игры на 19:30»."); }
+}
+const restOfWeek = () => { const out = []; const t = new Date(); t.setHours(0,0,0,0); for(let i=0;i<7;i++){ const d = addDays(t,i); out.push(d); if(dayIdxOf(d) === 6) break; } return out; };
 function findPlanned(q){
   const qs = nrm(q), type = RITM.guessType(q), ck = curKey(), ti = todayI();
   const keys = [ck, iso(addDays(new Date(ck+"T00:00:00"),7))];
@@ -953,7 +1025,7 @@ function pullNative(){
   const all = fired.map(f => ({t:f.firedAt || f.at, f})).concat(inbox.map(m => ({t:m.at, m}))).sort((a,b)=>a.t-b.t);
   for(const x of all){
     if(x.f) pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t});
-    else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); if(x.m.ctx !== "nudge") respond(x.m.text); }
+    else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); if(x.m.ctx !== "nudge") handleUser(x.m.text, false); }
   }
   if(all.length) render();
 }
@@ -961,16 +1033,15 @@ function pullNative(){
 // ---------- chat screen ----------
 function fmtTime(ms){ const d = new Date(ms); const t = new Date(); const same = d.toDateString() === t.toDateString(); return (same ? "" : d.getDate() + " " + MON[d.getMonth()] + ", ") + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
 function renderChat(){
-  $("subtitle").textContent = "Пиши как другу: что делал и что планируешь";
+  $("subtitle").textContent = claudeOn() ? "Ритм + Claude: пиши как другу" : "Пиши как другу: что делал и что планируешь";
   let arr = getChat();
-  if(arr.length && askRoutine()) arr = getChat();
   if(!arr.length){ bot("Привет! Я Ритм. Пиши мне обычными словами, что делал или что планируешь. Например: «выпил кофе в 9:30», «сегодня бассейн в 18», «что сегодня?». Я всё запишу, подскажу и днём иногда буду спрашивать, как дела.", [act("Что я умею", {op:"help"})]); arr = getChat(); }
   const view = arr.slice(-120);
   let html = "", lastDay = "";
   for(const m of view){
     const dd = new Date(m.at).toDateString();
     if(dd !== lastDay){ lastDay = dd; const d = new Date(m.at); html += `<div class="cday">${dd === new Date().toDateString() ? "Сегодня" : d.getDate()+" "+MONG[d.getMonth()]}</div>`; }
-    html += `<div class="msg ${m.who}"><div class="bub">${esc(m.text).replace(/\n/g,"<br>")}</div>`;
+    html += `<div class="msg ${m.who}${m.temp ? " typing" : ""}">${m.by === "claude" ? `<span class="by">Claude</span>` : ""}<div class="bub">${esc(m.text).replace(/\n/g,"<br>")}</div>`;
     if(m.acts && m.acts.length) html += `<div class="macts">${m.acts.map((a,i) => m.chosen != null ? (i === m.chosen ? `<span class="chosen">${esc(a.l)}</span>` : "") : `<button class="btn" data-ma="${m.id}" data-mi="${i}">${esc(a.l)}</button>`).join("")}</div>`;
     html += `<span class="mt">${fmtTime(m.at)}</span></div>`;
   }
@@ -978,12 +1049,7 @@ function renderChat(){
   $("chatQuick").innerHTML = ["Что сегодня?","+ стакан воды","Что завтра?","Как неделя?","Разбор"].map(q => `<button class="chip" data-cq="${q}">${q}</button>`).join("");
 }
 function scrollChat(){ if(tab === "chat") requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight})); }
-function sendChat(text){
-  text = (text||"").trim(); if(!text) return;
-  pushMsg({who:"me", text});
-  try{ respond(text); }catch(err){ bot("Что-то пошло не так, попробуй написать иначе."); }
-  render(); scrollChat();
-}
+function sendChat(text){ handleUser(text); }
 function chatClick(ds){
   if(ds.ma){ const arr = getChat(), m = arr.find(x=>x.id===ds.ma); const a = m && m.acts[+ds.mi] && m.acts[+ds.mi].a;
     if(a && a.op === "help"){ m.chosen = +ds.mi; saveChat(arr); bot(HELP_TEXT); render(); scrollChat(); return true; }
@@ -995,6 +1061,130 @@ function chatClick(ds){
   }
   return false;
 }
+
+/* ---------- optional Claude brain (API key), shares the same chat, plan and memory ---------- */
+const CLAUDE_MODEL = "claude-haiku-5-5";
+const claudeKey = () => LS.get("claudeKey") || "";
+const claudeOn = () => !!(settings.claudeOn && claudeKey());
+const getMemory = () => LS.get("memory") || [];
+function remember(fact){ fact = String(fact||"").trim().slice(0, 160); if(!fact) return; const m = getMemory().filter(x => x.toLowerCase() !== fact.toLowerCase()); m.push(fact); LS.set("memory", m.slice(-25)); }
+let ruleMiss = false;
+
+function compactState(){
+  const ck = curKey(), ti = todayI(), w = getWeek(ck), now = new Date();
+  const its = w.items.filter(i=>i.day===ti).map(i => `${i.time||"--:--"} ${i.t}${i.done?" [done]":""}`).join("; ") || "nothing";
+  const tom = w.items.filter(i=>i.day===ti+1).map(i => `${i.time||""} ${i.t}`.trim()).join("; ");
+  const gs = goalState(w, ti), miss = goalCats().filter(c=>gs[c].deficit>0).map(c => `${CATS[c].n} x${gs[c].deficit}`).join(", ") || "none";
+  const L = intakeOf((w.days[ti]||{}).log), h = w.days[ti]||{};
+  const sl = sleepFor(dateOf(ck,ti)), st = stepsFor(dateOf(ck,ti)), pd = typeof phoneDay === "function" ? phoneDay(dateOf(ck,ti)) : null;
+  const r = getRoutine();
+  const routine = [r.noWork ? "no work schedule" : r.workDays ? `works ${r.workDays.map(i=>DW[i]).join(",")}${r.work ? " "+r.work.from+"-"+r.work.to : ""}` : "", r.place ? "place:"+r.place : "", `wake ${wakeFor(ti)}`, `bed ${usualBedtime().hm}`, r.lunch ? "lunch "+r.lunch : "", r.train ? "train:"+r.train : ""].filter(Boolean).join("; ");
+  const lines = [
+    `now: ${DFULL[ti]} ${iso(now)} ${nowHM()}`,
+    `today plan: ${its}`, tom ? `tomorrow: ${tom}` : "",
+    `week goals missing: ${miss}`,
+    `today: water ${L.water}/${settings.waterGoal}ml, caffeine ${L.mg}mg (last ${L.lastCaf||"-"}), protein ${L.protein}/${settings.proteinGoal}g` + (st != null ? `, steps ${st}` : "") + (sl ? `, sleep ${Math.round(sl.min/6)/10}h (${sl.start}-${sl.end})` : "") + (h.energy ? `, energy ${h.energy}/5` : "") + (h.mood ? `, mood ${h.mood}/5` : ""),
+    pd ? `phone today ${pd.total}min, entertainment ${pd.ent}min (limit ${settings.screenLimit}), top: ${pd.apps.slice(0,3).map(a=>a.l+" "+a.m).join(", ")}` : "",
+    `routine: ${routine}`,
+    getMemory().length ? `remembered: ${getMemory().join(" | ")}` : ""
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+function recentChat(n){
+  return getChat().filter(m => !m.temp).slice(-n).map(m => (m.who === "me" ? "user: " : "ritm: ") + String(m.text).replace(/\s+/g," ").slice(0, 220)).join("\n");
+}
+const TYPE_IDS = () => Object.keys(TYPES).filter(k => k !== "other").join(",");
+const CLAUDE_SYSTEM = () => `You are Ritm, a warm, down-to-earth habit and wellbeing buddy inside a Russian planner app. Always answer in Russian, informal "ты", like a caring friend: short (1-3 sentences unless asked for more), specific, no lectures, no emoji spam.
+You get the user's current data and recent chat. Use it; never invent numbers.
+Reply with ONLY a JSON object: {"reply": string, "do": [string], "learn": [{"text": string, "type": string}], "mem": string|null}
+- "do": actions the app should perform, written as short Russian commands its parser understands: logging what was done ("прогулка 30 минут в 18:00", "выпил кофе в 9:30"), plans ("завтра бассейн в 18:00"), edits ("перенеси силовая на четверг", "убери кино"). Only for things the user clearly did, decided or asked. Usually empty.
+- "learn": when the user mentions an activity the app may not know, map the phrase to one type id from: ${TYPE_IDS()}.
+- "mem": one durable fact worth remembering about the user (schedule, preferences, constraints, goals), else null.
+Respect the user's bedtime and work hours when suggesting times. No medical diagnoses; for worrying symptoms suggest seeing a doctor.`;
+
+async function callClaude(userContent, maxTokens){
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"content-type":"application/json", "x-api-key":claudeKey(), "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true"},
+    body: JSON.stringify({model:CLAUDE_MODEL, max_tokens:maxTokens||450, thinking:{type:"disabled"}, output_config:{effort:"low"},
+      system: CLAUDE_SYSTEM(), messages:[{role:"user", content:userContent}]})
+  });
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok){ const e = new Error((data.error && data.error.message) || ("HTTP " + res.status)); e.status = res.status; throw e; }
+  const u = data.usage || {}, month = iso(new Date()).slice(0,7), us = LS.get("claudeUsage") || {};
+  const cur = us.month === month ? us : {month, in:0, out:0, n:0};
+  cur.in += u.input_tokens||0; cur.out += u.output_tokens||0; cur.n++; LS.set("claudeUsage", cur);
+  return (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+}
+async function askClaude(text){
+  const wait = pushMsg({who:"bot", text:"…", temp:true}); render(); scrollChat();
+  const drop = () => { saveChat(getChat().filter(m => m.id !== wait.id)); };
+  try{
+    const content = `[data]\n${compactState()}\n[recent chat]\n${recentChat(8)}\n[new message]\n${text}`;
+    const raw = await callClaude(content);
+    drop();
+    let out; try{ out = JSON.parse(raw.replace(/^```(?:json)?|```$/g,"").trim()); }catch(e){ const m = /\{[\s\S]*\}/.exec(raw); try{ out = m ? JSON.parse(m[0]) : null; }catch(e2){ out = null; } }
+    if(!out){ bot(raw.slice(0, 800), null, {by:"claude"}); render(); scrollChat(); return true; }
+    if(out.mem) remember(out.mem);
+    let relearned = false;
+    for(const l of out.learn||[]) if(l && l.text && TYPES[l.type]){ RITM.remember(l.text, l.type, null); relearned = true; }
+    if(out.reply) bot(String(out.reply).slice(0, 1200), null, {by:"claude"});
+    const cmds = (out.do||[]).filter(x => typeof x === "string" && x.trim()).slice(0, 5);
+    for(const c of cmds) respond(c);
+    if(relearned && !cmds.length && RITM.parse(text).some(e=>e.type)) respond(text);
+    render(); scrollChat(); return true;
+  }catch(err){
+    drop();
+    const msg = err.status === 401 ? "Claude не принял ключ. Проверь его в «Ещё → Claude в чате». Пока отвечаю сам."
+      : err.status === 429 || err.status === 529 ? "Claude сейчас перегружен, отвечаю сам."
+      : err.status === 400 && /credit|balance/i.test(err.message) ? "На счёте Claude закончились средства, пополни баланс на console.anthropic.com. Пока отвечаю сам."
+      : "Не получилось связаться с Claude (нет интернета?). Отвечаю сам.";
+    bot(msg); render(); scrollChat(); return false;
+  }
+}
+// single entry point for everything the user writes
+async function handleUser(text, pushMe){
+  text = (text||"").trim(); if(!text) return;
+  if(pushMe !== false) pushMsg({who:"me", text});
+  if(claudeOn() && settings.claudeMode === "all"){ await askClaude(text); return; }
+  const before = getChat().length; ruleMiss = false;
+  try{ respond(text); }catch(err){ ruleMiss = true; }
+  if(ruleMiss && claudeOn()){
+    const arr = getChat(); saveChat(arr.slice(0, before));
+    const ok = await askClaude(text);
+    if(!ok){ saveChat(getChat().filter(m=>!m.temp)); try{ respond(text); }catch(e){} }
+  }
+  render(); scrollChat();
+}
+function renderClaudeCard(){
+  const el = $("claudeCard"); if(!el) return;
+  const us = LS.get("claudeUsage") || {}, month = iso(new Date()).slice(0,7);
+  const used = us.month === month ? us : {in:0, out:0, n:0};
+  const cost = used.in * 0.10 / 1e6 + used.out * 0.50 / 1e6;
+  const has = !!claudeKey();
+  el.innerHTML = `<h2>Claude в чате</h2>
+    <p class="note">Без Claude чат работает на встроенных правилах. С Claude Ритм понимает любые фразы. Контекст общий: история чата, план, распорядок и память сохраняются при переключении.</p>
+    <label class="tog ${settings.claudeOn ? "on" : ""}" style="cursor:pointer"><input type="checkbox" id="cOn" ${settings.claudeOn ? "checked" : ""} hidden><span class="box"></span>Подключить Claude</label>
+    <div class="field"><label class="label" for="cKey">Ключ API</label><input id="cKey" type="password" autocomplete="off" placeholder="${has ? "Ключ сохранён" : "sk-ant-…"}" style="font:inherit;font-size:16px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);width:100%"></div>
+    <div class="tools"><button class="btn primary" id="cSave">Сохранить и проверить</button>${has ? `<button class="btn danger" id="cDel">Удалить ключ</button>` : ""}</div>
+    <p class="note">Ключ создаётся на console.anthropic.com → API Keys (нужно пополнить баланс). Он хранится только на этом телефоне и не попадает в резервную копию.</p>
+    <span class="label">Когда звать Claude</span>
+    <div class="seg" id="cMode">${[["smart","Только если бот не понял"],["all","На все сообщения"]].map(([v,l]) => `<button class="${(settings.claudeMode||"smart")===v?"on":""}" data-cmode="${v}">${l}</button>`).join("")}</div>
+    <p class="note">Модель Claude Haiku 5.5, без размышлений, короткие ответы. В этом месяце: ${used.n} ${plural(used.n,"запрос","запроса","запросов")}, ${fmtNum(used.in + used.out)} токенов, примерно $${cost.toFixed(cost < 0.01 ? 4 : 2)}.</p>
+    ${getMemory().length ? `<details class="base"><summary>Что Ритм запомнил о тебе (${getMemory().length})</summary>${getMemory().map((m,i) => `<div class="lrow"><span class="lt">${esc(m)}</span><button class="x" data-memdel="${i}" aria-label="Забыть">×</button></div>`).join("")}</details>` : ""}`;
+  $("cOn").onchange = e => { settings.claudeOn = e.target.checked; persistSettings(); render(); toast(settings.claudeOn ? (has ? "Claude подключён" : "Теперь добавь ключ API") : "Claude отключён, отвечает встроенный бот"); };
+  $("cSave").onclick = async () => {
+    const v = $("cKey").value.trim(); if(v) LS.set("claudeKey", v);
+    if(!claudeKey()){ toast("Вставь ключ API"); return; }
+    toast("Проверяю ключ…");
+    try{ await callClaude("Ответь одним словом JSON {\"reply\":\"ок\"}", 20); settings.claudeOn = true; persistSettings(); toast("Ключ работает, Claude подключён"); }
+    catch(err){ toast(err.status === 401 ? "Ключ не подходит" : "Не удалось проверить: " + err.message); }
+    render();
+  };
+  if($("cDel")) $("cDel").onclick = () => confirmIn($("cDel"), "Точно удалить?", () => { LS.set("claudeKey", ""); settings.claudeOn = false; persistSettings(); render(); toast("Ключ удалён"); });
+  $("cMode").onclick = e => { const b = e.target.closest("[data-cmode]"); if(!b) return; settings.claudeMode = b.dataset.cmode; persistSettings(); render(); };
+}
+function memClick(ds){ if(ds.memdel == null) return false; const m = getMemory(); m.splice(+ds.memdel, 1); LS.set("memory", m); render(); return true; }
 
 /* ---------- routine: learn the daily schedule by asking ---------- */
 const nrt = s => " " + String(s).toLowerCase().replace(/ё/g,"е").replace(/[!?;()«»"]/g," ").replace(/,/g," , ").replace(/\s+/g," ").trim() + " ";
@@ -1051,6 +1241,8 @@ function routineKnown(r){ return ROUTINE_QS.filter(q => r.asked[q.k]).length; }
 function nextRoutineQ(r){ return ROUTINE_QS.find(q => !r.asked[q.k]); }
 function askRoutine(force){
   const r = getRoutine(), q = nextRoutineQ(r); if(!q) return false;
+  const lastMe = getChat().filter(m=>m.who==="me").slice(-1)[0];
+  if(!force && lastMe && Date.now() - lastMe.at < 10*60*1000) return false;
   const h = new Date().getHours(); if(!force && (h < 9 || h >= 23)) return false;
   if(!force && Date.now() - (r.lastAsk||0) < 2*3600*1000) return false;
   r.lastAsk = Date.now(); r.pending = q.k; saveRoutine(r);
@@ -1062,10 +1254,11 @@ function routineAnswer(text){
   const last = getChat().filter(m=>m.who==="bot").slice(-1)[0];
   if(!last || last.kind !== "routine:" + r.pending || Date.now() - last.at > 12*3600*1000) return false;
   const s = nrm(text);
+  if(/\?/.test(text) || /^ (что|какой|какие|как|сколько|покажи|перенеси|убери|отмени|привет|спасибо) /.test(s)) return false;
   if(/ (пропуст|не знаю|потом|не хочу|не скажу|позже) /.test(s)){ r.asked[r.pending] = true; r.pending = null; saveRoutine(r); bot("Хорошо, пропустим. Если захочешь, расскажи потом: «я работаю с 10 до 19», «встаю в 8»."); return true; }
   const q = ROUTINE_QS.find(x => x.k === r.pending);
   const res = q.parse(text, r);
-  if(!res){ if(RITM.parse(text).some(e=>e.type)) return false; bot("Не совсем понял. " + q.q.split(". ").slice(-1)[0], [act("Пропустить", {op:"rskip", k:q.k})], {kind:"routine:" + q.k}); return true; }
+  if(!res){ r.pending = null; saveRoutine(r); return false; }
   r.asked[q.k] = true; r.pending = null; saveRoutine(r); applyRoutineToSettings(r);
   const nx = nextRoutineQ(r);
   if(nx){ r.pending = nx.k; r.lastAsk = Date.now(); saveRoutine(r); bot(res + " " + nx.q, [act("Пропустить", {op:"rskip", k:nx.k})], {kind:"routine:" + nx.k}); }
@@ -1074,7 +1267,7 @@ function routineAnswer(text){
 }
 // free statements anywhere in chat: «я работаю с 10 до 19», «по субботам футбол в 12», «в выходные встаю в 11»
 function routineStatement(text){
-  const s = nrt(text), r = getRoutine(); const said = [];
+  const s = nrt(text), r = getRoutine(); const said = []; let bedChanged = false;
   if(/ (работаю|работа|учусь|учеба|на работе|в офисе) /.test(s) && !/ (сегодня|сейчас|вчера) /.test(s)){
     const rg = parseRange(s); if(rg){ r.work = rg; r.asked.hours = true; said.push(`работа с ${rg.from} до ${rg.to}`); }
     const d = parseDays(s); if(d && (d.days || d.shift)){ r.workDays = d.days; r.shift = d.shift||null; r.asked.days = true; said.push(d.shift ? "сменный график" : "рабочие дни: " + d.days.map(i=>DW[i].toLowerCase()).join(", ")); }
@@ -1085,7 +1278,7 @@ function routineStatement(text){
     if(/ выходн/.test(s) && !b && a){ r.wakeWe = a; said.push("подъём в выходные " + a); } else { if(a){ r.wakeWd = a; said.push("подъём " + a); } if(b){ r.wakeWe = b; said.push("в выходные " + b); } }
     if(a || b) r.asked.wake = true; }
   if(/ (обедаю|обед обычно|обычно обед) /.test(s)){ const tm = parseOneTime(s); if(tm){ r.lunch = tm; r.asked.lunch = true; said.push("обед в " + tm); } }
-  if(/ (ложусь|отбой|засыпаю) /.test(s) && / (обычно|всегда|как правило) /.test(s)){ const tm = parseOneTime(s); if(tm){ settings.bedtime = tm; persistSettings(); said.push("отбой в " + tm); } }
+  if(/ (ложусь|отбой|засыпаю|иду спать|ложусь спать|сплю с) /.test(s) && !/ (вчера|сегодня лег|лег в) /.test(s)){ const tm = parseOneTime(s); if(tm){ setBedtime(tm); said.push(`отбой в ${tm}, экраны выключаем к ${settings.screensOff}`); bedChanged = true; } }
   // regular activities: «по субботам футбол в 12», «каждый вторник йога»
   const rec = / (по|каждый|каждую|каждое) (понедельник|вторник|сред|четверг|пятниц|суббот|воскресень|будням|выходным)[а-я]* /.exec(s);
   if(rec){
@@ -1099,8 +1292,10 @@ function routineStatement(text){
     }
   }
   if(!said.length) return false;
+  if(bedChanged){ const rr = getRoutine(); r.bedSet = rr.bedSet; r.asked.bed = true; }
   saveRoutine(r); applyRoutineToSettings(r);
   bot("Запомнил: " + said.join(", ") + ".");
+  postIssues(restOfWeek(), 3);
   // a new regular activity may clash with this week's plan
   if(rec){ const ck = curKey(), w = getWeek(ck);
     for(const x of (r.recurring||[]).filter(x => x.day >= todayI())){
@@ -1476,6 +1671,7 @@ const MOVE = c => !!(CATS[c] && CATS[c].move);
 const defaultMin = it => { const m = /(\d+)\s*(?:–\d+\s*)?мин/.exec(it.t || ""); if(m) return +m[1]; const c = RITM.CATALOG.find(e=>e.n===it.t) || customActs().find(e=>e.n===it.t); if(c && c.m) return c.m; return (TYPES[it.cat]||TYPES.other).def || 30; };
 const hmMinus = (hm, m) => { const [h,mm] = hm.split(":").map(Number); let t = (h*60+mm-m+1440)%1440; return pad(Math.floor(t/60))+":"+pad(t%60); };
 function usualBedtime(){
+  if(getRoutine().bedSet && settings.bedtime) return {hm: settings.bedtime, auto:false};
   const starts = []; const t = new Date();
   for(let i=0;i<7;i++){ const s = sleepFor(iso(addDays(t,-i))); if(s) starts.push(bedMin(s.start)); }
   if(starts.length >= 3){ starts.sort((a,b)=>a-b); const m = starts[Math.floor(starts.length/2)] % 1440; return {hm: pad(Math.floor(m/60))+":"+pad(m%60), auto:true}; }
@@ -1747,7 +1943,7 @@ window.__ritmNative = {
       LS.set("health", health); render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(!checkOpen()) render(); scrollChat(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -1768,7 +1964,7 @@ if(NATIVE){
   $("nTestCheckin").onclick = () => { try{ NATIVE.testCheckin(); }catch(e){} };
   $("nWatch").onclick = e => { const b = e.target.closest("[data-watch]"); if(!b) return; settings.watchMin = +b.dataset.watch; persistSettings(); render(); toast("Сохранено"); };
   $("nTestWatch").onclick = () => { syncWatch(); try{ NATIVE.testWatch(); toast("Проверил. Если есть повод, придёт уведомление"); }catch(e){} };
-  $("nBed").onchange = () => { if($("nBed").value){ settings.bedtime = $("nBed").value; persistSettings(); render(); toast("Время отбоя сохранено"); } };
+  $("nBed").onchange = () => { if($("nBed").value){ setBedtime($("nBed").value); if(postIssues(restOfWeek(), 3)) toast("Время отбоя сохранено. В чате предложил поправить план"); else toast("Время отбоя сохранено"); render(); } };
   const saveTimes = () => { settings.morning = $("nMorning").value || settings.morning; settings.evening = $("nEvening").value || settings.evening; persistSettings(); if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Время сохранено"); };
   $("nMorning").onchange = saveTimes; $("nEvening").onchange = saveTimes;
   try{ NATIVE.refreshHealth(); }catch(e){}
@@ -1785,6 +1981,7 @@ document.addEventListener("visibilitychange", () => { if(!document.hidden){ dism
 
 render();
 pullNative();
+if(tab === "chat" && getChat().length) { askRoutine(); render(); }
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
