@@ -158,3 +158,6 @@ label.tog{display:flex}
 .lrow.miss .lt{flex:1 1 100%}
 .lrow.miss .mbtns{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .btn.sm{padding:5px 10px;font-size:.8rem;min-height:0}
+.norms{margin:10px 0 0;padding-left:18px;font-size:.88rem;line-height:1.45}
+.norms li{margin-bottom:8px}
+.norms a{color:var(--accent,#0f766e)}

@@ -5,7 +5,7 @@ const CATS = Object.fromEntries(Object.entries(TYPES).map(([k,t]) => [k, {n:t.sh
 const GOALABLE = Object.keys(TYPES).filter(k => ["move","rest","social"].includes(TYPES[k].g) && TYPES[k].unit === "min");
 const isScreen = c => !!(CATS[c] && CATS[c].grp === "screen");
 const goalCats = () => GOALABLE.filter(c => (settings.goals[c]||0) > 0);
-const DEFAULT_SETTINGS = {goals:{strength:2,walk:3,swim:1,mobility:1,social:2,unplug:1,outing:1,nature:1}, waterGoal:2000, caffeineMax:400, caffeineCutoff:"14:00", proteinGoal:100, screenLimit:120, screensOff:"22:30", morning:"08:45", evening:"19:45", stepsGoal:7000, notify:false, bedtime:"23:30", reviewOn:true};
+const DEFAULT_SETTINGS = {goals:{strength:2,walk:3,swim:1,mobility:2,social:2,unplug:1,outing:1,nature:1}, waterGoal:2000, caffeineMax:400, caffeineCutoff:"14:00", proteinGoal:100, screenLimit:120, screensOff:"22:30", morning:"08:45", evening:"19:45", stepsGoal:7000, notify:false, bedtime:"23:30", reviewOn:true};
 const DW = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 const DFULL = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
 const DACC = ["в понедельник","во вторник","в среду","в четверг","в пятницу","в субботу","в воскресенье"];
@@ -15,12 +15,17 @@ const TEMPLATE = [
   [0,"strength","Силовая дома: всё тело","19:00"],[0,"gaming","Видеоигры, до часа","21:00"],
   [1,"walk","Быстрая прогулка","18:30"],[1,"social","Позвонить родителям или близким",""],
   [2,"mobility","Растяжка","21:00"],[2,"unplug","Вечер без экранов","21:00"],
-  [3,"strength","Силовая дома: ноги и кор","19:00"],[3,"video","Ютуб, до часа","21:00"],
+  [3,"strength","Силовая дома: ноги и кор","19:00"],[3,"video","Ютуб, до часа","21:00"],[3,"social","Написать старому знакомому",""],
   [4,"walk","Прогулка после ужина","20:00"],[4,"outing","Кино, кафе или встреча с друзьями",""],[4,"gaming","Видеоигры с друзьями голосом","21:30"],
   [5,"swim","Бассейн с ускорениями","11:00"],[5,"nature","Парк или набережная","13:00"],
-  [6,"walk","Прогулка в новом районе","12:00"],[6,"relax","Отдых и план на неделю","19:00"]
+  [6,"walk","Прогулка в новом районе","12:00"],[6,"mobility","Йога","18:00"],[6,"relax","Отдых и план на неделю","19:00"]
 ];
+// экраны в шаблоне не должны заходить на последний час перед сном
+const fitScreenTime = (cat, tm) => { if(!tm || !isScreen(cat)) return tm; const hm = x => +x.slice(0,2)*60 + +x.slice(3,5); let off = hm(settings.screensOff || "22:30"); if(off < 6*60) off += 1440;
+  let t = hm(tm); if(t < 6*60) t += 1440; if(t + 60 <= off) return tm; const n = Math.max(17*60, off - 60); return String(Math.floor(n/60)%24).padStart(2,"0") + ":" + String(n%60).padStart(2,"0"); };
 const customActs = () => LS.get("custom") || [];
+// отсечка кофеина: не позже чем за 9 часов до сна (период полувыведения ~5–6 ч; AASM/Drake 2013: кофеин за 6 ч до сна укорачивает сон)
+function cafCutoffFor(bed){ let m = +bed.slice(0,2)*60 + +bed.slice(3,5); if(m < 6*60) m += 1440; m = Math.max(12*60, Math.min(16*60, m - 9*60)); return pad(Math.floor(m/60)) + ":" + pad(m%60); }
 const IDEAS_BASE = RITM.CATALOG.filter(e => e.s).map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:e.w||"any", time:e.tm||"", note:e.s}));
 const ideasAll = () => IDEAS_BASE.concat(customActs().filter(e => TYPES[e.t] && TYPES[e.t].unit === "min").map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:"any", time:"", note:"Ваше занятие"})));
 
@@ -88,17 +93,34 @@ function bedMin(hm){ const [h,m] = hm.split(":").map(Number); let t = h*60+m; if
 function sleepRegular(ds){
   const s = sleepFor(ds); if(!s) return null;
   const prev = []; for(let i=1;i<=7;i++){ const o = sleepFor(iso(addDays(new Date(ds+"T00:00:00"),-i))); if(o) prev.push(bedMin(o.start)); }
-  if(s.min < 390) return false;
+  if(s.min < 420) return false;
   if(prev.length < 3) return true;
   prev.sort((a,b)=>a-b); return Math.abs(bedMin(s.start) - prev[Math.floor(prev.length/2)]) <= 60;
 }
+// null — данных о ночи нет; иначе ночь засчитана или нет (≥7 ч по AASM/SRS и ровный отбой)
+function sleepVerdict(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; const ds = dateOf(key,d); if(!sleepFor(ds)) return null; return sleepRegular(ds) === true; }
 function sleepOk(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; return sleepRegular(dateOf(key,d)) === true; }
 
 const curKey = () => iso(mondayOf(new Date()));
 const todayI = () => (new Date().getDay()+6)%7;
+(function migrateV3(){
+  if((LS.get("schema") || 0) >= 3) return;
+  const st = LS.get("settings");
+  if(st){
+    if(!st.goalsEdited && st.goals){ st.goals.mobility = Math.max(2, st.goals.mobility || 0); }
+    if(!st.cafManual && st.bedtime) st.caffeineCutoff = cafCutoffFor(st.bedtime);
+    LS.set("settings", st); settings = loadSettings();
+  }
+  // неделя из прежнего шаблона: добавляем второе занятие на гибкость, если его нет
+  const ck = iso(mondayOf(new Date())), keys = [ck, iso(addDays(new Date(ck+"T00:00:00"), 7))];
+  for(const k of keys){ const w = LS.get("w:"+k); if(!w || !w.items) continue;
+    const fromTpl = w.items.some(i => i.t === "Растяжка" && i.day === 2) && w.items.some(i => i.t === "Отдых и план на неделю");
+    if(fromTpl && w.items.filter(i => i.cat === "mobility").length < 2 && !w.items.some(i => i.day === 6 && i.cat === "mobility")){ w.items.push({id:uid(), day:6, cat:"mobility", t:"Йога", time:"18:00", done:false}); LS.set("w:"+k, w); } }
+  LS.set("schema", 3);
+})();
 if(!LS.get("started")){
   const k = curKey();
-  if(!LS.get("w:"+k)) saveWeek(k, {items:TEMPLATE.map(([d,c,t,tm]) => ({id:uid(), day:d, cat:c, t, time:tm, done:false})), days:{}});
+  if(!LS.get("w:"+k)) saveWeek(k, {items:TEMPLATE.map(([d,c,t,tm]) => ({id:uid(), day:d, cat:c, t, time:fitScreenTime(c, tm), done:false})), days:{}});
   LS.set("started", true); persistSettings();
 }
 
@@ -118,6 +140,15 @@ function goalState(w, ti){
     out[c] = {goal, done, future, missed, plan, deficit: Math.max(0, goal - done - future)};
   }
   return out;
+}
+// аэробная нагрузка за неделю: ВОЗ рекомендует 150–300 минут умеренной (или 75–150 интенсивной)
+const AERO = new Set(["walk","run","bike","swim","cardio","sport"]), AERO_GOAL = 150;
+function aeroMinutes(w){
+  const linked = {}; let done = 0, plan = 0;
+  for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(e.plan) linked[e.plan] = e.min || 0;
+  for(const it of w.items){ if(!AERO.has(it.cat)) continue; const m = it.done && linked[it.id] ? linked[it.id] : defaultMin(it); plan += m; if(it.done) done += m; }
+  for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(AERO.has(e.type) && !e.plan && (e.min||0) >= 5){ done += e.min; plan += e.min; }
+  return {done, plan};
 }
 function daysSinceDone(cat){
   const ck = curKey(), ti = todayI(), cw = getWeek(ck), pw = getWeek(iso(addDays(mondayOf(new Date()),-7)));
@@ -193,7 +224,7 @@ function autoFill(key){
   const w = getWeek(key), ti = Math.max(0, relIdx(key));
   if(relIdx(key) === 7){ toast("Эта неделя уже прошла"); return 0; }
   const gs = goalState(w, ti), recent = recentTitles(), added = [];
-  const load = Array(7).fill(0); w.items.forEach(i => load[i.day]++);
+  const load = Array(7).fill(0); w.items.forEach(i => load[i.day]++); let off0 = 3;
   for(const c of goalCats()){
     let need = gs[c].deficit;
     let off = 0;
@@ -209,6 +240,14 @@ function autoFill(key){
       w.items.push({id:uid(), day:best, cat:c, t:idea.t, time:tm, done:false});
       load[best]++; added.push(idea.t); need--;
     }
+  }
+  // норма ВОЗ: хотя бы 150 минут аэробной нагрузки — добираем прогулками
+  for(let guard = 0; guard < 4 && aeroMinutes(w).plan < AERO_GOAL; guard++){
+    const best = smartDay(key, "walk", ti, -1, load, w); if(best < 0) break;
+    const idea = ideasFor("walk", best, null, off0++, recent) || {t:CATS.walk.n, time:""};
+    recent.add(idea.t); let tm = (!idea.time || idea.when === "any") ? learnedTime("walk", best, smartTime("walk", best, idea.time||"")) : smartTime("walk", best, idea.time);
+    if(key === curKey() && best === todayI() && tm && tm < fromMin(toMinHM(nowHM()) + 30)) tm = "";
+    w.items.push({id:uid(), day:best, cat:"walk", t:idea.t, time:tm, done:false}); load[best]++; added.push(idea.t);
   }
   if(added.length) saveWeek(key, w);
   return added.length;
@@ -343,11 +382,11 @@ function renderWeek(){
     const dots = w.items.filter(i=>i.day===d).slice(0,5).map(i=>`<i class="${i.done?"on":""}"></i>`).join("");
     return `<button class="dchip ${d===ti?"today":""}" data-jump="${d}" aria-label="${DFULL[d]}"><span class="dw">${dw}</span><span class="dn">${addDays(ws,d).getDate()}</span><span class="dots">${dots}</span></button>`;
   }).join("");
-  const gs = goalState(w, Math.max(0, ti)), missing = goalCats().filter(c => gs[c].deficit > 0);
+  const gs = goalState(w, Math.max(0, ti)), missing = goalCats().filter(c => gs[c].deficit > 0), aeroNeed = ti >= 0 && ti < 6 || ti === -1 ? Math.max(0, AERO_GOAL - aeroMinutes(w).plan) : 0;
   let gh;
   if(ti === 7) gh = `<h2>Неделя прошла</h2><p class="note">Итоги этой недели — во вкладке «Итоги», когда она текущая. Можно скопировать её план на новую неделю во вкладке «Ещё».</p>`;
   else if(!w.items.length) gh = `<h2>Неделя пустая</h2><p class="note">Приложение может само составить план по вашим целям, с разными занятиями.</p><div class="tools"><button class="btn primary" data-autofill="1">Составить план за меня</button><button class="btn" data-act="tpl">По шаблону</button></div>`;
-  else if(missing.length) gh = `<h2>Не хватает до целей</h2><p class="note">${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).join(", ")}</p><div class="tools"><button class="btn primary" data-autofill="1">Добавить недостающее</button></div><p class="note">Приложение раскидает занятия по самым свободным дням и подберёт разные идеи.</p>`;
+  else if(missing.length || aeroNeed > 0) gh = `<h2>Не хватает до целей</h2><p class="note">${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).concat(aeroNeed > 0 ? [`аэробной нагрузки ещё ~${aeroNeed} мин (норма ВОЗ ${AERO_GOAL})`] : []).join(", ")}</p><div class="tools"><button class="btn primary" data-autofill="1">Добавить недостающее</button></div><p class="note">Приложение раскидает занятия по самым свободным дням и подберёт разные идеи.</p>`;
   else gh = `<h2>Все цели в плане</h2><p class="note">Если что-то не получится, перенесите дело: нажмите на него и выберите другой день.</p>`;
   $("weekGaps").innerHTML = gh;
   $("days").innerHTML = DFULL.map((name,d) => {
@@ -363,24 +402,27 @@ function renderStats(){
   $("goalsCard").innerHTML = `<div class="bhead"><h2>Цели недели</h2><span class="note num">${w.items.filter(i=>i.done).length} сделано</span></div><div class="goals">` + goalCats().filter(c=>settings.goals[c]).map(c => {
     const g = gs[c], col = `var(${CATS[c].c})`;
     return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.done}/${g.goal}</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.plan/g.goal*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.done/g.goal*100)}%;background:${col}"></div></div></div>`;
-  }).join("") + `</div><p class="note">Яркая часть полосы — сделано, бледная — запланировано.</p>`;
+  }).join("") + (() => { const a = aeroMinutes(w), col = "var(" + CATS.walk.c + ")";
+    return `<div class="goal"><div class="gh"><span>Аэробная нагрузка</span><span class="num">${a.done}/${AERO_GOAL} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,a.plan/AERO_GOAL*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,a.done/AERO_GOAL*100)}%;background:${col}"></div></div></div>`; })()
+    + `</div><p class="note">Яркая часть полосы — сделано, бледная — запланировано. Аэробная нагрузка — ходьба, плавание, бег, велосипед и спорт; норма ВОЗ — от 150 минут в неделю.</p>`;
 
   const ins = [];
   const missing = goalCats().filter(c => gs[c].deficit > 0);
   if(missing.length) ins.push(["warn", `Не хватает до целей: ${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).join(", ")}. Во вкладке «Неделя» можно добавить это одной кнопкой.`]);
+  { const a = aeroMinutes(w); if(ti < 6 && a.plan < AERO_GOAL) ins.push(["warn", `В плане ${a.plan} мин аэробной нагрузки (ходьба, плавание, бег и т. п.). Норма ВОЗ — от ${AERO_GOAL} минут в неделю, лучше до 300. Добавьте прогулку: 30 минут быстрым шагом — это уже ${Math.round(30/AERO_GOAL*100)}% нормы.`]); }
   const missed = goalCats().reduce((s,c)=>s+gs[c].missed,0);
   if(missed) ins.push(["sun", `Пропущено ${missed} ${plural(missed,"дело","дела","дел")}. Не страшно: переносите их на свободные дни, а не отменяйте.`]);
-  const elapsed = ti+1; let sleep=0, light=0; const eM=[], eR=[], mood=[];
+  const elapsed = ti+1; let sleep=0, sleepN=0, light=0; const eM=[], eR=[], mood=[];
   for(let d=0; d<=ti; d++){
-    const h = w.days[d]||{}; if(sleepOk(w, ck, d)) sleep++; if(h.light) light++; if(h.mood) mood.push(h.mood);
+    const h = w.days[d]||{}; const sv = sleepVerdict(w, ck, d); if(sv !== null){ sleepN++; if(sv) sleep++; } if(h.light) light++; if(h.mood) mood.push(h.mood);
     if(h.energy){ (w.items.some(i=>i.day===d && i.done && CATS[i.cat] && CATS[i.cat].move) ? eM : eR).push(h.energy); }
   }
-  const okN = Math.max(1, elapsed-1);
-  if(!sleep && !light && elapsed <= 1) ins.push(["sun", "Сегодня вечером отметьте сон и дневной свет во вкладке «Сегодня». Здесь появится, сколько дней вы держали режим."]);
-  else {
-    ins.push([sleep >= okN ? "ok" : "warn", `Режим сна: ${sleep} из ${elapsed} ${plural(elapsed,"дня","дней","дней")}. ${sleep >= okN ? "Так держать, это основа бодрости." : "Попробуйте ложиться в одно время хотя бы 3 дня подряд."}`]);
-    ins.push([light >= okN ? "ok" : "sun", `Дневной свет: ${light} из ${elapsed}. ${light >= okN ? "Отлично." : "Хватит 15 минут на улице до обеда."}`]);
-  }
+  // выводы про сон и свет — только когда есть из чего: хотя бы 3 ночи / 3 дня
+  if(sleepN < 3) ins.push(["sun", `Сон: данных пока мало (${sleepN} из 3 нужных ночей). Норма для взрослых — 7–9 часов и отбой в одно время (разброс до 30–60 минут). Вывод по режиму появится, когда наберётся 3 ночи.`]);
+  else { const need = Math.ceil(sleepN * 0.7);
+    ins.push([sleep >= need ? "ok" : "warn", `Сон: ${sleep} из ${sleepN} ${plural(sleepN,"ночи","ночей","ночей")} в норме (от 7 часов и ровный отбой). ${sleep >= need ? "Так держать, это основа бодрости." : "Цель — 7 ночей из 7; для начала хотя бы 5. Ровное время отбоя помогает не меньше, чем длина сна."}`]); }
+  if(elapsed >= 3) ins.push([light >= elapsed - 1 ? "ok" : "sun", `Дневной свет: ${light} из ${elapsed}. ${light >= elapsed - 1 ? "Отлично." : "Хватит 15–30 минут на улице до обеда: утренний свет настраивает суточный ритм."}`]);
+  else ins.push(["sun", "Отмечайте сон, свет, энергию и настроение вечером во вкладке «Сегодня». Выводы по сну и свету появятся примерно через 3 дня."]);
   const avg = a => a.reduce((x,y)=>x+y,0)/a.length;
   if(NATIVE || Object.keys(health.steps||{}).length){
     const sd = [], sl = [], eGood = [], eBad = [];
@@ -390,7 +432,7 @@ function renderStats(){
       if(sp){ sl.push(sp); if(h.energy) (sp.min >= 420 ? eGood : eBad).push(h.energy); }
     }
     if(sd.length) { const a = avg(sd); ins.push([a >= settings.stepsGoal ? "ok" : "sun", `Шагов в среднем ${fmtNum(a)} в день при цели ${fmtNum(settings.stepsGoal)}.` + (a < settings.stepsGoal ? " Добавьте прогулку после ужина: это плюс 1 500–2 000 шагов." : "")]); }
-    if(sl.length >= 2){
+    if(sl.length >= 3){
       const am = avg(sl.map(x=>x.min)), starts = sl.map(x=>bedMin(x.start)), spread = Math.max(...starts) - Math.min(...starts);
       ins.push([am >= 420 ? "ok" : "warn", `Сон в среднем ${fmtDur(Math.round(am))}.` + (am < 420 ? " Взрослым обычно нужно 7–9 часов." : "") + (spread > 90 ? ` Время засыпания гуляет на ${Math.round(spread/6)/10} ч; ровный отбой помогает легче вставать.` : " Время отбоя стабильное.")]);
     }
@@ -551,7 +593,7 @@ $("copyPrev").onclick = () => {
 $("goalsBtn").onclick = openGoals;
 $("helpBtn").onclick = openIntro;
 $("clear").onclick = () => confirmIn($("clear"), "Точно очистить эту неделю?", () => { mutate(curKey(), w => { w.items = []; }); toast("Неделя очищена"); });
-function fillTemplate(){ const k = tab==="week" ? viewKey() : curKey(); mutate(k, w => TEMPLATE.forEach(([d,c,t,tm]) => w.items.push({id:uid(), day:d, cat:c, t, time:tm, done:false}))); toast("Неделя заполнена по шаблону"); }
+function fillTemplate(){ const k = tab==="week" ? viewKey() : curKey(); mutate(k, w => TEMPLATE.forEach(([d,c,t,tm]) => w.items.push({id:uid(), day:d, cat:c, t, time:fitScreenTime(c, tm), done:false}))); toast("Неделя заполнена по шаблону"); }
 function confirmIn(btn, text, fn){
   if(btn.dataset.armed){ delete btn.dataset.armed; btn.textContent = btn.dataset.orig; fn(); return; }
   btn.dataset.orig = btn.textContent; btn.dataset.armed = "1"; btn.textContent = text;
@@ -612,7 +654,8 @@ function openGoals(){
   };
   openSheet(`<h2>Цели</h2><p class="note">Сколько раз в неделю вы хотите каждое занятие и дневные нормы. По ним приложение считает, чего не хватает, и подбирает советы. Ноль — без цели.</p>
     <div id="gRows">${rows()}</div>
-    <div class="field"><label class="label" for="gCaf">Последний кофе до</label><input id="gCaf" type="time" value="${settings.caffeineCutoff}"></div>
+    <div class="field"><label class="label" for="gWeight">Вес, кг <span class="note">— для нормы белка (1,4 г на кг при силовых)</span></label><input id="gWeight" type="number" min="30" max="250" inputmode="numeric" value="${settings.weight || ""}" placeholder="не указан"></div>
+    <div class="field"><label class="label" for="gCaf">Последний кофе до <span class="note">— сам считаю по отбою: за 9 часов до сна</span></label><input id="gCaf" type="time" value="${settings.caffeineCutoff}"></div>
     <div class="field"><label class="label" for="gOff">Экраны выключаю в</label><input id="gOff" type="time" value="${settings.screensOff}"></div>
     <div class="tools"><button class="btn primary" id="gSave">Сохранить</button><button class="btn" id="gCancel">Отмена</button></div>`);
   $("gRows").onclick = e => {
@@ -622,7 +665,11 @@ function openGoals(){
     $("gRows").innerHTML = rows();
   };
   $("gCancel").onclick = closeSheet;
-  $("gSave").onclick = () => { settings = {...settings, ...lim, goals:draft, screensOff:$("gOff").value || "22:30", caffeineCutoff:$("gCaf").value || "14:00"}; persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
+  $("gSave").onclick = () => {
+    const cafNew = $("gCaf").value || settings.caffeineCutoff, wt = Math.round(+$("gWeight").value || 0), protChanged = lim.proteinGoal !== settings.proteinGoal;
+    settings = {...settings, ...lim, goals:draft, goalsEdited:true, screensOff:$("gOff").value || "22:30", caffeineCutoff:cafNew, cafManual: settings.cafManual || cafNew !== settings.caffeineCutoff};
+    if(wt >= 30 && wt <= 250){ if(wt !== settings.weight && !protChanged) settings.proteinGoal = proteinFor(wt); settings.weight = wt; }
+    persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
 }
 
 function openIntro(){
@@ -1197,8 +1244,11 @@ function noteMiss(text, why){
 }
 function dropMiss(text){ const t = String(text||"").trim(); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== t && !t.includes(x.text) && !x.text.includes(t))); }
 
+const proteinFor = kg => Math.max(60, Math.min(250, Math.round(kg * 1.4 / 10) * 10));
+function setWeight(kg){ settings.weight = kg; settings.proteinGoal = proteinFor(kg); persistSettings(); const r = getRoutine(); r.asked.weight = true; saveRoutine(r); return `Вес ${kg} кг. Норму белка поставил ${settings.proteinGoal} г в день: 1,4 г на килограмм, как рекомендуют при силовых тренировках (диапазон 1,4–2,0).`; }
 function setBedtime(hm){
   settings.bedtime = hm;
+  if(!settings.cafManual) settings.caffeineCutoff = cafCutoffFor(hm);
   const b = toMinHM(hm), bb = b < 6*60 ? b + 1440 : b, o = toMinHM(settings.screensOff || "22:30"), oo = o < 6*60 ? o + 1440 : o;
   if(oo > bb - 60) settings.screensOff = fromMin(bb - 60);
   persistSettings();
@@ -1763,9 +1813,10 @@ function weeklyReport(){
   const L = [];
   L.push(`Неделя: сделано ${a.done} из ${a.planned} запланированного, движения ${fmtDur(a.move)}${b.planned ? ` (прошлая: ${b.done} из ${b.planned}, ${fmtDur(b.move)})` : ""}.`);
   const cmp = (x, y, f, better) => x == null || y == null ? "" : Math.abs(x - y) < (better === "sleep" ? 10 : 0.3) ? "" : (x > y ? "больше" : "меньше");
-  if(a.sleep != null) L.push(`Сон в среднем ${fmtDur(Math.round(a.sleep))}${b.sleep != null && Math.abs(a.sleep - b.sleep) >= 10 ? ` — на ${fmtDur(Math.round(Math.abs(a.sleep-b.sleep)))} ${a.sleep > b.sleep ? "больше" : "меньше"}, чем неделей раньше` : ""}.`);
+  if(a.sleep != null && a.days >= 3) L.push(`Сон в среднем ${fmtDur(Math.round(a.sleep))}${b.sleep != null && Math.abs(a.sleep - b.sleep) >= 10 ? ` — на ${fmtDur(Math.round(Math.abs(a.sleep-b.sleep)))} ${a.sleep > b.sleep ? "больше" : "меньше"}, чем неделей раньше` : ""}.`);
   if(a.screen != null) L.push(`Развлечения в телефоне: ${fmtDur(Math.round(a.screen))} в день${b.screen != null && Math.abs(a.screen-b.screen) >= 10 ? ` (${a.screen < b.screen ? "меньше" : "больше"} на ${fmtDur(Math.round(Math.abs(a.screen-b.screen)))})` : ""}.`);
-  if(a.steps != null) L.push(`Шагов в среднем ${fmtNum(Math.round(a.steps))} в день.`);
+  if(a.steps != null) L.push(`Шагов в среднем ${fmtNum(Math.round(a.steps))} в день (ориентир ${fmtNum(settings.stepsGoal)}).`);
+  { const ae = aeroMinutes(getWeek(ck)); L.push(`Аэробная нагрузка: ${ae.done} из ${AERO_GOAL} минут нормы ВОЗ.`); }
   const good = goalCats().filter(c => gs[c].done >= gs[c].goal).map(c => CATS[c].full.toLowerCase());
   const miss = goalCats().filter(c => gs[c].done < gs[c].goal).map(c => `${CATS[c].full.toLowerCase()} ${gs[c].done}/${gs[c].goal}`);
   if(good.length) L.push(`Получилось: ${good.join(", ")}.`);
@@ -1892,6 +1943,8 @@ const ROUTINE_QS = [
      if(!p) return null; r.train = p; const tm = parseOneTime(s); if(tm) r.trainTime = tm;
      return {morning:"Утро, отлично: буду ставить тренировки до работы.", lunch:"Понял, в обед.", evening:"Вечер, понял: буду ставить тренировки после работы.", any:"Понял, буду подбирать по свободному времени."}[p]; }}
 ];
+ROUTINE_QS.push({k:"weight", q:"Сколько ты примерно весишь? Нужно, чтобы посчитать норму белка (1,4 г на кг). Можно пропустить.",
+  parse(t, r){ const m = /(\d{2,3})/.exec(t); if(!m || +m[1] < 30 || +m[1] > 250) return null; return setWeight(+m[1]); }});
 function routineKnown(r){ return ROUTINE_QS.filter(q => r.asked[q.k]).length; }
 function nextRoutineQ(r){ return ROUTINE_QS.find(q => !r.asked[q.k]); }
 function askRoutine(force){
@@ -1928,12 +1981,14 @@ function routineStatement(text){
     const d = parseDays(s); if(d && (d.days || d.shift)){ r.workDays = d.days; r.shift = d.shift||null; r.asked.days = true; said.push(d.shift ? "сменный график" : "рабочие дни: " + d.days.map(i=>DW[i].toLowerCase()).join(", ")); }
     if(/ (удален|из дома) /.test(s) || / удал/.test(s)){ r.place = "home"; r.asked.place = true; said.push("удалёнка"); }
   }
+  const wm = /(?:^| )(?:я )?(?:вешу|мой вес|вес)\s*(?:сейчас |около |примерно )?(\d{2,3})(?:[.,]\d)?\s*(?:кг|килограмм|кило)?(?= |$)/.exec(s);
+  if(wm && +wm[1] >= 30 && +wm[1] <= 250){ bot(setWeight(+wm[1])); return true; }
   const wk = / (встаю|просыпаюсь|подъем) /.test(s);
   if(wk){ const parts = s.split(/ (?:а )?(?:в )?выходн[а-я]* /); const a = parseOneTime(" "+parts[0]+" "), b = parts[1] ? parseOneTime(" "+parts[1]+" ") : null;
     if(/ выходн/.test(s) && !b && a){ r.wakeWe = a; said.push("подъём в выходные " + a); } else { if(a){ r.wakeWd = a; said.push("подъём " + a); } if(b){ r.wakeWe = b; said.push("в выходные " + b); } }
     if(a || b) r.asked.wake = true; }
   if(/ (обедаю|обед обычно|обычно обед) /.test(s)){ const tm = parseOneTime(s); if(tm){ r.lunch = tm; r.asked.lunch = true; said.push("обед в " + tm); } }
-  if(/ (ложусь|отбой|засыпаю|иду спать|ложусь спать|сплю с) /.test(s) && !/ (вчера|сегодня лег|лег в) /.test(s)){ const tm = parseOneTime(s); if(tm){ setBedtime(tm); said.push(`отбой в ${tm}, экраны выключаем к ${settings.screensOff}`); bedChanged = true; } }
+  if(/ (ложусь|лягу|отбой|засыпаю|иду спать|пойду спать|ложусь спать|лягу спать|сплю с) /.test(s) && !/ (вчера|сегодня лег|лег в) /.test(s)){ const tm = parseOneTime(s); if(tm){ setBedtime(tm); said.push(`отбой в ${tm}, экраны выключаем к ${settings.screensOff}`); bedChanged = true; } }
   // regular activities: «по субботам футбол в 12», «каждый вторник йога»
   let rec = / (по|каждый|каждую|каждое|каждые) (понедельник|вторник|сред|четверг|пятниц|суббот|воскресень|будням|будн|выходн|день|утро|вечер)[а-я]* /.exec(s) || (/ (ежедневно|через день) /.exec(s) && [null, "", / ежедневно /.test(s) ? "день" : "черезд"]);
   if(rec && / (сегодня|завтра|вчера) /.test(s)) rec = null;
