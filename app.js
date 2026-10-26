@@ -687,7 +687,7 @@ function undoLogged(L, text, v){
   render(); scrollChat();
   return true;
 }
-function respond(text){
+function respondRulesMode(text){
   const t0 = Date.now(); respondRules(text);
   const mine = getChat().filter(m => m.who === "bot" && m.at >= t0 - 50);
   const plain = mine.filter(m => m.text && !m.acts && !m.kind);
@@ -699,6 +699,89 @@ function respond(text){
     llmJudge(text, (v, err) => { if(v && (v.kind === "chat" || v.kind === "command") && undoLogged(L, text, v)) return; reply(); }, did);
   } else reply();
 }
+/* ---------- режим «модель понимает»: модель сама решает, что записать, запланировать или отменить ---------- */
+const brainModel = () => llmOn() && llmCfg().brain !== "rules";
+const REPLY_TYPES = () => Object.entries(TYPES).filter(([k, t]) => t.unit !== "event").map(([k, t]) => k + " — " + t.short.toLowerCase()).join("; ");
+function brainPrompt(text){
+  const now = new Date(), ck = curKey(), ti = todayI(), w = getWeek(ck), w2 = getWeek(iso(addDays(new Date(ck + "T00:00:00"), 7)));
+  const DN = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"];
+  const items = []; for(const [wk, wob] of [[ck, w], [iso(addDays(new Date(ck + "T00:00:00"), 7)), w2]]) for(const i of wob.items){ const off = (wk === ck ? 0 : 7) + i.day - ti; if(off < -1 || off > 9) continue; items.push([off, i.time || "99", "id=" + i.id + " | день " + off + " | " + i.t + (i.time ? " | " + i.time : "") + (i.done ? " | сделано" : "")]); }
+  items.sort((x, y) => x[0] - y[0] || x[1].localeCompare(y[1]));
+  const st = stepsFor(dateOf(ck, ti));
+  const sys = "Ты — Ритм, добрый помощник по планированию недели и здоровью. Человек пишет тебе по-русски. Ты отвечаешь ТОЛЬКО JSON: {\"reply\":\"ответ человеку, 1–2 коротких предложения\",\"actions\":[...]}.\n" +
+    "Действия: {\"op\":\"log\",\"type\":ТИП,\"name\":\"как назвал человек\",\"min\":минуты,\"time\":\"ЧЧ:ММ\",\"day\":0} — человек УЖЕ сделал это (day: 0 сегодня, -1 вчера); " +
+    "{\"op\":\"plan\",\"type\":ТИП,\"name\":\"как назвал человек\",\"time\":\"ЧЧ:ММ\",\"day\":1} — собирается сделать (day: 0 сегодня, 1 завтра и т. д.); {\"op\":\"cancel\",\"id\":ID} — убрать пункт плана; {\"op\":\"move\",\"id\":ID,\"day\":2,\"time\":\"ЧЧ:ММ\"} — перенести пункт.\n" +
+    "Если это просто разговор, вопрос, где человек находится, чужие дела, погода, эмоции — actions пустой []. Записывай только то, что человек прямо сказал. Не выдумывай числа и занятия. min и time указывай, только если человек их назвал.\n" +
+    "ТИП — один из: " + REPLY_TYPES() + ".\n" +
+    "Примеры:\n«поплавал 40 минут» → {\"reply\":\"Отлично, 40 минут плавания записал.\",\"actions\":[{\"op\":\"log\",\"type\":\"swim\",\"min\":40,\"day\":0}]}\n" +
+    "«завтра бассейн в 18» → {\"reply\":\"Поставил бассейн на завтра в 18:00.\",\"actions\":[{\"op\":\"plan\",\"type\":\"swim\",\"time\":\"18:00\",\"day\":1}]}\n" +
+    "«йогу отмени» (в плане id=ab1 Йога) → {\"reply\":\"Убрал йогу из плана.\",\"actions\":[{\"op\":\"cancel\",\"id\":\"ab1\"}]}\n" +
+    "«вернулся с работы» → {\"reply\":\"С возвращением! Как прошёл день?\",\"actions\":[]}";
+  const ctx = "Сейчас " + DN[ti] + " " + pad(now.getDate()) + "." + pad(now.getMonth() + 1) + ", " + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ". " + (st != null ? "Шагов сегодня: " + st + ". " : "") +
+    "План (день 0 — сегодня):\n" + (items.slice(0, 24).map(x => x[2]).join("\n") || "пусто");
+  const hist = getChat().filter(m => m.text && !m.thinking).slice(-5, -1).slice(-4);
+  return {sys: sys + "\n\n" + ctx, hist};
+}
+function parseBrain(out){
+  let t = String(out || "").replace(/<\|[^|]*\|>/g, "").replace(/```(?:json)?/g, ""); const i = t.indexOf("{"), j = t.lastIndexOf("}");
+  if(i < 0 || j <= i) return null;
+  try{ const o = JSON.parse(t.slice(i, j + 1)); return {reply: String(o.reply || "").trim(), actions: Array.isArray(o.actions) ? o.actions : []}; }catch(e){}
+  const m = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t); return m ? {reply: m[1], actions: []} : null;
+}
+const brainName = a => { const n = String(a.name || "").trim(); return n && n.length <= 40 && !/[{}"]/.test(n) ? n[0].toUpperCase() + n.slice(1) : TYPES[a.type].short; };
+const validHM = x => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(x || ""));
+function runBrainActions(actions){
+  const done = [], undo = [];
+  for(const a of actions.slice(0, 4)){
+    try{
+      if(a.op === "log" && TYPES[a.type] && TYPES[a.type].unit !== "event"){
+        const off = Math.max(-2, Math.min(0, Math.round(+a.day || 0)));
+        const e = {type:a.type, name:brainName(a), text:lastUserText, dayOffset:off, time: validHM(a.time) ? String(a.time).padStart(5, "0") : ""};
+        if(+a.min > 0 && +a.min < 1000) e.min = Math.round(+a.min);
+        fillDefaults(e); logFromChat([e]); const L = LS.get("lastLog"); if(L) undo.push(...L.ids.map(id => ({key:L.key, d:L.day, id}))); done.push("log");
+      } else if(a.op === "plan" && TYPES[a.type] && TYPES[a.type].unit !== "event"){
+        const off = Math.max(0, Math.min(13, Math.round(+a.day || 0))); const date = addDays(new Date(), off);
+        addPlanFromChat({type:a.type, name:brainName(a), time: validHM(a.time) ? String(a.time).padStart(5, "0") : "", text:lastUserText, noLearn:true}, date); done.push("plan");
+      } else if(a.op === "cancel" && a.id){
+        for(const k of [curKey(), iso(addDays(new Date(curKey() + "T00:00:00"), 7))]) if(getWeek(k).items.some(i => i.id === a.id)){ mutateQuiet(k, w => { w.items = w.items.filter(i => i.id !== a.id); }); done.push("cancel"); break; }
+      } else if(a.op === "move" && a.id){
+        const off = Math.max(0, Math.min(13, Math.round(+a.day || 0))); const date = addDays(new Date(), off);
+        for(const k of [curKey(), iso(addDays(new Date(curKey() + "T00:00:00"), 7))]){ const it = getWeek(k).items.find(i => i.id === a.id); if(it){ moveItemTo({key:k, it}, date, validHM(a.time) ? String(a.time).padStart(5, "0") : ""); done.push("move"); break; } }
+      }
+    }catch(e){}
+  }
+  return {done, undo};
+}
+function respondBrain(text){
+  const A = RITM.analyze(text);
+  if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});                  // кризисный ответ всегда по готовому тексту, не через модель
+  if(routineAnswer(text)) return;                                                // ответ на заданный ботом вопрос о распорядке
+  lastUserText = text;
+  const ph = bot("Думаю…", null, {thinking:true}); render(); scrollChat();
+  const fin = (reply, acts) => { const arr = getChat(), m = arr.find(x => x.id === ph.id); if(!m) return; m.text = reply; m.thinking = false; if(acts) m.acts = acts; saveChat(arr); render(); scrollChat(); };
+  const {sys, hist} = brainPrompt(text);
+  const handle = out => {
+    const o = parseBrain(out);
+    if(!o || !o.reply){ ruleMiss = true; noteMiss(text, "model"); return fin("Не смог разобрать ответ модели. Напишите чуть иначе или переключите «Кто понимает» на правила в «Ещё → Умный разбор»."); }
+    const r = runBrainActions(o.actions);
+    const acts = r.undo.length ? [act("Это ошибка, убрать запись", {op:"unlogIds", key:r.undo[0].key, d:r.undo[0].d, ids:r.undo.map(x => x.id)})] : null;
+    fin(o.reply.slice(0, 400), acts); render();
+  };
+  if(llmMode() === "local"){
+    const h = hist.map(m => "<|im_start|>" + (m.who === "me" ? "user" : "assistant") + "\n" + String(m.text).slice(0, 200) + "<|im_end|>").join("\n");
+    const id = ++llmSeq, to = setTimeout(() => { if(llmWait[id]){ delete llmWait[id]; fin("Модель не успела ответить. Попробуйте ещё раз."); } }, 150000);
+    llmWait[id] = (status, out) => { clearTimeout(to); if(status !== 200) return fin("Модель не запустилась: " + String(out).slice(0, 120)); handle(out); };
+    try{ NATIVE.llmLocalAsk(id, "<|im_start|>system\n" + sys + "<|im_end|>\n" + h + "\n<|im_start|>user\n" + text + "<|im_end|>\n<|im_start|>assistant\n"); }catch(e){ clearTimeout(to); delete llmWait[id]; fin("Не удалось запустить модель."); }
+  } else {
+    const c = llmCfg(); if(!c.key) return fin("Нет ключа DeepSeek.");
+    const msgs = [{role:"system", content:sys}, ...hist.map(m => ({role: m.who === "me" ? "user" : "assistant", content:String(m.text).slice(0, 300)})), {role:"user", content:text}];
+    const body = JSON.stringify({model:"deepseek-chat", messages:msgs, temperature:0.2, max_tokens:300, response_format:{type:"json_object"}});
+    const id = ++llmSeq; llmWait[id] = (status, out) => { if(status < 200 || status >= 300) return fin("Облачная модель не ответила (" + status + ")."); try{ handle(JSON.parse(out).choices[0].message.content); }catch(e){ fin("Не смог разобрать ответ модели."); } };
+    if(NATIVE && NATIVE.llmRequest){ try{ NATIVE.llmRequest(id, LLM_URL, c.key, body); }catch(e){ delete llmWait[id]; fin("Ошибка запроса."); } }
+    else fetch(LLM_URL, {method:"POST", headers:{"Content-Type":"application/json", Authorization:"Bearer " + c.key}, body}).then(async r => llmWait[id] && llmWait[id](r.status, await r.text())).catch(() => { delete llmWait[id]; fin("Нет сети."); });
+  }
+}
+function respond(text){ if(brainModel()) return respondBrain(text); return respondRulesMode(text); }
 let llmDl = null;   // {pct, err}
 function renderLlm(){
   const c = llmCfg(), t = $("llmToggle"); if(!t) return;
@@ -710,7 +793,7 @@ function renderLlm(){
   $("llmDl").textContent = llmDl && llmDl.err ? "Повторить скачивание" : "Скачать модель (1,6 ГБ)";
   $("llmBar").hidden = !(llmDl && !llmDl.err); $("llmBarFill").style.width = (llmDl ? llmDl.pct : 0) + "%";
   t.textContent = c.on ? "Включён" : "Выключен"; t.classList.toggle("primary", !!c.on);
-  $("llmReply").textContent = c.reply === false ? "Отвечает: правила" : "Отвечает: модель"; $("llmReply").classList.toggle("primary", c.reply !== false);
+  $("llmReply").textContent = c.brain === "rules" ? "Кто понимает: правила" : "Кто понимает: модель"; $("llmReply").classList.toggle("primary", c.brain !== "rules");
   if(NATIVE && !canLocal && !$("llmNote").textContent) $("llmNote").textContent = "В этой версии приложения нет модели на телефоне. Она есть в отдельном файле ritm-local.apk (только для 64-битных телефонов).";
   if(mode === "local" && !(llmDl && !llmDl.err) && !$("llmNote").textContent) $("llmNote").textContent = sz > 1e9 ? "Модель скачана." : (sz > 0 ? "Скачано не полностью, нажмите «Скачать» ещё раз, докачается." : "");
 }
@@ -719,7 +802,7 @@ $("llmModeLocal").onclick = () => setMode("local"); $("llmModeCloud").onclick = 
 $("llmKey").onchange = () => { const c = llmCfg(); c.key = $("llmKey").value.trim(); LS.set("llm", c); $("llmNote").textContent = c.key ? "Ключ сохранён." : ""; };
 $("llmDl").onclick = () => { llmDl = {pct:0}; $("llmNote").textContent = "Скачиваю. Можно закрыть экран, но приложение лучше не выгружать."; renderLlm(); try{ NATIVE.llmLocalDownload(LOCAL_MODEL_URL); }catch(e){ llmDl = {pct:0, err:"нет доступа"}; renderLlm(); } };
 $("llmDel").onclick = () => { try{ NATIVE.llmLocalDelete(); }catch(e){} const c = llmCfg(); c.on = false; LS.set("llm", c); llmDl = null; $("llmNote").textContent = "Модель удалена."; renderLlm(); };
-$("llmReply").onclick = () => { const c = llmCfg(); c.reply = c.reply === false; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.reply === false ? "Отвечает бот по шаблонам. Модель только проверяет записи." : "Бот пишет ответы своими словами через модель (записывают по-прежнему правила). Пока модель думает, виден шаблонный ответ, потом он заменится."; };
+$("llmReply").onclick = () => { const c = llmCfg(); c.brain = c.brain === "rules" ? "model" : "rules"; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.brain === "rules" ? "Понимают и записывают правила, модель только проверяет записи и переписывает ответы." : "Модель сама решает, что записать, запланировать или отменить, и отвечает. Правила отключены (кроме кризисного ответа). Ответ занимает 10–20 секунд."; };
 $("llmToggle").onclick = () => { const c = llmCfg(); if(!c.on && !llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Сначала скачайте модель." : "Сначала вставьте ключ."; return; } c.on = !c.on; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено. Проверяю только то, что бот записал по тексту без цифр." : "Выключено, бот работает по правилам."; };
 $("llmTest").onclick = () => { const c = llmCfg(); if(llmMode() === "cloud"){ c.key = $("llmKey").value.trim(); LS.set("llm", c); }
   if(!llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Модель ещё не скачана." : "Нет ключа."; return; }
