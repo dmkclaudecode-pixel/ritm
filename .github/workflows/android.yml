@@ -49,6 +49,19 @@ jobs:
           git checkout --orphan ci-log; git rm -rf . -q
           cp /tmp/log.txt log.txt; git add log.txt; git commit -qm "build log"; git push -f origin ci-log
 
+      - name: Проверить APK
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          { echo "== apksigner"; $BT/apksigner verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk 2>&1 | head -20
+            echo "== badging"; $BT/aapt dump badging android/app/build/outputs/apk/release/app-release.apk 2>&1 | grep -E "package:|sdkVersion|targetSdk|native-code|uses-" | head -20
+            echo "== zip"; unzip -tq android/app/build/outputs/apk/release/app-release.apk | tail -2
+            echo "== libs"; unzip -v android/app/build/outputs/apk/release/app-release.apk | grep -E "\.so|AndroidManifest|resources.arsc" | head -30
+            echo "== zipalign"; $BT/zipalign -c -P 16 -v 4 android/app/build/outputs/apk/release/app-release.apk 2>&1 | grep -E "FAIL|Verification" | head -10
+          } > /tmp/apkcheck.txt 2>&1 || true
+          git config user.name ci; git config user.email ci@example.com
+          git checkout --orphan ci-apk; git rm -rf . -q; cp /tmp/apkcheck.txt apkcheck.txt; git add apkcheck.txt; git commit -qm apkcheck; git push -f origin ci-apk || true
+          git checkout -f main || git checkout -f ${{ github.sha }}
+
       - name: Переименовать
         run: cp android/app/build/outputs/apk/release/app-release.apk ritm.apk
 
