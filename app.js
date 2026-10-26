@@ -596,7 +596,8 @@ const localSize = () => { try{ return NATIVE && NATIVE.llmLocalSize ? +NATIVE.ll
 const hasLocal = () => { try{ return !!(NATIVE && NATIVE.llmLocalAvailable && NATIVE.llmLocalAvailable()); }catch(e){ return false; } };
 const llmMode = () => llmCfg().mode === "cloud" ? "cloud" : (hasLocal() ? "local" : "cloud");
 const llmReady = () => llmMode() === "local" ? localSize() > 1e9 : !!llmCfg().key;
-const llmOn = () => !!(llmCfg().on && llmReady());
+const llmEnabled = c => c.on !== false;            // по умолчанию включено, как только есть модель или ключ
+const llmOn = () => !!(llmEnabled(llmCfg()) && llmReady());
 let llmSeq = 0; const llmWait = {};
 function llmCall(messages, done){
   const c = llmCfg(); if(!c.key) return done(null, "нет ключа");
@@ -792,7 +793,7 @@ function renderLlm(){
   $("llmDl").hidden = sz > 1e9 || !!(llmDl && !llmDl.err); $("llmDel").hidden = !(sz > 0);
   $("llmDl").textContent = llmDl && llmDl.err ? "Повторить скачивание" : "Скачать модель (1,6 ГБ)";
   $("llmBar").hidden = !(llmDl && !llmDl.err); $("llmBarFill").style.width = (llmDl ? llmDl.pct : 0) + "%";
-  t.textContent = c.on ? "Включён" : "Выключен"; t.classList.toggle("primary", !!c.on);
+  const en = llmEnabled(c) && llmReady(); t.textContent = en ? "Включён" : (llmEnabled(c) ? "Включится после скачивания" : "Выключен"); t.classList.toggle("primary", en);
   $("llmReply").textContent = c.brain === "rules" ? "Кто понимает: правила" : "Кто понимает: модель"; $("llmReply").classList.toggle("primary", c.brain !== "rules");
   if(NATIVE && !canLocal && !$("llmNote").textContent) $("llmNote").textContent = "В этой версии приложения нет модели на телефоне. Она есть в отдельном файле ritm-local.apk (только для 64-битных телефонов).";
   if(mode === "local" && !(llmDl && !llmDl.err) && !$("llmNote").textContent) $("llmNote").textContent = sz > 1e9 ? "Модель скачана." : (sz > 0 ? "Скачано не полностью, нажмите «Скачать» ещё раз, докачается." : "");
@@ -803,7 +804,7 @@ $("llmKey").onchange = () => { const c = llmCfg(); c.key = $("llmKey").value.tri
 $("llmDl").onclick = () => { llmDl = {pct:0}; $("llmNote").textContent = "Скачиваю. Можно закрыть экран, но приложение лучше не выгружать."; renderLlm(); try{ NATIVE.llmLocalDownload(LOCAL_MODEL_URL); }catch(e){ llmDl = {pct:0, err:"нет доступа"}; renderLlm(); } };
 $("llmDel").onclick = () => { try{ NATIVE.llmLocalDelete(); }catch(e){} const c = llmCfg(); c.on = false; LS.set("llm", c); llmDl = null; $("llmNote").textContent = "Модель удалена."; renderLlm(); };
 $("llmReply").onclick = () => { const c = llmCfg(); c.brain = c.brain === "rules" ? "model" : "rules"; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.brain === "rules" ? "Понимают и записывают правила, модель только проверяет записи и переписывает ответы." : "Модель сама решает, что записать, запланировать или отменить, и отвечает. Правила отключены (кроме кризисного ответа). Ответ занимает 10–20 секунд."; };
-$("llmToggle").onclick = () => { const c = llmCfg(); if(!c.on && !llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Сначала скачайте модель." : "Сначала вставьте ключ."; return; } c.on = !c.on; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено. Проверяю только то, что бот записал по тексту без цифр." : "Выключено, бот работает по правилам."; };
+$("llmToggle").onclick = () => { const c = llmCfg(); const was = llmEnabled(c) && llmReady(); if(!was && !llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Сначала скачайте модель." : "Сначала вставьте ключ."; return; } c.on = !was; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено: " + (c.brain === "rules" ? "правила понимают, модель проверяет." : "модель понимает и отвечает, правила отключены.") : "Выключено, бот работает по правилам."; };
 $("llmTest").onclick = () => { const c = llmCfg(); if(llmMode() === "cloud"){ c.key = $("llmKey").value.trim(); LS.set("llm", c); }
   if(!llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Модель ещё не скачана." : "Нет ключа."; return; }
   $("llmNote").textContent = llmMode() === "local" ? "Проверяю… первый запуск модели может занять до минуты." : "Проверяю…"; const t0 = Date.now();
