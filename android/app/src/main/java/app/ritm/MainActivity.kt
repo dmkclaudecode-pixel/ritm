@@ -35,6 +35,13 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var web: WebView
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    @Volatile private var pendingOpen: String? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra("open")?.let { pendingOpen = it }
+    }
 
     private val healthLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -56,6 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Reminders.ensureChannel(this)
+        pendingOpen = intent?.getStringExtra("open")
 
         web = WebView(this)
         setContentView(web)
@@ -172,6 +180,21 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface fun setReminders(morning: String, evening: String, enabled: Boolean) {
             Reminders.save(this@MainActivity, morning, evening, enabled)
             Reminders.schedule(this@MainActivity)
+        }
+
+        @JavascriptInterface fun setReview(time: String, enabled: Boolean) {
+            Reminders.saveReview(this@MainActivity, time, enabled)
+            Reminders.schedule(this@MainActivity)
+        }
+
+        @JavascriptInterface fun consumeOpen(): String {
+            val v = pendingOpen ?: ""
+            pendingOpen = null
+            return v
+        }
+
+        @JavascriptInterface fun testReview() {
+            Reminders.show(this@MainActivity, "review", test = true)
         }
 
         @JavascriptInterface fun saveSnapshot(json: String) {

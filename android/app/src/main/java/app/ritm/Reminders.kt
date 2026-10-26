@@ -36,6 +36,13 @@ object Reminders {
             .putString("morning", morning).putString("evening", evening).putBoolean("enabled", enabled).apply()
     }
 
+    fun saveReview(ctx: Context, time: String, enabled: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("review", time).putBoolean("reviewEnabled", enabled).apply()
+    }
+
+    private fun code(kind: String) = when (kind) { "morning" -> 1; "evening" -> 2; else -> 3 }
+
     fun saveSnapshot(ctx: Context, json: String) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("snapshot", json).apply()
     }
@@ -43,7 +50,7 @@ object Reminders {
     private fun pending(ctx: Context, kind: String): PendingIntent {
         val i = Intent(ctx, ReminderReceiver::class.java).putExtra("kind", kind)
         return PendingIntent.getBroadcast(
-            ctx, if (kind == "morning") 1 else 2, i,
+            ctx, code(kind), i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
@@ -51,10 +58,11 @@ object Reminders {
     fun schedule(ctx: Context) {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val am = ctx.getSystemService(AlarmManager::class.java)
-        for (kind in listOf("morning", "evening")) {
+        for (kind in listOf("morning", "evening", "review")) {
             am.cancel(pending(ctx, kind))
-            if (!p.getBoolean("enabled", false)) continue
-            val hm = p.getString(kind, if (kind == "morning") "08:45" else "19:45") ?: continue
+            val on = if (kind == "review") p.getBoolean("reviewEnabled", false) else p.getBoolean("enabled", false)
+            if (!on) continue
+            val hm = p.getString(kind, when (kind) { "morning" -> "08:45"; "evening" -> "19:45"; else -> "23:00" }) ?: continue
             val t = try { LocalTime.parse(hm) } catch (e: Exception) { continue }
             val zone = ZoneId.systemDefault()
             var at = ZonedDateTime.of(LocalDate.now(zone), t, zone)
@@ -68,9 +76,12 @@ object Reminders {
         ensureChannel(ctx)
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val today = LocalDate.now().toString()
-        var title = if (kind == "morning") "План на сегодня" else "Как прошёл день?"
-        var text = if (kind == "morning") "Откройте Ритм недели: дела на сегодня и советы."
-                   else "Отметьте сделанное, сон, энергию и настроение."
+        var title = when (kind) { "morning" -> "План на сегодня"; "review" -> "Пора подвести итоги дня"; else -> "Как прошёл день?" }
+        var text = when (kind) {
+            "morning" -> "Откройте Ритм недели: дела на сегодня и советы."
+            "review" -> "Две минуты: отметьте, что и сколько делали, и получите разбор и план на завтра."
+            else -> "Отметьте сделанное, сон, энергию и настроение."
+        }
         try {
             val snap = JSONObject(p.getString("snapshot", "{}") ?: "{}")
             val day = snap.optJSONObject("days")?.optJSONObject(today)?.optJSONObject(kind)
@@ -82,7 +93,7 @@ object Reminders {
         if (test) title = "Проверка: $title"
 
         val open = PendingIntent.getActivity(
-            ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            ctx, 100 + code(kind), Intent(ctx, MainActivity::class.java).putExtra("open", kind).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val n = NotificationCompat.Builder(ctx, CHANNEL)
@@ -96,7 +107,7 @@ object Reminders {
             .build()
         val nm = NotificationManagerCompat.from(ctx)
         if (nm.areNotificationsEnabled()) {
-            try { nm.notify(if (kind == "morning") 11 else 12, n) } catch (e: SecurityException) { }
+            try { nm.notify(10 + code(kind), n) } catch (e: SecurityException) { }
         }
     }
 }

@@ -29,6 +29,7 @@
   <!-- TODAY -->
   <main id="tab-today" class="tab">
     <section class="hero" id="todayHero"></section>
+    <section class="card cta" id="reviewCta" hidden></section>
     <section class="card" id="bodyCard" hidden></section>
     <section class="block">
       <div class="bhead"><h2>Мои дела на сегодня</h2></div>
@@ -40,6 +41,9 @@
     </section>
     <section class="card" id="checkin"></section>
   </main>
+
+  <!-- REVIEW -->
+  <main id="tab-review" class="tab" hidden></main>
 
   <!-- WEEK -->
   <main id="tab-week" class="tab" hidden>
@@ -72,7 +76,9 @@
       <p class="note">Утром приложение пришлёт план на день, а вечером напомнит, что осталось и чего не хватает до целей недели.</p>
       <div class="remrow"><span class="rl"><b>Утро</b><span class="note">План на день</span></span><input type="time" id="nMorning" aria-label="Время утреннего уведомления"></div>
       <div class="remrow"><span class="rl"><b>Вечер</b><span class="note">Отметить день</span></span><input type="time" id="nEvening" aria-label="Время вечернего уведомления"></div>
-      <div class="tools"><button class="btn primary" id="nToggle">Включить уведомления</button><button class="btn" id="nTest">Прислать пробное</button></div>
+      <div class="remrow"><span class="rl"><b>Разбор дня</b><span class="note" id="nReviewNote">За 30 минут до сна</span></span><button class="btn" id="nReviewToggle">Вкл</button></div>
+      <div class="remrow"><span class="rl"><b>Обычно ложусь в</b><span class="note">если данных о сне ещё нет</span></span><input type="time" id="nBed" aria-label="Обычное время отбоя"></div>
+      <div class="tools"><button class="btn primary" id="nToggle">Включить уведомления</button><button class="btn" id="nTest">Пробное</button><button class="btn" id="nTestReview">Пробный разбор</button></div>
     </section>
     <section class="card" id="remCard">
       <h2>Напоминания</h2>
@@ -81,6 +87,8 @@
         <span class="tools"><input type="time" id="remMorning" aria-label="Время утреннего напоминания"><a class="btn" id="gMorning" target="_blank" rel="noopener">В календарь</a></span></div>
       <div class="remrow"><span class="rl"><b>Вечер: отметить день</b><span class="note">Каждый день</span></span>
         <span class="tools"><input type="time" id="remEvening" aria-label="Время вечернего напоминания"><a class="btn" id="gEvening" target="_blank" rel="noopener">В календарь</a></span></div>
+      <div class="remrow"><span class="rl"><b>Разбор дня</b><span class="note" id="gReviewNote">За 30 минут до сна</span></span>
+        <span class="tools"><a class="btn" id="gReview" target="_blank" rel="noopener">В календарь</a></span></div>
       <div class="tools"><button class="btn" id="icsWeek">Дела недели в календарь (.ics)</button></div>
       <p class="note">В Google Календаре нажмите «Сохранить». Чтобы уведомление приходило ровно в срок, выберите в событии «в момент начала».</p>
     </section>
