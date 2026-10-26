@@ -13,6 +13,7 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Duration
 import java.time.Instant
@@ -27,6 +28,7 @@ object HealthReader {
     private val SLEEP = HealthPermission.getReadPermission(SleepSessionRecord::class)
     val PERMISSIONS = setOf(STEPS, SLEEP)
     private val HM = DateTimeFormatter.ofPattern("HH:mm")
+    private val DT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
 
     /** Шаги и сон за последние 14 дней. Ключ — дата (для сна — дата пробуждения). */
     suspend fun read(ctx: Context): JSONObject {
@@ -35,6 +37,7 @@ object HealthReader {
         val from = today.minusDays(13)
         val steps = JSONObject()
         val sleep = JSONObject()
+        val sessions = JSONArray()
         var granted: Set<String> = emptySet()
 
         if (HealthConnectClient.getSdkStatus(ctx) == HealthConnectClient.SDK_AVAILABLE) {
@@ -66,6 +69,11 @@ object HealthReader {
                 )
                 for (s in res.records) {
                     val mins = Duration.between(s.startTime, s.endTime).toMinutes()
+                    // все сессии от 20 минут: дневной и вечерний сон тоже считается в сутки
+                    if (mins >= 20) sessions.put(JSONObject()
+                        .put("s", s.startTime.atZone(zone).format(DT))
+                        .put("e", s.endTime.atZone(zone).format(DT))
+                        .put("m", mins))
                     if (mins < 120) continue
                     putSleep(sleep, s.startTime.atZone(zone), s.endTime.atZone(zone), mins, "hc")
                 }
@@ -84,6 +92,7 @@ object HealthReader {
             .put("apps", apps)
             .put("steps", steps)
             .put("sleep", sleep)
+            .put("sessions", sessions)
             .put("stepsGranted", STEPS in granted)
             .put("sleepGranted", SLEEP in granted)
             .put("usage", usage)

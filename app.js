@@ -88,17 +88,65 @@ function sleepFromLog(ds){
   return min >= 120 && min <= 16*60 ? {start:bed, end:wake, min, src:"log"} : null;
 }
 const sleepFor = ds => (health.sleep && health.sleep[ds]) || sleepFromLog(ds);
+/* ----- сон за сутки: ночь + вечерний/дневной сон; норма — личная ----- */
+function sleepTotal(ds){
+  const main = sleepFor(ds), day = dayLog(ds), log = day.log || [];
+  let extra = 0, nap = 0; const prev = iso(addDays(new Date(ds+"T00:00:00"), -1));
+  const ses = health.sessions || [];
+  const hasHC = ses.some(x => x.e.slice(0,10) === ds);
+  // вечерний сон (начался и закончился в один день после 16:00) относится к ночи следующего дня
+  for(const x of ses){
+    const E = x.e.slice(0,10), evening = x.s.slice(0,10) === E && x.s.slice(11) >= "16:00", isMain = main && main.src !== "log" && E === ds && x.s.slice(11) === main.start && x.e.slice(11) === main.end;
+    if(isMain) continue;
+    if((E === ds && !evening) || (E === prev && evening)) extra += x.m;
+  }
+  if(!hasHC){   // записано вручную
+    for(const e of log) if(e.type === "sleep" && e.event === "nap" && e.min && !(e.time && e.time >= "16:00")) nap += e.min;
+    for(const e of dayLog(prev).log || []) if(e.type === "sleep" && e.event === "nap" && e.min && e.time && e.time >= "16:00") nap += e.min;
+  }
+  let base = main ? main.min : 0, src = main ? main.src : null;
+  if(!main){ const nt = log.filter(e => e.type === "sleep" && e.event === "night" && e.min).map(e => e.min); if(nt.length){ base = Math.max(...nt); src = "chat"; } }
+  const total = base + extra + nap;
+  if(!total || (!main && !base)) return null;
+  return {min: total, main: base, extra: extra + nap, start: main ? main.start : null, end: main ? main.end : null, src};
+}
+let needCache = {t:0, v:null};
+// по самочувствию: при каком количестве сна энергия заметно выше (нужно ≥10 дней с оценкой энергии)
+function learnSleepNeed(){
+  const pairs = history(60).filter(x => x.sleepMin != null && x.energy != null);
+  if(pairs.length < 10) return {n:pairs.length, T:null};
+  let best = null;
+  for(let T = 330; T <= 510; T += 30){
+    const A = pairs.filter(x => x.sleepMin >= T).map(x => x.energy), B = pairs.filter(x => x.sleepMin < T).map(x => x.energy);
+    if(A.length < 3 || B.length < 3) continue;
+    const diff = mean(A) - mean(B); if(!best || diff > best.diff) best = {T, diff, nA:A.length, nB:B.length};
+  }
+  if(best && best.diff >= 0.6) return {n:pairs.length, T:best.T, diff:best.diff, nA:best.nA, nB:best.nB};
+  return {n:pairs.length, T:null, flat:true};
+}
+function sleepNeed(){
+  if(settings.sleepNeed) return {min:settings.sleepNeed, src:"user"};
+  if(Date.now() - needCache.t > 60000){ let L = null; try{ L = learnSleepNeed(); }catch(e){} needCache = {t:Date.now(), v:L}; }
+  const L = needCache.v; if(L && L.T) return {min:L.T, src:"data", n:L.n, diff:L.diff};
+  return {min:420, src:"default", flat:!!(L && L.flat), n:L ? L.n : 0};
+}
+const sleepLow = m => m != null && m < sleepNeed().min - 30;
+const sleepEnough = m => m != null && m >= sleepNeed().min - 15;
+function needText(){ const n = sleepNeed(), h = fmtDur(n.min);
+  return n.src === "user" ? `твоя норма — ${h}` : n.src === "data" ? `по твоему самочувствию тебе нужно около ${h}` : "ориентир для взрослых — 7–9 часов, твою норму определю по самочувствию"; }
 const stepsFor = ds => { if(health.steps && health.steps[ds] != null) return health.steps[ds]; const d = dayLog(ds); return d.stepsManual != null ? d.stepsManual : ((d.review||{}).steps ?? null); };
 function bedMin(hm){ const [h,m] = hm.split(":").map(Number); let t = h*60+m; if(t < 12*60) t += 24*60; return t; }
 function sleepRegular(ds){
-  const s = sleepFor(ds); if(!s) return null;
+  const t = sleepTotal(ds); if(!t) return null;
+  const en = dayLog(ds).energy;
+  if(!sleepEnough(t.min) && !(en >= 4 && t.min >= 300)) return false;   // хорошее самочувствие важнее нормы
+  const s = sleepFor(ds); if(!s || !s.start) return true;
   const prev = []; for(let i=1;i<=7;i++){ const o = sleepFor(iso(addDays(new Date(ds+"T00:00:00"),-i))); if(o) prev.push(bedMin(o.start)); }
-  if(s.min < 420) return false;
   if(prev.length < 3) return true;
   prev.sort((a,b)=>a-b); return Math.abs(bedMin(s.start) - prev[Math.floor(prev.length/2)]) <= 60;
 }
 // null — данных о ночи нет; иначе ночь засчитана или нет (≥7 ч по AASM/SRS и ровный отбой)
-function sleepVerdict(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; const ds = dateOf(key,d); if(!sleepFor(ds)) return null; return sleepRegular(ds) === true; }
+function sleepVerdict(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; const ds = dateOf(key,d); if(!sleepTotal(ds)) return null; return sleepRegular(ds) === true; }
 function sleepOk(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; return sleepRegular(dateOf(key,d)) === true; }
 
 const curKey = () => iso(mondayOf(new Date()));
@@ -414,13 +462,15 @@ function renderStats(){
   if(missed) ins.push(["sun", `Пропущено ${missed} ${plural(missed,"дело","дела","дел")}. Не страшно: переносите их на свободные дни, а не отменяйте.`]);
   const elapsed = ti+1; let sleep=0, sleepN=0, light=0; const eM=[], eR=[], mood=[];
   for(let d=0; d<=ti; d++){
-    const h = w.days[d]||{}; const sv = sleepVerdict(w, ck, d); if(sv !== null){ sleepN++; if(sv) sleep++; } if(h.light) light++; if(h.mood) mood.push(h.mood);
+    const h = w.days[d]||{}; if(h.light) light++; if(h.mood) mood.push(h.mood);
     if(h.energy){ (w.items.some(i=>i.day===d && i.done && CATS[i.cat] && CATS[i.cat].move) ? eM : eR).push(h.energy); }
   }
+  // сон считаем по последним 7 дням, а не по календарной неделе (в понедельник иначе всегда «данных мало»)
+  for(let i = 0; i < 7; i++){ const dt = addDays(new Date(), -i), sv = sleepVerdict(getWeek(dateKeyOf(dt)), dateKeyOf(dt), dayIdxOf(dt)); if(sv !== null){ sleepN++; if(sv) sleep++; } }
   // выводы про сон и свет — только когда есть из чего: хотя бы 3 ночи / 3 дня
-  if(sleepN < 3) ins.push(["sun", `Сон: данных пока мало (${sleepN} из 3 нужных ночей). Норма для взрослых — 7–9 часов и отбой в одно время (разброс до 30–60 минут). Вывод по режиму появится, когда наберётся 3 ночи.`]);
+  if(sleepN < 3) ins.push(["sun", `Сон: данных пока мало (${sleepN} из 3 нужных ночей). Норма у каждого своя: ${needText()}. Сон за сутки считаю вместе с дневным и вечерним; вывод по режиму появится, когда наберётся 3 ночи.`]);
   else { const need = Math.ceil(sleepN * 0.7);
-    ins.push([sleep >= need ? "ok" : "warn", `Сон: ${sleep} из ${sleepN} ${plural(sleepN,"ночи","ночей","ночей")} в норме (от 7 часов и ровный отбой). ${sleep >= need ? "Так держать, это основа бодрости." : "Цель — 7 ночей из 7; для начала хотя бы 5. Ровное время отбоя помогает не меньше, чем длина сна."}`]); }
+    ins.push([sleep >= need ? "ok" : "warn", `Сон за 7 дней: ${sleep} из ${sleepN} ${plural(sleepN,"ночи","ночей","ночей")} в норме (${needText()}; хорошее самочувствие тоже засчитывается). ${sleep >= need ? "Так держать, это основа бодрости." : "Цель — большинство ночей по твоей норме. Ровное время отбоя помогает не меньше, чем длина сна."}`]); }
   if(elapsed >= 3) ins.push([light >= elapsed - 1 ? "ok" : "sun", `Дневной свет: ${light} из ${elapsed}. ${light >= elapsed - 1 ? "Отлично." : "Хватит 15–30 минут на улице до обеда: утренний свет настраивает суточный ритм."}`]);
   else ins.push(["sun", "Отмечайте сон, свет, энергию и настроение вечером во вкладке «Сегодня». Выводы по сну и свету появятся примерно через 3 дня."]);
   const avg = a => a.reduce((x,y)=>x+y,0)/a.length;
@@ -429,14 +479,14 @@ function renderStats(){
     for(let d=0; d<=ti; d++){
       const ds = dateOf(ck,d), st = stepsFor(ds), sp = sleepFor(ds), h = w.days[d]||{};
       if(st != null && d < ti) sd.push(st);
-      if(sp){ sl.push(sp); if(h.energy) (sp.min >= 420 ? eGood : eBad).push(h.energy); }
+      if(sp){ const tt = sleepTotal(ds) || sp; sl.push({...sp, min:tt.min}); if(h.energy) (sleepEnough(tt.min) ? eGood : eBad).push(h.energy); }
     }
     if(sd.length) { const a = avg(sd); ins.push([a >= settings.stepsGoal ? "ok" : "sun", `Шагов в среднем ${fmtNum(a)} в день при цели ${fmtNum(settings.stepsGoal)}.` + (a < settings.stepsGoal ? " Добавьте прогулку после ужина: это плюс 1 500–2 000 шагов." : "")]); }
     if(sl.length >= 3){
       const am = avg(sl.map(x=>x.min)), starts = sl.map(x=>bedMin(x.start)), spread = Math.max(...starts) - Math.min(...starts);
-      ins.push([am >= 420 ? "ok" : "warn", `Сон в среднем ${fmtDur(Math.round(am))}.` + (am < 420 ? " Взрослым обычно нужно 7–9 часов." : "") + (spread > 90 ? ` Время засыпания гуляет на ${Math.round(spread/6)/10} ч; ровный отбой помогает легче вставать.` : " Время отбоя стабильное.")]);
+      ins.push([sleepEnough(am) ? "ok" : "warn", `Сон в среднем ${fmtDur(Math.round(am))} за сутки.` + (sleepLow(am) ? ` Это меньше твоей нормы (${needText()}).` : "") + (spread > 90 ? ` Время засыпания гуляет на ${Math.round(spread/6)/10} ч; ровный отбой помогает легче вставать.` : " Время отбоя стабильное.")]);
     }
-    if(eGood.length >= 2 && eBad.length >= 2){ const df = avg(eGood) - avg(eBad); if(df > 0.2) ins.push(["ok", `После ночей от 7 часов энергия выше в среднем на ${df.toFixed(1).replace(".", ",")} балла.`]); }
+    if(eGood.length >= 2 && eBad.length >= 2){ const df = avg(eGood) - avg(eBad); if(df > 0.2) ins.push(["ok", `После ночей от ${fmtDur(sleepNeed().min - 15)} энергия выше в среднем на ${df.toFixed(1).replace(".", ",")} балла.`]); }
   }
   if(eM.length >= 2 && eR.length >= 2){
     const diff = avg(eM) - avg(eR);
@@ -655,6 +705,7 @@ function openGoals(){
   openSheet(`<h2>Цели</h2><p class="note">Сколько раз в неделю вы хотите каждое занятие и дневные нормы. По ним приложение считает, чего не хватает, и подбирает советы. Ноль — без цели.</p>
     <div id="gRows">${rows()}</div>
     <div class="field"><label class="label" for="gWeight">Вес, кг <span class="note">— для нормы белка (1,4 г на кг при силовых)</span></label><input id="gWeight" type="number" min="30" max="250" inputmode="numeric" value="${settings.weight || ""}" placeholder="не указан"></div>
+    <div class="field"><label class="label" for="gSleep">Сколько сна тебе нужно, ч <span class="note">— пусто: определю по самочувствию</span></label><input id="gSleep" type="number" min="3" max="12" step="0.5" inputmode="decimal" value="${settings.sleepNeed ? settings.sleepNeed/60 : ""}" placeholder="определю сам"></div>
     <div class="field"><label class="label" for="gCaf">Последний кофе до <span class="note">— сам считаю по отбою: за 9 часов до сна</span></label><input id="gCaf" type="time" value="${settings.caffeineCutoff}"></div>
     <div class="field"><label class="label" for="gOff">Экраны выключаю в</label><input id="gOff" type="time" value="${settings.screensOff}"></div>
     <div class="tools"><button class="btn primary" id="gSave">Сохранить</button><button class="btn" id="gCancel">Отмена</button></div>`);
@@ -669,6 +720,7 @@ function openGoals(){
     const cafNew = $("gCaf").value || settings.caffeineCutoff, wt = Math.round(+$("gWeight").value || 0), protChanged = lim.proteinGoal !== settings.proteinGoal;
     settings = {...settings, ...lim, goals:draft, goalsEdited:true, screensOff:$("gOff").value || "22:30", caffeineCutoff:cafNew, cafManual: settings.cafManual || cafNew !== settings.caffeineCutoff};
     if(wt >= 30 && wt <= 250){ if(wt !== settings.weight && !protChanged) settings.proteinGoal = proteinFor(wt); settings.weight = wt; }
+    const sv = parseFloat(($("gSleep").value || "").replace(",", ".")); settings.sleepNeed = sv >= 3 && sv <= 12 ? Math.round(sv*60/15)*15 : null; needCache = {t:0, v:null};
     persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
 }
 
@@ -816,6 +868,7 @@ function runAction(msgId, i){
   else if(a.op === "notact"){ const pend = (m.pending||[])[a.idx];
     if(pend){ RITM.forget(pend.text, pend.fuzzyWord); dropMiss(pend.text); }
     reply = "Понял, не записываю. Запомнил: " + (pend && pend.fuzzyWord ? `«${pend.fuzzyWord}» — не занятие.` : `«${pend ? pend.text.trim() : ""}» — не занятие.`); }
+  else if(a.op === "sleepneed"){ settings.sleepNeed = a.min; persistSettings(); needCache = {t:0, v:null}; reply = `Поставил норму сна ${fmtDur(a.min)}.`; }
   else if(a.op === "why"){ const r = whyAnswer(a); m.chosen = i; saveChat(arr); bot(r.text, r.acts || null); render(); scrollChat(); return; }
   else if(a.op === "addOn"){ mutateQuiet(a.key, w => w.items.push({id:uid(), day:a.day, cat:a.cat, t:a.name, time:"", done:false})); reply = `Поставил «${a.name}» ${DACC[a.day]}.`; }
   else if(a.op === "unlog"){ let n = 0; mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const rm = (day.log||[]).filter(r => r.type === a.type && r.src === "chat"); n = rm.length;
@@ -959,6 +1012,11 @@ function respond(text){
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
   const entries = RITM.parse(text);
+  { const bedE = entries.find(e => e.type === "sleep" && e.event === "bed"), wakeE = entries.find(e => e.type === "sleep" && e.event === "wake");
+    if(bedE && wakeE && !bedE.dayOffset && bedE.time && wakeE.time && bedE.time > wakeE.time) bedE.dayOffset = -1; }
+  { const sl = entries.filter(e => e.min && !/(вздремну(?!л)|подремлю|посплю|прилягу|буду спать)/i.test(e.text || "") && ((!e.type && /^(поспал|спал|вздремнул|подремал|дремал|заснул на|уснул на)/i.test(e.name || "")) || (e.type === "relax" && /(вздремнул|подремал|задремал|дремал)/i.test(e.text || ""))));
+    for(const e of sl){ entries.splice(entries.indexOf(e), 1); logSleepWords(e, text); }
+    if(sl.length && !entries.length) return; }
   if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return bot(chattyReply(null));
   if(!entries.length){ ruleMiss = true; noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
   const lastBot = getChat().filter(m=>m.who==="bot").slice(-1)[0];
@@ -1158,7 +1216,7 @@ function contextReply(text, s, A, pre){
 /* ---------- утро: как прошла ночь и что на неё повлияло ---------- */
 function nightFacts(){
   const t = new Date(); t.setHours(0,0,0,0); const y = addDays(t, -1), ds = iso(t), ys = iso(y);
-  const sl = sleepFor(ds), facts = [], causes = [];
+  const sl = sleepTotal(ds), facts = [], causes = [];
   const pdY = phoneDay(ys), pdT = phoneDay(ds);
   const yLog = (getWeek(dateKeyOf(y)).days[dayIdxOf(y)] || {}).log || [], L = intakeOf(yLog);
   if(pdY && pdY.late >= 20){ const after = pdT ? ((appsFor(ds)||{}).hours||[]).slice(0, 4).reduce((a,b) => a + (b||0), 0) : 0;
@@ -1166,7 +1224,7 @@ function nightFacts(){
   if(L.lastCaf && L.lastCaf > settings.caffeineCutoff) causes.push({k:"caffeine", w:40, text:`последний кофеин был в ${L.lastCaf}`});
   if(L.alcohol > 0) causes.push({k:"alcohol", w:50, text:"вчера был алкоголь"});
   const yr = dayRecord(y); if(yr.hasData && yr.moveMin === 0 && (yr.steps == null || yr.steps < 3000)) causes.push({k:"move", w:15, text:"вчера почти не было движения"});
-  if(sl){ facts.push(`Ночь: ${fmtDur(sl.min)}${sl.start ? ` (лёг в ${sl.start}, встал в ${sl.end})` : ""}.`);
+  if(sl){ facts.push(`Сон: ${fmtDur(sl.min)}${sl.extra ? ` (ночь ${fmtDur(sl.main)} и ещё ${fmtDur(sl.extra)} днём или вечером)` : sl.start ? ` (лёг в ${sl.start}, встал в ${sl.end})` : ""}.`);
     const bed = usualBedtime().hm; if(sl.start && bedMin(sl.start) - bedMin(bed) >= 45) causes.push({k:"late", w:bedMin(sl.start) - bedMin(bed), text:`лёг на ${fmtDur(bedMin(sl.start) - bedMin(bed))} позже обычного отбоя (${bed})`}); }
   causes.sort((a, b) => b.w - a.w);
   return {sl, facts, causes};
@@ -1178,14 +1236,29 @@ function morningBrief(){
   if(LS.get("briefDay") === today || h < 5 || h >= 13) return false;
   const n = nightFacts(); if(!n.sl && !n.causes.length) return false;
   LS.set("briefDay", today);
-  const short = n.sl && n.sl.min < 420, L = [];
+  const short = n.sl && sleepLow(n.sl.min), L = [];
   L.push(pick(["Доброе утро!","Утро доброе!","С добрым утром!"]) + (n.facts.length ? " " + n.facts.join(" ") : ""));
   if(short && n.causes.length){ L.push("Что могло помешать: " + n.causes.slice(0, 2).map(c => c.text).join("; ") + "." + personalLink(n.causes[0].k)); L.push(TIP[n.causes[0].k] || ""); }
-  else if(short) L.push("Ночь короткая. Сегодня без кофе после " + settings.caffeineCutoff + " и лучше лечь пораньше.");
+  else if(short) L.push("Сна меньше твоей нормы. Сегодня без кофе после " + settings.caffeineCutoff + " и лучше лечь пораньше. А как самочувствие на самом деле? Отметь энергию, так я лучше пойму, сколько сна тебе нужно.");
   else if(n.sl) L.push(pick(["Хорошо выспался — отличный день, чтобы сделать что-то важное.","Выспался, это база. Удачного дня!","Нормальная ночь, так держать."]));
   else if(n.causes.length) L.push("Кстати, " + n.causes[0].text + "." + personalLink(n.causes[0].k));
   bot(L.filter(Boolean).join("\n"), [act("Как настроение? Отметить", {op:"tab", tab:"today"})], {kind:"brief"});
   return true;
+}
+
+/* ---------- сон словами: «поспал 3 часа вечером», «ночью спал 5 часов» ---------- */
+function logSleepWords(e, text){
+  const s = nrm(text), verbNap = /(вздремнул|подремал|задремал|дремал|заснул на|уснул на)/i.test((e.name || "") + " " + (e.text || ""));
+  const nightWord = / (ночью|ночь|всю ночь|за ночь|ночи) /.test(s), dayWord = / (днем|днём|после обеда|в обед|после работы|вечером|утром) /.test(s);
+  const night = nightWord || (e.time && (e.time >= "22:00" || e.time < "05:00")) || (!e.time && !dayWord && !verbNap && e.min >= 240);
+  const off = e.dayOffset || 0, ds = iso(addDays(new Date(), off));
+  logFromChat([{type:"sleep", event: night ? "night" : "nap", name: night ? "Ночной сон" : "Дневной сон", min:e.min, time:e.time || "", text, dayOffset:off}]);
+  const t = sleepTotal(ds), L = [night ? `Записал ночной сон: ${fmtDur(e.min)}.` : `Записал ${e.time && e.time >= "16:00" ? "вечерний" : "дневной"} сон: ${fmtDur(e.min)}.`];
+  if(t && (t.extra || night)) L.push(`За сутки ${fmtDur(t.min)}${t.extra && t.main ? ` (ночь ${fmtDur(t.main)} и ещё ${fmtDur(t.extra)})` : ""}: ${sleepEnough(t.min) ? "для твоей нормы хватает" : "это меньше твоей нормы"} (${needText()}).`);
+  else if(!night) L.push("Ночь отметь, когда проснёшься, например: «лёг в 23, встал в 7» или «ночью спал 6 часов». Суммарно за сутки я считаю вместе.");
+  if(!night && (e.min > 40 || (e.time && e.time >= "16:00"))) L.push("Дневной сон дольше 30 минут или после 16:00 может сдвинуть ночной. Лучше 20–30 минут до 15:00.");
+  if(night && !dayLog(ds).energy) L.push("Отметь самочувствие (энергия 1–5) во вкладке «Сегодня»: по ней я пойму, сколько сна нужно именно тебе.");
+  bot(L.join(" "));
 }
 
 /* ---------- срывы: спрашиваем, что мешает, и подстраиваемся ---------- */
@@ -1230,7 +1303,7 @@ function whyAnswer(a){
   }
   if(a.r === "tired"){
     const g = settings.goals[cat] || 0;
-    return {text:"Тогда сначала силы, потом нагрузка. Помогают сон от 7 часов и лёгкие дни между тяжёлыми. Могу уменьшить цель или заменить ближайшую тренировку на лёгкую.",
+    return {text:"Тогда сначала силы, потом нагрузка. Помогают сон по твоей норме и лёгкие дни между тяжёлыми. Могу уменьшить цель или заменить ближайшую тренировку на лёгкую.",
       acts: [g > 1 ? act(`Цель ${g - 1} в неделю вместо ${g}`, {op:"goal", c:cat, to:g - 1}) : null, nx ? act("Ближайшую сделать лёгкой (растяжка)", {op:"swap", key:nx.key, id:nx.it.id, type:"mobility", name:"Лёгкая растяжка, 20 минут", t:nx.it.t}) : null, act("Пока ничего", {op:"keep"})].filter(Boolean)};
   }
   return {text:"Понял."};
@@ -1640,7 +1713,7 @@ function answerTopic(topics){
     if(t === "steps"){ const st = stepsFor(ds); out.push(st != null ? `Шагов сегодня ${fmtNum(st)} из ${fmtNum(settings.stepsGoal)}.` : "Шаги пока не видны. Подключи Health Connect в «Ещё» или напиши, например, «8000 шагов»."); }
     if(t === "sleep"){ const arr = []; for(let i=0;i<7;i++){ const s = sleepFor(iso(addDays(new Date(),-i))); if(s) arr.push(s); }
       if(!arr.length) out.push("Данных о сне пока нет. Подключи Health Connect или пиши «лёг в 23:30», «проснулся в 7:30».");
-      else { const avgMin = Math.round(arr.reduce((a,s)=>a+s.min,0)/arr.length), last = arr[0]; out.push(`Прошлой ночью: ${fmtDur(last.min)} (${last.start}–${last.end}). В среднем за неделю ${fmtDur(avgMin)}.` + (avgMin < 420 ? " Это меньше 7 часов — попробуй ложиться на 30 минут раньше." : " Это в норме.")); } }
+      else { const avgMin = Math.round(arr.reduce((a,s)=>a+s.min,0)/arr.length), last = arr[0]; out.push(`Прошлой ночью: ${fmtDur(last.min)} (${last.start}–${last.end}). В среднем за неделю ${fmtDur(avgMin)}.` + (sleepLow(avgMin) ? " Это меньше твоей нормы — попробуй ложиться на 30 минут раньше." : " Это в норме.")); } }
     if(t === "screen"){ const pd = typeof phoneDay === "function" ? phoneDay(ds) : null;
       out.push(pd ? `Сегодня в телефоне ${fmtDur(pd.total)}, из них развлечения ${fmtDur(pd.ent)} при лимите ${fmtDur(settings.screenLimit)}.` + (pd.apps[0] ? ` Больше всего — ${pd.apps[0].l} (${fmtDur(pd.apps[0].m)}).` : "") : (L.screen ? `По журналу экранов сегодня ${fmtDur(L.screen)}.` : "Экранное время пока не видно: разреши доступ к истории использования в «Ещё».")); }
     if(t === "week") out.push(weekText());
@@ -1654,8 +1727,8 @@ function answerTopic(topics){
 let lastUserText = "";
 function adviceText(){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), gs = goalState(w, ti), tips = [];
-  const sl = []; for(let i=0;i<7;i++){ const s = sleepFor(iso(addDays(new Date(),-i))); if(s) sl.push(s.min); }
-  if(sl.length >= 3 && sl.reduce((a,b)=>a+b,0)/sl.length < 420) tips.push("Главный рычаг сейчас — сон: в среднем меньше 7 часов. Ложись на 30 минут раньше и убирай телефон за час до отбоя.");
+  const sl = []; for(let i=0;i<7;i++){ const s = sleepTotal(iso(addDays(new Date(),-i))); if(s) sl.push(s.min); }
+  if(sl.length >= 3 && sleepLow(sl.reduce((a,b)=>a+b,0)/sl.length)) tips.push("Главный рычаг сейчас — сон: в среднем меньше твоей нормы. Ложись на 30 минут раньше и убирай телефон за час до отбоя.");
   const miss = goalCats().filter(c => gs[c].deficit > 0);
   if(miss.length) tips.push(`До целей недели не хватает: ${miss.map(c => CATS[c].n.toLowerCase()).join(", ")}. Во вкладке «Неделя» это можно добавить одной кнопкой.`);
   const st = stepsFor(dateOf(ck, ti)); if(st != null && st < settings.stepsGoal*0.6) tips.push("Шагов маловато: прогулка после ужина 20–30 минут закрывает пару тысяч.");
@@ -1668,7 +1741,7 @@ function adviceText(){
 /* ---------- stage 2: personal patterns, trends, streaks, weekly report ---------- */
 function dayRecord(date){
   const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key), day = w.days[d] || {}, ds = iso(date);
-  const log = day.log || [], L = intakeOf(log), sl = sleepFor(ds);
+  const log = day.log || [], L = intakeOf(log), sl = sleepFor(ds), stot = sleepTotal(ds);
   const its = w.items.filter(i => i.day === d);
   const doneIts = its.filter(i => i.done);
   const rv = day.review || {};
@@ -1680,7 +1753,7 @@ function dayRecord(date){
   const lastCafM = L.lastCaf ? toMinHM(L.lastCaf) : null;
   return {
     date:ds, dow:d, past: date < new Date(new Date().setHours(0,0,0,0)),
-    sleepMin: sl ? sl.min : null, bedM: sl ? bedMin(sl.start) : null, wakeM: sl ? toMinHM(sl.end) : null,
+    sleepMin: stot ? stot.min : null, bedM: sl && sl.start ? bedMin(sl.start) : null, wakeM: sl && sl.end ? toMinHM(sl.end) : null,
     energy: day.energy ?? null, mood: day.mood ?? null, stress: day.stress ?? (rv.stress ?? null), sick: !!day.sick,
     steps: stepsFor(ds), moveMin, major: doneIts.some(i => MAJOR.has(i.cat)) || log.some(e => MAJOR.has(e.type) && !e.plan),
     caf: L.mg, lateCaf: lastCafM != null ? lastCafM >= 14*60 + 30 : null, alcohol: L.alcohol > 0 ? 1 : (log.length ? 0 : null),
@@ -1734,10 +1807,12 @@ function personalInsights(){
   r = compare(pairs, p => p.x.alcohol == null ? null : p.x.alcohol > 0, p => p.y.sleepMin);
   if(r && r.diff <= -20) add(-r.diff, `После алкоголя ты спишь в среднем на ${fmtDur(Math.round(-r.diff))} меньше.`, "alcohol");
   // сон → энергия и настроение в тот же день
-  r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= 420, x => x.energy);
-  if(r && r.diff >= 0.5) add(r.diff*40, `После ночей от 7 часов твоя энергия выше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
-  r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= 420, x => x.mood);
-  if(r && r.diff >= 0.5) add(r.diff*40, `Когда высыпаешься, настроение лучше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
+  { const nd = sleepNeed(), hh = fmtDur(nd.min);
+    r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= nd.min - 15, x => x.energy);
+    if(r && r.diff >= 0.5) add(r.diff*40, nd.src === "data" ? `Твоя норма сна по самочувствию — около ${hh}: после таких ночей энергия выше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла (${r.nA} и ${r.nB} дней).` : `После ночей от ${hh} твоя энергия выше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
+    r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= nd.min - 15, x => x.mood);
+    if(r && r.diff >= 0.5) add(r.diff*40, `Когда спишь от ${hh}, настроение лучше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
+    if(nd.src === "default" && nd.flat) add(10, "По твоим данным сон сам по себе пока мало меняет самочувствие, поэтому норму в 7 часов не навязываю. Продолжай отмечать энергию.", "sleep"); }
   // движение → энергия, настроение, сон
   r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.energy);
   if(r && r.diff >= 0.5) add(r.diff*40, `В дни, когда ты двигаешься хотя бы 20 минут, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "move");
@@ -1764,7 +1839,7 @@ function streaks(){
   const run = (test, skipToday) => { let n = 0; for(let i = skipToday ? 1 : 0; i < days.length; i++){ const v = test(days[i]); if(v === null) { if(n) break; else continue; } if(!v) break; n++; } return n; };
   const out = [];
   const s1 = run(x => x.hasData ? x.moveMin >= 20 : null, true); if(s1 >= 2) out.push(`${s1} ${plural(s1,"день","дня","дней")} подряд с движением от 20 минут`);
-  const s2 = run(x => x.sleepMin == null ? null : x.sleepMin >= 420, false); if(s2 >= 2) out.push(`${s2} ${plural(s2,"ночь","ночи","ночей")} подряд от 7 часов сна`);
+  const s2 = run(x => x.sleepMin == null ? null : sleepEnough(x.sleepMin), false); if(s2 >= 2) out.push(`${s2} ${plural(s2,"ночь","ночи","ночей")} подряд со сном по твоей норме (от ${fmtDur(sleepNeed().min - 15)})`);
   const s3 = run(x => x.water == null ? null : x.water >= settings.waterGoal, true); if(s3 >= 2) out.push(`${s3} ${plural(s3,"день","дня","дней")} подряд норма воды`);
   const s4 = run(x => x.screenEnt == null ? null : x.screenEnt <= settings.screenLimit, true); if(s4 >= 2) out.push(`${s4} ${plural(s4,"день","дня","дней")} подряд экраны в пределах лимита`);
   const s5 = run(x => x.past || x.reviewed ? x.reviewed : null, true); if(s5 >= 2) out.push(`${s5} ${plural(s5,"разбор","разбора","разборов")} дня подряд`);
@@ -1860,8 +1935,20 @@ function goalSuggestions(){
   }
   return out;
 }
+// когда накопилось достаточно данных: сообщаем личную норму сна или предлагаем поправить названную
+function sleepNeedNews(){
+  let L; try{ L = learnSleepNeed(); }catch(e){ return; }
+  if(!L || !L.T) return;
+  const fm = m => fmtDur(m);
+  if(settings.sleepNeed){
+    if(Math.abs(L.T - settings.sleepNeed) >= 45 && Date.now() - (settings.needAsked || 0) > 21*86400000){ settings.needAsked = Date.now(); persistSettings();
+      bot(`Ты говорил, что тебе хватает ${fm(settings.sleepNeed)}, но по данным энергия заметно выше после сна от ${fm(L.T)} (на ${L.diff.toFixed(1).replace(".", ",")} балла, ${L.n} дней). Поправить норму?`, [act(`Поставить ${fm(L.T)}`, {op:"sleepneed", min:L.T}), act("Оставить мою", {op:"keep"})]); }
+  } else if(settings.needAnnounced !== L.T){ settings.needAnnounced = L.T; persistSettings();
+    bot(`Заметил про тебя: когда сплю от ${fm(L.T)}, энергия выше в среднем на ${L.diff.toFixed(1).replace(".", ",")} балла (${L.nA} против ${L.nB} дней). Беру ${fm(L.T)} как твою норму вместо общих 7 часов. Скажешь «мне хватает 6 часов» — поставлю твою.`); }
+}
 function postWeeklyReport(){
   bot(weeklyReport(), [act("Составить план на следующую неделю", {op:"planNext"}), act("Открыть итоги", {op:"tab", tab:"stats"})], {kind:"report"});
+  sleepNeedNews();
   for(const g of goalSuggestions().slice(0, 2)) bot(g.text, [act(g.to > settings.goals[g.c] ? "Поднять" : "Снизить", {op:"goal", c:g.c, to:g.to}), act("Оставить", {op:"keep"})]);
 }
 
@@ -1943,6 +2030,9 @@ const ROUTINE_QS = [
      if(!p) return null; r.train = p; const tm = parseOneTime(s); if(tm) r.trainTime = tm;
      return {morning:"Утро, отлично: буду ставить тренировки до работы.", lunch:"Понял, в обед.", evening:"Вечер, понял: буду ставить тренировки после работы.", any:"Понял, буду подбирать по свободному времени."}[p]; }}
 ];
+ROUTINE_QS.push({k:"sleepneed", q:"Сколько часов сна тебе обычно хватает, чтобы чувствовать себя нормально? У каждого своя норма: кому-то хватает 6, кому-то нужно 8. Ответь числом, например «6,5», или пропусти.",
+  parse(t, r){ const m = /(\d{1,2}(?:[.,]\d)?)/.exec(t); const hv = m ? parseFloat(m[1].replace(",", ".")) : NaN; if(!(hv >= 3 && hv <= 12)) return null; settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); needCache = {t:0, v:null};
+    return `Записал: тебе хватает около ${fmtDur(settings.sleepNeed)}. Буду сверять это с твоим самочувствием.`; }});
 ROUTINE_QS.push({k:"weight", q:"Сколько ты примерно весишь? Нужно, чтобы посчитать норму белка (1,4 г на кг). Можно пропустить.",
   parse(t, r){ const m = /(\d{2,3})/.exec(t); if(!m || +m[1] < 30 || +m[1] > 250) return null; return setWeight(+m[1]); }});
 function routineKnown(r){ return ROUTINE_QS.filter(q => r.asked[q.k]).length; }
@@ -1981,6 +2071,12 @@ function routineStatement(text){
     const d = parseDays(s); if(d && (d.days || d.shift)){ r.workDays = d.days; r.shift = d.shift||null; r.asked.days = true; said.push(d.shift ? "сменный график" : "рабочие дни: " + d.days.map(i=>DW[i].toLowerCase()).join(", ")); }
     if(/ (удален|из дома) /.test(s) || / удал/.test(s)){ r.place = "home"; r.asked.place = true; said.push("удалёнка"); }
   }
+  if(/ (сна|сон|спать|спится|высыпа)/.test(s)){
+    if(/ (определи|вычисли|посчитай|сам определи)/.test(s)){ settings.sleepNeed = null; persistSettings(); needCache = {t:0, v:null}; bot("Хорошо, норму сна буду определять сам по твоему самочувствию. Пока данных мало, ориентир — 7 часов."); return true; }
+    const sm = /(?:хватает|нужно|надо|достаточно|норма сна|норма|высыпаюсь за|выспаться)\D{0,14}?(\d{1,2}(?:[.,]\d)?)|(\d{1,2}(?:[.,]\d)?)\s*(?:час\S*|ч)\s*(?:сна\s*)?(?:мне\s*)?(?:хватает|достаточно|нормально)/.exec(s);
+    const hv = sm ? parseFloat((sm[1] || sm[2]).replace(",", ".")) : NaN;
+    if(hv >= 3 && hv <= 12){ settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); needCache = {t:0, v:null}; const r0 = getRoutine(); r0.asked.sleepneed = true; saveRoutine(r0);
+      bot(`Запомнил: тебе нужно около ${fmtDur(settings.sleepNeed)} сна. Буду считать ночь нормальной от этого. По самочувствию проверю, так ли это: если энергия будет говорить о другом, скажу.`); return true; } }
   const wm = /(?:^| )(?:я )?(?:вешу|мой вес|вес)\s*(?:сейчас |около |примерно )?(\d{2,3})(?:[.,]\d)?\s*(?:кг|килограмм|кило)?(?= |$)/.exec(s);
   if(wm && +wm[1] >= 30 && +wm[1] <= 250){ bot(setWeight(+wm[1])); return true; }
   const wk = / (встаю|просыпаюсь|подъем) /.test(s);
@@ -2460,7 +2556,7 @@ function analyzeDay(rv){
     : doneIts.filter(i=>isScreen(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>isScreen(x.cat)).reduce((s,x)=>s+(x.min||0),0) + L.screen;
   const steps = stepsFor(ds) ?? rv.steps;
   const sl = sleepFor(ds);
-  const sleepMin = sl ? sl.min : (rv.sleepH != null ? rv.sleepH*60 : null);
+  const stt = sleepTotal(ds), sleepMin = stt ? stt.min : (sl ? sl.min : (rv.sleepH != null ? rv.sleepH*60 : null));
   const goalSteps = settings.stepsGoal;
   const screenH = screenMin ? screenMin/60 : (rv.screen != null ? rv.screen : null);
   const weekMin = activeMinutesWeek(w, ck, ti, rv), pace = Math.round(150/7*(ti+1));
@@ -2497,7 +2593,7 @@ function analyzeDay(rv){
     if(ns.ignored) bad.push(`Проигнорировал мои просьбы сделать перерыв: ${ns.ignored} ${plural(ns.ignored,"раз","раза","раз")}` + (ns.promisedIgnored ? `, хотя ${ns.promisedIgnored === 1 ? "один раз обещал" : "обещал"} выключить` : "") + "."); }
   const topEnt = PD ? PD.apps.filter(a => APP_GROUPS[a.grp] && APP_GROUPS[a.grp].ent)[0] : null;
   if(h.light) good.push("Был дневной свет. Это помогает и бодрости днём, и сну ночью.");
-  if(sleepMin != null){ if(sleepMin >= 420) good.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: в норме.`); else if(sleepMin < 390) bad.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: меньше нормы в 7–9 часов.`); }
+  if(sleepMin != null){ if(sleepEnough(sleepMin) || (h.energy >= 4 && sleepMin >= 300)) good.push(`Сон ${fmtDur(sleepMin)}: ${h.energy >= 4 && !sleepEnough(sleepMin) ? "меньше ориентира, но самочувствие хорошее — тебе, видимо, хватает" : "в норме"}.`); else if(sleepLow(sleepMin)) bad.push(`Сон ${fmtDur(sleepMin)}: меньше твоей нормы (${needText()}).`); }
   if(its.length && !undone.length) good.push("Все дела из плана выполнены.");
   else if(undone.length) bad.push(`Не получилось: ${undone.map(i=>i.t).join("; ")}.`);
   if(screenMin > settings.screenLimit) bad.push(`Экраны ${fmtDur(screenMin)} при вашем лимите ${fmtDur(settings.screenLimit)}.`);
@@ -2510,7 +2606,7 @@ function analyzeDay(rv){
   if(rv.stress != null && rv.stress >= 4) bad.push(`Высокий стресс (${rv.stress} из 5).`);
 
   const bed = usualBedtime().hm;
-  if(sleepMin != null && sleepMin < 390) tips.push(`Сегодня ложитесь не позже ${bed}, а лучше на 30 минут раньше: после короткой ночи организму нужно наверстать.`);
+  if(sleepLow(sleepMin) && !(h.energy >= 4)) tips.push(`Сегодня ложитесь не позже ${bed}, а лучше на 30 минут раньше: после короткой ночи организму нужно наверстать.`);
   if(cafLate) tips.push(`Завтра последний кофе до ${settings.caffeineCutoff}.`);
   if(L.water > 0 && L.water < wg*0.6) tips.push("Выпивайте стакан воды с каждым приёмом пищи и держите бутылку на столе: так проще добрать норму.");
   if(L.water === 0) tips.push("Записывайте воду кнопкой «+ стакан» в журнале: так я смогу подсказать, хватает ли её.");
@@ -2540,8 +2636,8 @@ function proposeChanges(rv, m){
   const tomorrow = last ? 0 : ti+1;
   const load = Array(7).fill(0); w.items.forEach(i=>load[i.day]++);
   const taken = (d,c) => w.items.some(i=>i.day===d && i.cat===c) || props.some(p=>p.day===d && p.cat===c);
-  const bestDay = (c, avoid=-1) => { let b=-1, bl=99; for(let d=from; d<=to; d++){ if(d===avoid || taken(d,c)) continue; const l = load[d] + (c==="swim" && d<5 ? 2 : 0) + (d===tomorrow && (m.sleepMin!=null && m.sleepMin<390) && (c==="strength"||c==="swim") ? 5 : 0); if(l<bl){ bl=l; b=d; } } return b; };
-  const tired = (m.sleepMin != null && m.sleepMin < 390) || (m.energy && m.energy <= 2) || (m.stress != null && m.stress >= 4);
+  const bestDay = (c, avoid=-1) => { let b=-1, bl=99; for(let d=from; d<=to; d++){ if(d===avoid || taken(d,c)) continue; const l = load[d] + (c==="swim" && d<5 ? 2 : 0) + (d===tomorrow && sleepLow(m.sleepMin) && (c==="strength"||c==="swim") ? 5 : 0); if(l<bl){ bl=l; b=d; } } return b; };
+  const tired = (sleepLow(m.sleepMin) && !(m.energy >= 4)) || (m.energy && m.energy <= 2) || (m.stress != null && m.stress >= 4);
 
   // 1. undone goal items from today → move forward
   if(!last) for(const it of cw.items.filter(i=>i.day===ti && goalCats().includes(i.cat) && !(rv.entries[i.id] && rv.entries[i.id].done))){
@@ -2678,7 +2774,7 @@ function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.cons
 window.__ritmNative = {
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
-      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
+      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
       LS.set("health", health); render();
     }catch(e){}
   },
@@ -2725,5 +2821,5 @@ if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 // крючок для автотестов (без влияния на работу)
-window.__ritmT = {curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts};
+window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts};
 })();
