@@ -703,6 +703,7 @@ function respondRulesMode(text){
 /* ---------- режим «модель понимает»: модель сама решает, что записать, запланировать или отменить ---------- */
 const brainModel = () => llmOn() && llmCfg().brain !== "rules";
 const REPLY_TYPES = () => Object.entries(TYPES).filter(([k, t]) => t.unit !== "event").map(([k, t]) => k + " — " + t.short.toLowerCase()).join("; ");
+const BRAIN_PREFIX = '{"reply":"';
 function brainPrompt(text){
   const now = new Date(), ck = curKey(), ti = todayI(), w = getWeek(ck), w2 = getWeek(iso(addDays(new Date(ck + "T00:00:00"), 7)));
   const DN = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"];
@@ -723,11 +724,14 @@ function brainPrompt(text){
   const hist = getChat().filter(m => m.text && !m.thinking).slice(-5, -1).slice(-4);
   return {sys: sys + "\n\n" + ctx, hist};
 }
-function parseBrain(out){
-  let t = String(out || "").replace(/<\|[^|]*\|>/g, "").replace(/```(?:json)?/g, ""); const i = t.indexOf("{"), j = t.lastIndexOf("}");
-  if(i < 0 || j <= i) return null;
-  try{ const o = JSON.parse(t.slice(i, j + 1)); return {reply: String(o.reply || "").trim(), actions: Array.isArray(o.actions) ? o.actions : []}; }catch(e){}
-  const m = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t); return m ? {reply: m[1], actions: []} : null;
+function parseBrain(out, prefix){
+  let t = String(out || "").replace(/<\|[^|]*\|>/g, "").replace(/```(?:json)?/g, ""); if(/^\s*\{/.test(t)) prefix = ""; t = (prefix || "") + t;
+  const i = t.indexOf("{"), j = t.lastIndexOf("}");
+  if(i >= 0 && j > i){ try{ const o = JSON.parse(t.slice(i, j + 1)); return {reply: String(o.reply || "").trim(), actions: Array.isArray(o.actions) ? o.actions : []}; }catch(e){} }
+  const m = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t); if(m) return {reply: m[1].replace(/\\n/g, " "), actions: []};
+  // модель ответила просто текстом: берём как ответ, без действий
+  const plain = String(out || "").replace(/<\|[^|]*\|>/g, "").replace(/[{}\[\]"]/g, "").replace(/\s+/g, " ").trim();
+  return plain.length >= 2 ? {reply: plain.slice(0, 300), actions: [], plain:true} : null;
 }
 const brainName = a => { const n = String(a.name || "").trim(); return n && n.length <= 40 && !/[{}"]/.test(n) ? n[0].toUpperCase() + n.slice(1) : TYPES[a.type].short; };
 const validHM = x => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(x || ""));
@@ -762,8 +766,8 @@ function respondBrain(text){
   const fin = (reply, acts) => { const arr = getChat(), m = arr.find(x => x.id === ph.id); if(!m) return; m.text = reply; m.thinking = false; if(acts) m.acts = acts; saveChat(arr); render(); scrollChat(); };
   const {sys, hist} = brainPrompt(text);
   const handle = out => {
-    const o = parseBrain(out);
-    if(!o || !o.reply){ ruleMiss = true; noteMiss(text, "model"); return fin("Не смог разобрать ответ модели. Напишите чуть иначе или переключите «Кто понимает» на правила в «Ещё → Умный разбор»."); }
+    const o = parseBrain(out, llmMode() === "local" ? BRAIN_PREFIX : "");
+    if(!o || !o.reply){ ruleMiss = true; noteMiss(text, "model"); return fin("Модель ответила непонятно" + (String(out).trim() ? ": «" + String(out).replace(/\s+/g, " ").trim().slice(0, 90) + "»" : " (пусто)") + ". Напишите чуть иначе или переключите «Кто понимает» на правила в «Ещё → Умный разбор»."); }
     const r = runBrainActions(o.actions);
     const acts = r.undo.length ? [act("Это ошибка, убрать запись", {op:"unlogIds", key:r.undo[0].key, d:r.undo[0].d, ids:r.undo.map(x => x.id)})] : null;
     fin(o.reply.slice(0, 400), acts); render();
@@ -772,7 +776,7 @@ function respondBrain(text){
     const h = hist.map(m => "<|im_start|>" + (m.who === "me" ? "user" : "assistant") + "\n" + String(m.text).slice(0, 200) + "<|im_end|>").join("\n");
     const id = ++llmSeq, to = setTimeout(() => { if(llmWait[id]){ delete llmWait[id]; fin("Модель не успела ответить. Попробуйте ещё раз."); } }, 150000);
     llmWait[id] = (status, out) => { clearTimeout(to); if(status !== 200) return fin("Модель не запустилась: " + String(out).slice(0, 120)); handle(out); };
-    try{ NATIVE.llmLocalAsk(id, "<|im_start|>system\n" + sys + "<|im_end|>\n" + h + "\n<|im_start|>user\n" + text + "<|im_end|>\n<|im_start|>assistant\n"); }catch(e){ clearTimeout(to); delete llmWait[id]; fin("Не удалось запустить модель."); }
+    try{ NATIVE.llmLocalAsk(id, "<|im_start|>system\n" + sys + "<|im_end|>\n" + h + "\n<|im_start|>user\n" + text + "<|im_end|>\n<|im_start|>assistant\n" + BRAIN_PREFIX); }catch(e){ clearTimeout(to); delete llmWait[id]; fin("Не удалось запустить модель."); }
   } else {
     const c = llmCfg(); if(!c.key) return fin("Нет ключа DeepSeek.");
     const msgs = [{role:"system", content:sys}, ...hist.map(m => ({role: m.who === "me" ? "user" : "assistant", content:String(m.text).slice(0, 300)})), {role:"user", content:text}];
