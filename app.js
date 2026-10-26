@@ -11,7 +11,7 @@ const CATS = {
   other:{n:"Другое", c:"--c-other"}
 };
 const GOAL_CATS = ["strength","walk","pool","social","offline","fun"];
-const DEFAULT_SETTINGS = {goals:{strength:2,walk:4,pool:1,social:2,offline:1,fun:2}, screensOff:"22:30", morning:"08:45", evening:"19:45"};
+const DEFAULT_SETTINGS = {goals:{strength:2,walk:4,pool:1,social:2,offline:1,fun:2}, screensOff:"22:30", morning:"08:45", evening:"19:45", stepsGoal:7000, notify:false};
 const DW = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 const DFULL = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
 const DACC = ["в понедельник","во вторник","в среду","в четверг","в пятницу","в субботу","в воскресенье"];
@@ -50,6 +50,24 @@ function saveWeek(key, w){ LS.set("w:"+key, {items:w.items, days:w.days, week:ke
 function loadSettings(){ const s = LS.get("settings") || {}; return {...DEFAULT_SETTINGS, ...s, goals:{...DEFAULT_SETTINGS.goals, ...(s.goals||{})}}; }
 let settings = loadSettings();
 const persistSettings = () => LS.set("settings", settings);
+
+/* ---------- phone data: steps & sleep (Android app only) ---------- */
+const NATIVE = window.RitmNative || null;
+let health = LS.get("health") || {steps:{}, sleep:{}};
+const fmtDur = m => `${Math.floor(m/60)} ч ${pad(m%60)} мин`;
+const fmtNum = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+const dateOf = (key, d) => iso(addDays(new Date(key+"T00:00:00"), d));
+const sleepFor = ds => (health.sleep && health.sleep[ds]) || null;
+const stepsFor = ds => (health.steps && health.steps[ds] != null) ? health.steps[ds] : null;
+function bedMin(hm){ const [h,m] = hm.split(":").map(Number); let t = h*60+m; if(t < 12*60) t += 24*60; return t; }
+function sleepRegular(ds){
+  const s = sleepFor(ds); if(!s) return null;
+  const prev = []; for(let i=1;i<=7;i++){ const o = sleepFor(iso(addDays(new Date(ds+"T00:00:00"),-i))); if(o) prev.push(bedMin(o.start)); }
+  if(s.min < 390) return false;
+  if(prev.length < 3) return true;
+  prev.sort((a,b)=>a-b); return Math.abs(bedMin(s.start) - prev[Math.floor(prev.length/2)]) <= 60;
+}
+function sleepOk(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; return sleepRegular(dateOf(key,d)) === true; }
 
 const curKey = () => iso(mondayOf(new Date()));
 const todayI = () => (new Date().getDay()+6)%7;
@@ -114,11 +132,17 @@ function suggestionsToday(){
   const recent = recentTitles(), out = [];
   const h = w.days[ti] || {};
   if(hour < 15 && !h.light && !dismissed.has("light")) out.push({kind:"light"});
+  const tds = dateOf(ck, ti), stepsNow = stepsFor(tds), lastSleep = sleepFor(tds), goalSteps = settings.stepsGoal;
+  const shortSleep = !!(lastSleep && lastSleep.min < 360), lowSteps = stepsNow != null && hour >= 14 && stepsNow < goalSteps*0.5;
+  if(shortSleep && hour >= 17 && !dismissed.has("early") && !w.items.some(i=>i.day===ti && i.t.startsWith("Лечь пораньше"))) out.push({kind:"early"});
   const cands = GOAL_CATS.filter(c => settings.goals[c] > 0).map(c => {
     const g = gs[c], since = daysSinceDone(c), today = w.items.some(i => i.day===ti && i.cat===c);
-    let score = g.deficit*10 + Math.min(since,10) - (today?40:0);
+    let score = g.deficit*10 + Math.min(since,10) - (today?40:0), whyOver = null;
     if(c === "pool" && g.deficit === 0) score -= 6;
-    return {c, g, since, today, score};
+    if(shortSleep && (c === "strength" || c === "pool")) score -= 15;
+    if(c === "walk" && lowSteps){ score += 14; whyOver = `Сегодня пока ${fmtNum(stepsNow)} шагов из ${fmtNum(goalSteps)}`; }
+    else if(c === "walk" && shortSleep){ score += 4; whyOver = `Сон был ${fmtDur(lastSleep.min)}: сегодня лучше лёгкая прогулка, чем силовая`; }
+    return {c, g, since, today, score, whyOver};
   }).filter(x => !dismissed.has(x.c)).sort((a,b) => b.score - a.score);
   for(const x of cands){
     if(out.length >= 3) break;
@@ -126,7 +150,8 @@ function suggestionsToday(){
     const idea = ideasFor(x.c, ti, hour, offsets[x.c]||0, recent);
     if(!idea) continue;
     let why;
-    if(x.g.deficit > 0) why = `До цели недели не хватает ${x.g.deficit} ${plural(x.g.deficit,"раза","раз","раз")}: ${CATS[x.c].n.toLowerCase()} ${x.g.done}/${x.g.goal}`;
+    if(x.whyOver) why = x.whyOver;
+    else if(x.g.deficit > 0) why = `До цели недели не хватает ${x.g.deficit} ${plural(x.g.deficit,"раза","раз","раз")}: ${CATS[x.c].n.toLowerCase()} ${x.g.done}/${x.g.goal}`;
     else if(x.since >= 3 && x.since < 99) why = `Уже ${x.since} ${plural(x.since,"день","дня","дней")} без ${CATS[x.c].g}`;
     else if(x.since === 99) why = `Давно не было ${CATS[x.c].g}`;
     else why = "Для разнообразия: что-то новое";
@@ -182,11 +207,15 @@ function renderToday(){
   else msg = `Осталось ${total-done} ${plural(total-done,"дело","дела","дел")}. Дальше: ${esc(next.t)}${next.time?" в "+next.time:""}.`;
   const C = 2*Math.PI*30;
   $("todayHero").innerHTML = `<div class="ring"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="36" cy="36" r="30" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-frac)}"/></svg><span class="rv">${done}/${total}</span></div><div class="ht"><span class="big">${msg}</span><span class="note">Нажмите на кружок, когда сделаете дело</span></div>`;
+  renderBody(ck, ti);
   $("todayItems").innerHTML = its.map(itemRow).join("") + `<button class="add" data-add="${ti}" data-week="${ck}">+ Своё дело на сегодня</button>`;
 
   const sg = suggestionsToday();
   $("suggWhy").textContent = sg.length ? "по вашим целям" : "";
   $("suggs").innerHTML = sg.length ? sg.map((s,i) => {
+    if(s.kind === "early") return `<div class="sugg" style="--cc:var(--c-offline)"><div class="sh"><span class="st">Лечь сегодня пораньше</span><span class="pill">сон</span></div>
+      <span class="why">Прошлой ночью сон был ${fmtDur(sleepFor(dateOf(ck,ti)).min)}. Отбой к ${settings.screensOff} без экрана поможет восстановиться</span>
+      <div class="sa"><button class="btn primary" data-early="1">Добавить на вечер</button><button class="btn" data-dismiss="early">Не сегодня</button></div></div>`;
     if(s.kind === "light") return `<div class="sugg" style="--cc:var(--sun)"><div class="sh"><span class="st">15 минут дневного света</span><span class="pill">привычка</span></div>
       <span class="why">Свет до обеда помогает бодрости днём и сну ночью</span>
       <div class="sa"><button class="btn primary" data-light="1">Сделал</button><button class="btn" data-dismiss="light">Не сегодня</button></div></div>`;
@@ -201,7 +230,7 @@ function renderToday(){
   const h = w.days[ti]||{};
   $("checkin").innerHTML = `<div class="bhead"><h2>Как прошёл день?</h2><span class="note">лучше вечером</span></div>
     <div class="check">
-      <button class="tog ${h.sleep?"on":""}" data-hab="sleep"><span class="box"></span>Спал по режиму</button>
+      <button class="tog ${sleepOk(w,ck,ti)?"on":""}" data-hab="sleep"><span class="box"></span>Спал по режиму</button>
       <button class="tog ${h.light?"on":""}" data-hab="light"><span class="box"></span>Был на дневном свету</button>
     </div>
     <div class="scale"><span class="label">Энергия</span><div class="row">${[1,2,3,4,5].map(n=>`<button class="${h.energy===n?"on":""}" data-sc="energy" data-v="${n}">${n}</button>`).join("")}</div></div>
@@ -209,6 +238,64 @@ function renderToday(){
     <p class="note">Из этих отметок приложение поймёт, что вам реально помогает. Результат во вкладке «Итоги».</p>`;
 }
 let lastSugg = [];
+
+function renderBody(ck, ti){
+  const card = $("bodyCard");
+  if(!NATIVE){ card.hidden = true; return; }
+  card.hidden = false;
+  const ds = dateOf(ck, ti), st = stepsFor(ds), sl = sleepFor(ds), goal = settings.stepsGoal;
+  const connected = health.stepsGranted || health.sleepGranted || health.usage;
+  if(!connected){
+    card.innerHTML = `<h2>Шаги и сон</h2><p class="note">Подключите данные телефона, и приложение само будет видеть шаги и когда вы спите, а советы станут точнее.</p>
+      <div class="tools"><button class="btn primary" data-native="health">Подключить Health Connect</button><button class="btn" data-native="usage">Сон по экрану телефона</button></div>`;
+    return;
+  }
+  const stepsHtml = st != null
+    ? `<span class="mv">${fmtNum(st)}</span><span class="mk">шагов из ${fmtNum(goal)}</span><div class="bar"><div class="dn" style="width:${Math.min(100, st/goal*100)}%;background:var(--c-walk)"></div></div>`
+    : `<span class="mv">—</span><span class="mk">${health.stepsGranted ? "шагов пока нет" : "шаги не подключены"}</span>`;
+  const sleepHtml = sl
+    ? `<span class="mv">${fmtDur(sl.min)}</span><span class="mk">сон ${sl.start}–${sl.end}</span><span class="src">${sl.src==="hc" ? "из Health Connect" : "примерно, по экрану телефона"}</span>`
+    : `<span class="mv">—</span><span class="mk">${health.sleepGranted || health.usage ? "сон за ночь не найден" : "сон не подключён"}</span>`;
+  card.innerHTML = `<div class="bhead"><h2>Шаги и сон</h2><button class="btn" data-native="refresh" style="padding:5px 10px;font-size:.8rem">Обновить</button></div><div class="metrics"><div class="metric">${stepsHtml}</div><div class="metric">${sleepHtml}</div></div>`;
+}
+
+function renderHealthCard(){
+  const card = $("healthCard");
+  if(!NATIVE){ card.hidden = true; return; }
+  card.hidden = false;
+  let st = {}; try{ st = JSON.parse(NATIVE.status()); }catch(e){}
+  const hcLine = st.health === "unavailable" ? `<span class="note">Health Connect недоступен на этом телефоне</span>`
+    : (health.stepsGranted && health.sleepGranted) ? `<span class="ok">подключено</span>`
+    : `<button class="btn" data-native="health">${st.health === "update" ? "Установить Health Connect" : "Подключить"}</button>`;
+  card.innerHTML = `<h2>Шаги и сон</h2>
+    <p class="note">Шаги и сон приходят из Health Connect: туда их пишут Google Fit, Samsung Health, часы и трекеры сна. Если трекера сна нет, приложение примерно определит сон по тому, когда вы перестаёте и начинаете пользоваться телефоном.</p>
+    <div class="status"><span class="rl"><b>Health Connect</b><span class="note">шаги и сон</span></span>${hcLine}</div>
+    <div class="status"><span class="rl"><b>Сон по экрану телефона</b><span class="note">если нет трекера сна</span></span>${health.usage ? `<span class="ok">включено</span>` : `<button class="btn" data-native="usage">Разрешить</button>`}</div>
+    <div class="field"><span class="label">Цель по шагам в день</span><div class="stepper"><button data-steps="-1000" aria-label="Меньше">−</button><span class="num" style="min-width:4em;text-align:center">${fmtNum(settings.stepsGoal)}</span><button data-steps="1000" aria-label="Больше">+</button></div></div>`;
+}
+
+function buildSnapshot(){
+  const ck = curKey(), w = getWeek(ck), days = {};
+  for(let d=0; d<7; d++){
+    const its = w.items.filter(i=>i.day===d).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+    const undone = its.filter(i=>!i.done);
+    const gs = goalState(w, d), miss = GOAL_CATS.filter(c=>gs[c].deficit>0).map(c=>CATS[c].n.toLowerCase()+" ×"+gs[c].deficit);
+    const list = its.slice(0,4).map(i=>(i.time? i.time+" ":"")+i.t).join("; ");
+    days[dateOf(ck,d)] = {
+      morning: its.length ? {title:`Сегодня ${its.length} ${plural(its.length,"дело","дела","дел")}`, text: list + (its.length>4 ? " и ещё "+(its.length-4) : "") + ". И 15 минут дневного света до обеда."}
+                          : {title:"Сегодня свободный день", text:"Откройте Ритм недели: приложение подберёт, чем заняться."},
+      evening: {title: undone.length ? `Осталось ${undone.length} ${plural(undone.length,"дело","дела","дел")}` : "Как прошёл день?",
+                text: (undone.length ? "Не отмечено: "+undone.slice(0,3).map(i=>i.t).join("; ")+". " : "") + "Отметьте сон, энергию и настроение." + (miss.length ? " До целей недели: "+miss.join(", ")+"." : "") + " Экраны выключить к "+settings.screensOff+"."}
+    };
+  }
+  return {days};
+}
+let lastSnap = "";
+function syncNative(){
+  if(!NATIVE) return;
+  const s = JSON.stringify(buildSnapshot());
+  if(s !== lastSnap){ lastSnap = s; try{ NATIVE.saveSnapshot(s); }catch(e){} }
+}
 
 function renderWeek(){
   const key = viewKey(), w = getWeek(key), ws = weekStart, we = addDays(ws,6), ti = relIdx(key);
@@ -247,7 +334,7 @@ function renderStats(){
   if(missed) ins.push(["sun", `Пропущено ${missed} ${plural(missed,"дело","дела","дел")}. Не страшно: переносите их на свободные дни, а не отменяйте.`]);
   const elapsed = ti+1; let sleep=0, light=0; const eM=[], eR=[], mood=[];
   for(let d=0; d<=ti; d++){
-    const h = w.days[d]||{}; if(h.sleep) sleep++; if(h.light) light++; if(h.mood) mood.push(h.mood);
+    const h = w.days[d]||{}; if(sleepOk(w, ck, d)) sleep++; if(h.light) light++; if(h.mood) mood.push(h.mood);
     if(h.energy){ (w.items.some(i=>i.day===d && i.done && CATS[i.cat] && CATS[i.cat].move) ? eM : eR).push(h.energy); }
   }
   const okN = Math.max(1, elapsed-1);
@@ -257,6 +344,20 @@ function renderStats(){
     ins.push([light >= okN ? "ok" : "sun", `Дневной свет: ${light} из ${elapsed}. ${light >= okN ? "Отлично." : "Хватит 15 минут на улице до обеда."}`]);
   }
   const avg = a => a.reduce((x,y)=>x+y,0)/a.length;
+  if(NATIVE || Object.keys(health.steps||{}).length){
+    const sd = [], sl = [], eGood = [], eBad = [];
+    for(let d=0; d<=ti; d++){
+      const ds = dateOf(ck,d), st = stepsFor(ds), sp = sleepFor(ds), h = w.days[d]||{};
+      if(st != null && d < ti) sd.push(st);
+      if(sp){ sl.push(sp); if(h.energy) (sp.min >= 420 ? eGood : eBad).push(h.energy); }
+    }
+    if(sd.length) { const a = avg(sd); ins.push([a >= settings.stepsGoal ? "ok" : "sun", `Шагов в среднем ${fmtNum(a)} в день при цели ${fmtNum(settings.stepsGoal)}.` + (a < settings.stepsGoal ? " Добавьте прогулку после ужина: это плюс 1 500–2 000 шагов." : "")]); }
+    if(sl.length >= 2){
+      const am = avg(sl.map(x=>x.min)), starts = sl.map(x=>bedMin(x.start)), spread = Math.max(...starts) - Math.min(...starts);
+      ins.push([am >= 420 ? "ok" : "warn", `Сон в среднем ${fmtDur(Math.round(am))}.` + (am < 420 ? " Взрослым обычно нужно 7–9 часов." : "") + (spread > 90 ? ` Время засыпания гуляет на ${Math.round(spread/6)/10} ч; ровный отбой помогает легче вставать.` : " Время отбоя стабильное.")]);
+    }
+    if(eGood.length >= 2 && eBad.length >= 2){ const df = avg(eGood) - avg(eBad); if(df > 0.2) ins.push(["ok", `После ночей от 7 часов энергия выше в среднем на ${df.toFixed(1)} балла.`]); }
+  }
   if(eM.length >= 2 && eR.length >= 2){
     const diff = avg(eM) - avg(eR);
     ins.push([diff > 0 ? "ok" : "sun", diff > 0.2 ? `В дни с движением энергия выше в среднем на ${diff.toFixed(1)} балла. Движение вам реально помогает.` : `Пока разницы в энергии между днями с движением и без почти нет. Продолжайте отмечать, картина станет точнее.`]);
@@ -269,7 +370,12 @@ function renderStats(){
   $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + ins.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("");
 }
 
-function renderMore(){ $("subtitle").textContent = "Цели, напоминания, копия"; renderReminders(); }
+function renderMore(){
+  $("subtitle").textContent = "Цели, уведомления, копия";
+  renderReminders(); renderHealthCard();
+  $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
+  if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; }
+}
 
 const TITLES = {today:"Сегодня", week:"Неделя", stats:"Итоги", more:"Ещё"};
 function render(){
@@ -277,6 +383,7 @@ function render(){
   document.querySelectorAll("#tabbar button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   $("title").textContent = TITLES[tab];
   if(tab==="today") renderToday(); else if(tab==="week") renderWeek(); else if(tab==="stats") renderStats(); else renderMore();
+  syncNative();
 }
 
 /* ---------- calendar ---------- */
@@ -316,6 +423,7 @@ function buildIcs(key){
   L.push("END:VCALENDAR"); return L.join("\r\n");
 }
 function download(name, text, type){
+  if(NATIVE){ let ok = false; try{ ok = NATIVE.saveFile(name, text, type); }catch(e){} toast(ok ? "Файл сохранён в «Загрузки»" : "Не удалось сохранить файл"); return; }
   const url = URL.createObjectURL(new Blob([text], {type})), a = document.createElement("a");
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
@@ -324,14 +432,14 @@ $("icsWeek").onclick = async () => {
   if(!getWeek(key).items.some(i=>!i.done)){ toast("На этой неделе нет несделанных дел"); return; }
   const text = buildIcs(key), name = "ritm-"+key+".ics";
   try{ const file = new File([text], name, {type:"text/calendar"}); if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Ритм недели"}); return; } }catch(e){ if(e && e.name==="AbortError") return; }
-  download(name, text, "text/calendar"); toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
+  download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
 };
 
 /* ---------- backup ---------- */
 $("exportBtn").onclick = () => {
   const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}};
   for(const k of LS.keys()) data.entries[k] = LS.get(k);
-  download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); toast("Копия сохранена в загрузках");
+  download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); if(!NATIVE) toast("Копия сохранена в загрузках");
 };
 $("importFile").onchange = async e => {
   const f = e.target.files && e.target.files[0]; e.target.value = ""; if(!f) return;
@@ -357,9 +465,12 @@ document.addEventListener("click", e => {
   else if(ds.edit){ const k = keyOfItem(ds.edit); openItem(k, findIn(getWeek(k), ds.edit)); }
   else if(ds.add){ openItem(ds.week || curKey(), {id:null, day:+ds.add, cat:"walk", t:"", time:""}); }
   else if(ds.jump){ const el = $("day"+ds.jump); if(el) el.scrollIntoView({behavior:"smooth", block:"start"}); }
-  else if(ds.hab){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.hab] = !w.days[d][ds.hab]; }); }
+  else if(ds.hab){ const k = curKey(); mutate(k, w => { const d = todayI(); const cur = ds.hab==="sleep" ? sleepOk(w,k,d) : !!(w.days[d]||{})[ds.hab]; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.hab] = !cur; }); }
   else if(ds.sc){ mutate(curKey(), w => { const d = todayI(), v = +ds.v; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.sc] = w.days[d][ds.sc]===v ? null : v; }); }
   else if(ds.light){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{}), light:true}; }); toast("Отмечено: дневной свет"); }
+  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
+  else if(ds.steps){ settings.stepsGoal = Math.max(2000, Math.min(20000, settings.stepsGoal + +ds.steps)); persistSettings(); render(); }
+  else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"offline", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
   else if(ds.dismiss){ dismissed.add(ds.dismiss); render(); }
   else if(ds.snext){ offsets[ds.snext] = (offsets[ds.snext]||0) + 1; render(); }
   else if(ds.sadd){ const s = lastSugg[+ds.sadd]; if(!s) return; const tm = s.idea.time && s.idea.time > nowHM() ? s.idea.time : "";
@@ -453,12 +564,39 @@ function openIntro(){
 let toastT = null;
 function toast(msg){ const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
 
+/* ---------- android app bridge ---------- */
+window.__ritmNative = {
+  onHealth(json){
+    try{ const d = JSON.parse(json); if(d.error) return;
+      health = {steps:d.steps||{}, sleep:d.sleep||{}, stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
+      LS.set("health", health); render();
+    }catch(e){}
+  },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} render(); },
+  onNotifPermission(ok){
+    if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
+    else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
+    render();
+  }
+};
+if(NATIVE){
+  $("nToggle").onclick = () => {
+    if(settings.notify){ settings.notify = false; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, false); }catch(e){} toast("Уведомления выключены"); render(); }
+    else { try{ NATIVE.requestNotifications(); }catch(e){} }
+  };
+  $("nTest").onclick = () => { syncNative(); try{ NATIVE.testNotification(); }catch(e){} };
+  const saveTimes = () => { settings.morning = $("nMorning").value || settings.morning; settings.evening = $("nEvening").value || settings.evening; persistSettings(); if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Время сохранено"); };
+  $("nMorning").onchange = saveTimes; $("nEvening").onchange = saveTimes;
+  try{ NATIVE.refreshHealth(); }catch(e){}
+  if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){}
+}
+
 /* ---------- install & offline ---------- */
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; $("installBtn").hidden = false; });
 $("installBtn").onclick = async () => { if(!deferredPrompt) return; deferredPrompt.prompt(); try{ await deferredPrompt.userChoice; }catch(e){} deferredPrompt = null; $("installBtn").hidden = true; };
 window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; toast("Ритм недели установлен"); });
-if("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 document.addEventListener("visibilitychange", () => { if(!document.hidden){ dismissed = new Set(); render(); } });
 
 render();

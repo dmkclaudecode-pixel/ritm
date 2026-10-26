@@ -29,6 +29,7 @@
   <!-- TODAY -->
   <main id="tab-today" class="tab">
     <section class="hero" id="todayHero"></section>
+    <section class="card" id="bodyCard" hidden></section>
     <section class="block">
       <div class="bhead"><h2>Мои дела на сегодня</h2></div>
       <div class="items" id="todayItems"></div>
@@ -64,6 +65,14 @@
       <h2>Цели</h2>
       <p class="note">Сколько раз в неделю вы хотите двигаться, общаться и отдыхать. По этим числам приложение считает, чего не хватает.</p>
       <div class="tools"><button class="btn primary" id="goalsBtn">Изменить цели</button></div>
+    </section>
+    <section class="card" id="healthCard" hidden></section>
+    <section class="card" id="nativeRem" hidden>
+      <h2>Уведомления</h2>
+      <p class="note">Утром приложение пришлёт план на день, а вечером напомнит, что осталось и чего не хватает до целей недели.</p>
+      <div class="remrow"><span class="rl"><b>Утро</b><span class="note">План на день</span></span><input type="time" id="nMorning" aria-label="Время утреннего уведомления"></div>
+      <div class="remrow"><span class="rl"><b>Вечер</b><span class="note">Отметить день</span></span><input type="time" id="nEvening" aria-label="Время вечернего уведомления"></div>
+      <div class="tools"><button class="btn primary" id="nToggle">Включить уведомления</button><button class="btn" id="nTest">Прислать пробное</button></div>
     </section>
     <section class="card" id="remCard">
       <h2>Напоминания</h2>
