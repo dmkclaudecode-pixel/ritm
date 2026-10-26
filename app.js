@@ -997,6 +997,8 @@ function respond(text){
     return;
   }
   if(contextReply(text, s, A, pre)) return;
+  // «еду на работу», «жена приготовила ужин», «заказал пиццу»: не запись о деле (если нет цифр и явного времени)
+  if(A.notMine && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ ruleMiss = false; return bot(chattyReply(null)); }
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
   if(A.meta === "tooEarly" && !hasSureAct){
     settings.statsHold = Math.max(settings.statsHold || 0, startedAt() + 14*86400000); persistSettings();

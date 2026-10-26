@@ -25,4 +25,5 @@ for(const [t, exp] of NLU){
 }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
-process.exit(bad ? 1 : 0);
+require("./stress.js");
+process.exit(bad || process.exitCode ? 1 : 0);
