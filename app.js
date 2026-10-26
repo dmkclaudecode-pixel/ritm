@@ -629,8 +629,53 @@ function llmJudge(text, done){
   const ctx = hist.map(m => ({role: m.who === "me" ? "user" : "assistant", content: String(m.text || "").slice(0, 300)}));
   llmCall([{role:"system", content:LLM_SYS}, ...ctx, {role:"user", content:"Последнее сообщение пользователя: " + text}], done);
 }
+/* ---------- ответы моделью: правила считают и записывают, модель говорит ---------- */
+const replyOn = () => llmOn() && llmCfg().reply !== false;
+function replyContext(){
+  const w = getWeek(curKey()), ti = todayI(), now = new Date();
+  const plan = w.items.filter(i => i.day === ti).slice(0, 8).map(i => (i.done ? "[сделано] " : "[в плане] ") + i.t + (i.time ? " в " + i.time : "")).join("; ") || "ничего не запланировано";
+  const st = stepsFor(dateOf(curKey(), ti));
+  return "Сейчас " + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ". Сегодня: " + plan + "." + (st != null ? " Шагов сегодня: " + st + "." : "");
+}
+const REPLY_SYS = "Ты — Ритм, добрый собеседник в приложении для недельного планирования и здоровья. Ты говоришь по-русски, коротко: одно-два предложения, без списков и эмодзи. " +
+  "Тебе дают сообщение человека и то, что приложение уже сделало или хотело ответить (шаблон). Ответь человеку естественно, своими словами. " +
+  "Все числа, названия занятий и смысл из шаблона сохрани, ничего нового не выдумывай и не называй цифры, которых нет в шаблоне или контексте. " +
+  "Если приложение ничего не записало, просто поддержи разговор и, если уместно, предложи написать, что человек делал. Медицинских назначений не давай.";
+const numsOf = t => (String(t).match(/\d+(?:[.,]\d+)?/g) || []).map(x => x.replace(",", "."));
+function llmReply(text, plain){
+  const ids = plain.map(m => m.id), facts = plain.map(m => m.text).join(" ");
+  if(facts.includes("\n") || numsOf(facts).length > 4 || facts.length > 500) return;            // сложные ответы со списками и статистикой оставляем как есть
+  const hist = getChat().filter(m => m.text && !ids.includes(m.id) && m.at < plain[0].at && !(m.who === "me" && m.text === text)).slice(-4);
+  const ctx = replyContext();
+  const apply = r => {
+    r = String(r || "").replace(/<\|[^|]*\|>/g, "").replace(/^(ответ|ритм)\s*:\s*/i, "").replace(/\s+/g, " ").trim();
+    if(r.length < 2) return; if(r.length > 320) r = r.slice(0, r.lastIndexOf(" ", 300) > 0 ? r.lastIndexOf(" ", 300) : 300) + "…";
+    const have = new Set(numsOf(r)); if(!numsOf(facts).every(n => have.has(n))) return;              // модель потеряла или исказила число — оставляем шаблон
+    const arr = getChat(), last = arr.find(x => x.id === ids[ids.length - 1]); if(!last || last.acts) return;
+    last.text = r; last.llm = true;
+    saveChat(arr.filter(x => !(ids.includes(x.id) && x.id !== last.id))); render(); scrollChat(); };
+  const user = "Сообщение человека: " + text + "\nШаблон приложения: " + facts;
+  if(llmMode() === "local"){
+    const h = hist.map(m => "<|im_start|>" + (m.who === "me" ? "user" : "assistant") + "\n" + String(m.text).slice(0, 160) + "<|im_end|>").join("\n");
+    const prompt = "<|im_start|>system\n" + REPLY_SYS + "\nКонтекст: " + ctx + "<|im_end|>\n" + h + "\n<|im_start|>user\n" + user + "<|im_end|>\n<|im_start|>assistant\n";
+    const id = ++llmSeq; const to = setTimeout(() => { delete llmWait[id]; }, 120000);
+    llmWait[id] = (status, out) => { clearTimeout(to); if(status === 200) apply(out); };
+    try{ NATIVE.llmLocalAsk(id, prompt); }catch(e){ clearTimeout(to); delete llmWait[id]; }
+  } else {
+    const c = llmCfg(); if(!c.key) return;
+    const msgs = [{role:"system", content:REPLY_SYS + "\nКонтекст: " + ctx}, ...hist.map(m => ({role: m.who === "me" ? "user" : "assistant", content: String(m.text).slice(0, 300)})), {role:"user", content:user}];
+    const body = JSON.stringify({model:"deepseek-chat", messages:msgs, temperature:0.5, max_tokens:160});
+    const id = ++llmSeq; llmWait[id] = (status, out) => { if(status >= 200 && status < 300){ try{ apply(JSON.parse(out).choices[0].message.content); }catch(e){} } };
+    if(NATIVE && NATIVE.llmRequest){ try{ NATIVE.llmRequest(id, LLM_URL, c.key, body); }catch(e){ delete llmWait[id]; } }
+    else fetch(LLM_URL, {method:"POST", headers:{"Content-Type":"application/json", Authorization:"Bearer " + c.key}, body}).then(async r => llmWait[id] && llmWait[id](r.status, await r.text())).catch(() => { delete llmWait[id]; });
+  }
+}
 function respond(text){
   const t0 = Date.now(); respondRules(text);
+  if(replyOn()){
+    const plain = getChat().filter(m => m.who === "bot" && m.at >= t0 - 50 && m.text && !m.acts && !m.kind);
+    if(plain.length) llmReply(text, plain);
+  }
   if(!llmOn() || /\d/.test(text)) return;
   const L = LS.get("lastLog"); if(!L || L.at < t0) return;                       // правила ничего не записали
   llmJudge(text, (v, err) => {
@@ -657,6 +702,7 @@ function renderLlm(){
   $("llmDl").textContent = llmDl && llmDl.err ? "Повторить скачивание" : "Скачать модель (1,6 ГБ)";
   $("llmBar").hidden = !(llmDl && !llmDl.err); $("llmBarFill").style.width = (llmDl ? llmDl.pct : 0) + "%";
   t.textContent = c.on ? "Включён" : "Выключен"; t.classList.toggle("primary", !!c.on);
+  $("llmReply").textContent = c.reply === false ? "Отвечает: правила" : "Отвечает: модель"; $("llmReply").classList.toggle("primary", c.reply !== false);
   if(NATIVE && !canLocal && !$("llmNote").textContent) $("llmNote").textContent = "В этой версии приложения нет модели на телефоне. Она есть в отдельном файле ritm-local.apk (только для 64-битных телефонов).";
   if(mode === "local" && !(llmDl && !llmDl.err) && !$("llmNote").textContent) $("llmNote").textContent = sz > 1e9 ? "Модель скачана." : (sz > 0 ? "Скачано не полностью, нажмите «Скачать» ещё раз, докачается." : "");
 }
@@ -665,6 +711,7 @@ $("llmModeLocal").onclick = () => setMode("local"); $("llmModeCloud").onclick = 
 $("llmKey").onchange = () => { const c = llmCfg(); c.key = $("llmKey").value.trim(); LS.set("llm", c); $("llmNote").textContent = c.key ? "Ключ сохранён." : ""; };
 $("llmDl").onclick = () => { llmDl = {pct:0}; $("llmNote").textContent = "Скачиваю. Можно закрыть экран, но приложение лучше не выгружать."; renderLlm(); try{ NATIVE.llmLocalDownload(LOCAL_MODEL_URL); }catch(e){ llmDl = {pct:0, err:"нет доступа"}; renderLlm(); } };
 $("llmDel").onclick = () => { try{ NATIVE.llmLocalDelete(); }catch(e){} const c = llmCfg(); c.on = false; LS.set("llm", c); llmDl = null; $("llmNote").textContent = "Модель удалена."; renderLlm(); };
+$("llmReply").onclick = () => { const c = llmCfg(); c.reply = c.reply === false; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.reply === false ? "Отвечает бот по шаблонам. Модель только проверяет записи." : "Бот пишет ответы своими словами через модель (записывают по-прежнему правила). Пока модель думает, виден шаблонный ответ, потом он заменится."; };
 $("llmToggle").onclick = () => { const c = llmCfg(); if(!c.on && !llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Сначала скачайте модель." : "Сначала вставьте ключ."; return; } c.on = !c.on; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено. Проверяю только то, что бот записал по тексту без цифр." : "Выключено, бот работает по правилам."; };
 $("llmTest").onclick = () => { const c = llmCfg(); if(llmMode() === "cloud"){ c.key = $("llmKey").value.trim(); LS.set("llm", c); }
   if(!llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Модель ещё не скачана." : "Нет ключа."; return; }

@@ -132,7 +132,7 @@
     <section class="card" id="actsCard"></section>
     <section class="card" id="llmCard">
       <h2>Умный разбор</h2>
-      <p class="note">Необязательно. Когда бот что-то записал по тексту без цифр, нейросеть решает: это правда дело или просто разговор. Если разговор, запись убирается. Сон, еда и данные здоровья не используются, только текст сообщений.</p>
+      <p class="note">Необязательно. Нейросеть пишет ответы бота своими словами, а когда бот что-то записал по тексту без цифр, решает: это правда дело или просто разговор. Если разговор, запись убирается. Сон, еда и данные здоровья не используются, только текст сообщений.</p>
       <div class="tools"><button class="btn" id="llmModeLocal">На телефоне</button><button class="btn" id="llmModeCloud">DeepSeek (онлайн)</button></div>
       <div id="llmLocalBox">
         <p class="note">Модель Qwen2.5 1.5B (лицензия Apache 2.0) работает полностью на телефоне и без интернета. Нужно один раз скачать 1,6 ГБ (лучше по Wi-Fi). Ответ занимает несколько секунд, телефон при этом может греться.</p>
@@ -143,6 +143,7 @@
         <p class="note">Текст сообщений уходит в DeepSeek. Ключ хранится только на этом телефоне и не попадает в копии.</p>
         <div class="field"><label class="label" for="llmKey">API-ключ DeepSeek</label><input id="llmKey" type="password" autocomplete="off" placeholder="sk-…"></div>
       </div>
+      <div class="tools"><button class="btn" id="llmReply">Отвечает: модель</button></div>
       <div class="tools"><button class="btn" id="llmToggle">Выключен</button><button class="btn" id="llmTest">Проверить</button></div>
       <p class="note" id="llmNote"></p>
     </section>
