@@ -197,6 +197,9 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface fun setCheckins(json: String) = Checkins.set(this@MainActivity, json)
+        @JavascriptInterface fun setWatch(json: String) = Watcher.configure(this@MainActivity, json)
+        @JavascriptInterface fun nudges(): String = Watcher.history(this@MainActivity).toString()
+        @JavascriptInterface fun testWatch() = Watcher.check(this@MainActivity)
         @JavascriptInterface fun consumeFired(): String = Checkins.consumeFired(this@MainActivity)
         @JavascriptInterface fun consumeInbox(): String = Checkins.consumeInbox(this@MainActivity)
         @JavascriptInterface fun testCheckin() = Checkins.show(this@MainActivity, "Что делаешь?", "Проверка: так будут выглядеть вопросы днём. Можно ответить прямо отсюда.")

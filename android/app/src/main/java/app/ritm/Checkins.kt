@@ -139,6 +139,19 @@ object Checkins {
         try { NotificationManagerCompat.from(ctx).notify(nid, done) } catch (e: SecurityException) { }
     }
 
+    fun addBot(ctx: Context, text: String, kind: String) = synchronized(lock) {
+        val arr = try { JSONArray(prefs(ctx).getString("fired", "[]")) } catch (e: Exception) { JSONArray() }
+        val now = System.currentTimeMillis()
+        arr.put(JSONObject().put("id", "b$now").put("at", now).put("firedAt", now).put("text", text).put("kind", kind))
+        prefs(ctx).edit().putString("fired", arr.toString()).apply()
+    }
+
+    fun addMe(ctx: Context, text: String, kind: String) = synchronized(lock) {
+        val arr = try { JSONArray(prefs(ctx).getString("inbox", "[]")) } catch (e: Exception) { JSONArray() }
+        arr.put(JSONObject().put("text", text).put("at", System.currentTimeMillis()).put("ctx", kind))
+        prefs(ctx).edit().putString("inbox", arr.toString()).apply()
+    }
+
     private fun consume(ctx: Context, key: String): String = synchronized(lock) {
         val v = prefs(ctx).getString(key, "[]") ?: "[]"
         prefs(ctx).edit().putString(key, "[]").apply()

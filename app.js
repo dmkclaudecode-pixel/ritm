@@ -207,7 +207,7 @@ function autoFill(key){
       if(best < 0) break;
       const idea = ideasFor(c, best, null, off++, recent) || {t:CATS[c].n, time:""};
       recent.add(idea.t);
-      w.items.push({id:uid(), day:best, cat:c, t:idea.t, time:idea.time||"", done:false});
+      w.items.push({id:uid(), day:best, cat:c, t:idea.t, time:smartTime(c, best, idea.time||""), done:false});
       load[best]++; added.push(idea.t); need--;
     }
   }
@@ -407,6 +407,7 @@ function renderStats(){
   const games = w.items.filter(i=>isScreen(i.cat)), late = games.filter(i=>i.time && i.time >= settings.screensOff);
   if(late.length) ins.push(["warn", `Игры после ${settings.screensOff} стоят ${late.length} ${plural(late.length,"раз","раза","раз")}. Это мешает заснуть; лучше сдвинуть раньше.`]);
   if(NATIVE) for(const x of weekScreenInsights(ck, ti)) ins.push(x);
+  if(NATIVE){ const ns = nudgeStats(new Date(ck+"T00:00:00").getTime(), Date.now()+1); if(ns.n) ins.push([ns.ignored > ns.obeyed ? "warn" : "ok", `За неделю я ${ns.n} ${plural(ns.n,"раз","раза","раз")} просил сделать перерыв: послушался ${ns.obeyed}, по работе ${ns.exempt}, проигнорировал ${ns.ignored}` + (ns.promisedIgnored ? ` (из них ${ns.promisedIgnored} — после обещания выключить)` : "") + "."]); }
   $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + ins.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("");
 }
 
@@ -416,6 +417,7 @@ function renderMore(){
   $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
   if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; $("nTestReview").hidden = !settings.notify;
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
+    $("nWatch").innerHTML = [[0,"Выкл"],[30,"Строго"],[40,"Обычно"],[60,"Мягко"]].map(([v,l]) => `<button class="${(settings.watchMin ?? 40)===v?"on":""}" data-watch="${v}">${l}</button>`).join("");
     $("nWake").value = settings.wake || "08:00"; $("nLunch").value = settings.lunch || "13:00";
     $("nFreq").innerHTML = [[0,"Не писать"],[1,"Только утром"],[2,"Обычно"],[3,"Часто"],[4,"Очень часто"]].map(([v,l]) => `<button class="${(settings.checkins ?? 2)===v?"on":""}" data-freq="${v}">${l}</button>`).join("");
     $("nReviewToggle").textContent = settings.reviewOn ? "Включён" : "Выключен"; $("nReviewToggle").classList.toggle("primary", !!settings.reviewOn);
@@ -424,11 +426,12 @@ function renderMore(){
 
 const TITLES = {chat:"Ритм", today:"Сегодня", review:"Разбор дня", week:"Неделя", stats:"Итоги", more:"Ещё"};
 function render(){
+  applyRecurring(curKey()); applyRecurring(iso(addDays(new Date(curKey()+"T00:00:00"),7)));
   for(const t of Object.keys(TITLES)) $("tab-"+t).hidden = t !== tab;
   document.querySelectorAll("#tabbar button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   $("title").textContent = TITLES[tab];
   if(tab==="chat") renderChat(); else if(tab==="today") renderToday(); else if(tab==="review") renderReview(); else if(tab==="week") renderWeek(); else if(tab==="stats") renderStats(); else renderMore();
-  syncNative(); syncCheckins();
+  syncNative(); syncCheckins(); syncWatch();
   document.body.classList.toggle("inchat", tab === "chat");
 }
 
@@ -727,6 +730,7 @@ function runAction(msgId, i){
   let reply = "";
   if(a.op === "move"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.day = a.day; }); reply = `Перенёс «${a.t}» ${DACC[a.day]}.`; }
   else if(a.op === "remove"){ mutateQuiet(a.key, w => { w.items = w.items.filter(x=>x.id!==a.id); }); reply = `Убрал «${a.t}» из плана.`; }
+  else if(a.op === "rskip"){ const r = getRoutine(); r.asked[a.k] = true; r.pending = null; saveRoutine(r); reply = "Хорошо, пропустим. Расскажешь потом, если захочешь."; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
     const pend = (m.pending||[])[a.idx]; if(pend){ pend.type = a.type; pend.changed = true; pend.wasUnknown = true; fillDefaults(pend);
@@ -778,11 +782,15 @@ function addPlanFromChat(e, date){
 // ---------- understanding a message ----------
 function respond(text){
   const s = nrm(text);
+  if(routineAnswer(text)) return;
+  if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
+  if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   // small talk & commands
   if(/^ (привет|здравств|хай|добр(ое|ый|ой)|салют|йо) /.test(s)) return bot(`${pick(["Привет!","Привет-привет!","Здравствуй!"])} ${planText(new Date())}`);
   if(/ (спасибо|спс|благодарю) /.test(s) && s.length < 30) return bot(pick(["Пожалуйста!","Обращайся!","Всегда рад помочь."]));
   if(/ (помощь|помоги|что ты умеешь|как пользоваться|help) /.test(s)) return bot(HELP_TEXT);
   if(/ (разбор|подведи итог|подвести итог|итоги дня) /.test(s)) return bot("Давай подведём итоги дня.", [act("Открыть разбор", {op:"review"})]);
+  if(/^ (что|какой|какие|покажи|план)/.test(s) && dayFromText(text) && !RITM.parse(text).some(e=>e.type)) return bot(planText(dayFromText(text)));
   if(/ (что|какой|какие|покажи) .*(план|сегодня|по плану)|^ план /.test(s) && !/ завтра /.test(s) && !RITM.parse(text).some(e=>e.type && !/ (что|какой|какие) /.test(nrm(e.text)) )) return bot(planText(new Date()));
   if(/ (что|какой|покажи|план) .*завтра| завтра что /.test(s) && !/ (будет|буду|пойду) /.test(s)) return bot(planText(addDays(new Date(),1)));
   if(/ (как|что) .*(недел)| недел[яюи] /.test(s) && / (как|что|итог|цел) /.test(s)) return bot(weekText());
@@ -793,6 +801,7 @@ function respond(text){
   if(rm) return removeCommand(rm[2]);
   if(/^ (ничего|ничем|отдыхаю|просто отдыхаю|ничего особенного) /.test(s)) return bot(pick(["Отдых тоже важен. Если захочется движения, короткая прогулка на 15 минут отлично перезагружает.","Понял. Если что-то будешь делать, напиши, я запишу."]));
 
+  if(routineStatement(text)) return;
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
   const entries = RITM.parse(text);
@@ -890,7 +899,7 @@ function removeCommand(what){
   const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}».`);
   bot(`Убрать «${f.it.t}» (${DACC[f.it.day]}) из плана?`, [act("Да, убрать", {op:"remove", key:f.key, id:f.it.id, t:f.it.t}), act("Нет", {op:"keep"})]);
 }
-const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
+const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
 
 // ---------- check-ins: messages from Ritm during the day ----------
 function wakeTime(){
@@ -908,12 +917,12 @@ function buildCheckins(){
     const date = addDays(new Date(), off); date.setHours(0,0,0,0);
     const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key);
     const its = w.items.filter(i=>i.day===d && !i.done).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
-    const wake = toMinHM(wakeTime()), bed = bedMin(usualBedtime().hm) % 1440 || 1410, end = (bed < 6*60 ? bed + 1440 : bed) - 60;
+    const wake = toMinHM(wakeFor(d)), bed = bedMin(usualBedtime().hm) % 1440 || 1410, end = (bed < 6*60 ? bed + 1440 : bed) - 60;
     const jit = n => (hash(iso(date)+n) % 21) - 10;
     const slots = [];
     const planLine = its.length ? "Сегодня в плане: " + its.slice(0,3).map(i => (i.time ? i.time+" " : "") + lc(i.t)).join(", ") + "." : "В плане сегодня пусто. Чем займёмся?";
     slots.push({m: wake + 60 + jit("m"), kind:"morning", title:"Доброе утро!", text: planLine + " Как спалось?"});
-    if(freq >= 2) slots.push({m: toMinHM(settings.lunch || "13:00") + jit("l"), kind:"lunch", title:"Время обеда", text: pick(["Пора пообедать. Что будет на обед?","Обеденное время! Что сегодня на обед?","Не забудь пообедать. Что ешь сегодня?"])});
+    if(freq >= 2) slots.push({m: toMinHM(getRoutine().lunch || settings.lunch || "13:00") + jit("l"), kind:"lunch", title:"Время обеда", text: pick(["Пора пообедать. Что будет на обед?","Обеденное время! Что сегодня на обед?","Не забудь пообедать. Что ешь сегодня?"])});
     if(freq >= 2) for(const i of its.filter(i=>i.time && CATS[i.cat] && (CATS[i.cat].move || CATS[i.cat].grp==="social")).slice(0,2))
       slots.push({m: toMinHM(i.time) - 60, kind:"before", title:`Через час: ${lc(i.t)}`, text:`В ${i.time} по плану «${i.t}». Всё в силе? Если планы поменялись, напиши.`});
     if(freq >= 3) slots.push({m: 11*60 + jit("a"), kind:"doing", title:"Как дела?", text: pick(["Что делаешь?","Чем занят?","Как идёт день?"]) + " Не забывай про воду."});
@@ -921,6 +930,7 @@ function buildCheckins(){
     if(freq >= 4) slots.push({m: 19*60 + 30 + jit("c"), kind:"doing", title:"Как вечер?", text: "Как вечер? Что делаешь?"});
     for(const sl of slots){
       if(sl.m < wake + 30 || sl.m > end) continue;
+      if(sl.kind === "doing" && busyAt(d, fromMin(sl.m))){ sl.title = "Как работа?"; sl.text = pick(["Как работа? Не забывай раз в час вставать и пить воду.","Как идёт рабочий день? Сделай паузу на пару минут: встань, потянись, попей воды."]); }
       const at = date.getTime() + sl.m*60000; if(at < now + 60000) continue;
       if(out.some(x => Math.abs(x.at - at) < 50*60000)) continue;
       out.push({id: iso(date)+"-"+sl.kind+"-"+sl.m, at, title:sl.title, text:sl.text, kind:sl.kind});
@@ -943,7 +953,7 @@ function pullNative(){
   const all = fired.map(f => ({t:f.firedAt || f.at, f})).concat(inbox.map(m => ({t:m.at, m}))).sort((a,b)=>a.t-b.t);
   for(const x of all){
     if(x.f) pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t});
-    else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); respond(x.m.text); }
+    else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); if(x.m.ctx !== "nudge") respond(x.m.text); }
   }
   if(all.length) render();
 }
@@ -953,6 +963,7 @@ function fmtTime(ms){ const d = new Date(ms); const t = new Date(); const same =
 function renderChat(){
   $("subtitle").textContent = "Пиши как другу: что делал и что планируешь";
   let arr = getChat();
+  if(arr.length && askRoutine()) arr = getChat();
   if(!arr.length){ bot("Привет! Я Ритм. Пиши мне обычными словами, что делал или что планируешь. Например: «выпил кофе в 9:30», «сегодня бассейн в 18», «что сегодня?». Я всё запишу, подскажу и днём иногда буду спрашивать, как дела.", [act("Что я умею", {op:"help"})]); arr = getChat(); }
   const view = arr.slice(-120);
   let html = "", lastDay = "";
@@ -985,6 +996,226 @@ function chatClick(ds){
   return false;
 }
 
+/* ---------- routine: learn the daily schedule by asking ---------- */
+const nrt = s => " " + String(s).toLowerCase().replace(/ё/g,"е").replace(/[!?;()«»"]/g," ").replace(/,/g," , ").replace(/\s+/g," ").trim() + " ";
+const getRoutine = () => LS.get("routine") || {asked:{}, recurring:[]};
+const saveRoutine = r => LS.set("routine", r);
+const WD_ABBR = [["пн","понедельник"],["вт","вторник"],["ср","сред"],["чт","четверг"],["пт","пятниц"],["сб","суббот"],["вс","воскресень"]];
+const hmFrom = (h, m) => pad(Math.min(23, +h)) + ":" + pad(+(m||0));
+function parseRange(s){
+  const r = /(?:^|\s)(?:с|c|от)?\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:до|-|–|—|по)\s*(\d{1,2})(?:[:.](\d{2}))?/.exec(s);
+  if(!r || +r[1] > 23 || +r[3] > 24) return null;
+  return {from:hmFrom(r[1], r[2]), to:hmFrom(+r[3] === 24 ? 0 : r[3], r[4])};
+}
+function parseOneTime(s){ const r = /(?:^|\s)(?:в|к|около)?\s*(\d{1,2})(?:[:.](\d{2}))?(?!\s*(?:мин|час|км|раз))/.exec(s); return r && +r[1] <= 23 ? hmFrom(r[1], r[2]) : null; }
+function parseDays(s){
+  s = nrm(s);
+  if(/ (не работаю|не учусь|нигде|безработ|на пенсии|в декрете|фриланс без графика) /.test(s)) return {days:[], none:true};
+  if(/ (2\/2|2 через 2|два через два|сменами|сутки через|посменно|вахт) /.test(s)) return {days:null, shift:s.trim()};
+  if(/ (каждый день|ежедневно|без выходных|7 дней|все дни) /.test(s)) return {days:[0,1,2,3,4,5,6]};
+  if(/ (пн ?[-–—] ?сб|понедельник[а-я]* по суббот|6 дней|шестидневк) /.test(s)) return {days:[0,1,2,3,4,5]};
+  if(/ (пн ?[-–—] ?пт|понедельник[а-я]* по пятниц|будн|5\/2|5 через 2|пятидневк|кроме выходных|обычная неделя|стандартн) /.test(s)) return {days:[0,1,2,3,4]};
+  const days = []; WD_ABBR.forEach(([a, f], i) => { if(new RegExp(" " + a + "(?=[ ,])").test(s) || s.includes(" " + f)) days.push(i); });
+  return days.length ? {days} : null;
+}
+const ROUTINE_QS = [
+  {k:"days", q:"Хочу лучше понимать твой распорядок, чтобы не дёргать в неподходящее время. В какие дни ты обычно работаешь или учишься? Например: «пн–пт», «2/2», «не работаю».",
+   parse(t, r){ const d = parseDays(t); if(!d) return null; r.workDays = d.days; r.shift = d.shift || null; r.noWork = !!d.none;
+     if(d.none){ r.asked.hours = true; r.asked.place = true; }
+     const rg = parseRange(nrt(t)); if(rg){ r.work = rg; r.asked.hours = true; }
+     return d.none ? "Понял, без рабочего графика." : d.shift ? "Понял, сменный график. Буду ориентироваться по тому, что ты пишешь." : `Понял: ${d.days.map(i=>DW[i].toLowerCase()).join(", ")}.`; }},
+  {k:"hours", q:"Во сколько обычно начинается и заканчивается рабочий день? Например: «с 9 до 18».",
+   parse(t, r){ const rg = parseRange(nrt(t)); if(!rg) return null; r.work = rg; return `Записал: работа с ${rg.from} до ${rg.to}.`; }},
+  {k:"place", q:"Работаешь из дома или ездишь в офис? И сколько примерно дорога в одну сторону?",
+   parse(t, r){ const s = nrm(t); let p = null;
+     if(/ (дом|удален|удаленн|из дома|удаленке|удаленно) /.test(s) || / удал/.test(s)) p = "home";
+     if(/ (офис|езжу|еду|на работу|на завод|в универ|на учеб) /.test(s)) p = p === "home" ? "mixed" : "office";
+     if(/ (гибрид|по-разному|по разному|иногда|когда как) /.test(s)) p = "mixed";
+     const cm = /(\d+)\s*(?:мин|минут)/.exec(s), ch = /(\d+(?:[.,]\d)?)\s*час/.exec(s);
+     const commute = / полчаса /.test(s) ? 30 : cm ? +cm[1] : ch ? Math.round(parseFloat(ch[1].replace(",","."))*60) : / час /.test(s) ? 60 : null;
+     if(!p && commute == null) return null; r.place = p || r.place || "office"; if(commute != null) r.commute = commute;
+     return (r.place === "home" ? "Удалёнка, понял." : r.place === "mixed" ? "Гибрид, понял." : "Понял, офис.") + (commute != null ? ` Дорога около ${commute} мин.` : ""); }},
+  {k:"wake", q:"Во сколько обычно встаёшь в будни, а во сколько в выходные? Например: «в 7:30, в выходные в 10».",
+   parse(t, r){ const s = nrt(t); const parts = s.split(/ (?:а )?(?:в )?выходн[а-я]* /);
+     const wd = parseOneTime(" " + parts[0] + " "), we = parts[1] ? parseOneTime(" " + parts[1] + " ") : null;
+     if(!wd && !we) return null; if(wd) r.wakeWd = wd; if(we) r.wakeWe = we; else if(wd && !r.wakeWe) r.wakeWe = wd;
+     return `Записал: подъём ${r.wakeWd || "?"} в будни` + (r.wakeWe ? `, ${r.wakeWe} в выходные.` : "."); }},
+  {k:"lunch", q:"Во сколько обычно обедаешь?",
+   parse(t, r){ const tm = parseOneTime(nrt(t)); if(!tm) return null; r.lunch = tm; return `Хорошо, обед около ${tm}. Тогда и буду напоминать.`; }},
+  {k:"train", q:"Когда тебе удобнее тренироваться: утром, в обед или вечером?",
+   parse(t, r){ const s = nrm(t); const p = / утр/.test(s) ? "morning" : / (в обед|обед|днем|днём|день)/.test(s) ? "lunch" : / (вечер|после работ)/.test(s) ? "evening" : / (по-разному|по разному|неважно|когда как|любое|без разницы)/.test(s) ? "any" : null;
+     if(!p) return null; r.train = p; const tm = parseOneTime(s); if(tm) r.trainTime = tm;
+     return {morning:"Утро, отлично: буду ставить тренировки до работы.", lunch:"Понял, в обед.", evening:"Вечер, понял: буду ставить тренировки после работы.", any:"Понял, буду подбирать по свободному времени."}[p]; }}
+];
+function routineKnown(r){ return ROUTINE_QS.filter(q => r.asked[q.k]).length; }
+function nextRoutineQ(r){ return ROUTINE_QS.find(q => !r.asked[q.k]); }
+function askRoutine(force){
+  const r = getRoutine(), q = nextRoutineQ(r); if(!q) return false;
+  const h = new Date().getHours(); if(!force && (h < 9 || h >= 23)) return false;
+  if(!force && Date.now() - (r.lastAsk||0) < 2*3600*1000) return false;
+  r.lastAsk = Date.now(); r.pending = q.k; saveRoutine(r);
+  bot(q.q, [act("Пропустить", {op:"rskip", k:q.k})], {kind:"routine:" + q.k});
+  return true;
+}
+function routineAnswer(text){
+  const r = getRoutine(); if(!r.pending) return false;
+  const last = getChat().filter(m=>m.who==="bot").slice(-1)[0];
+  if(!last || last.kind !== "routine:" + r.pending || Date.now() - last.at > 12*3600*1000) return false;
+  const s = nrm(text);
+  if(/ (пропуст|не знаю|потом|не хочу|не скажу|позже) /.test(s)){ r.asked[r.pending] = true; r.pending = null; saveRoutine(r); bot("Хорошо, пропустим. Если захочешь, расскажи потом: «я работаю с 10 до 19», «встаю в 8»."); return true; }
+  const q = ROUTINE_QS.find(x => x.k === r.pending);
+  const res = q.parse(text, r);
+  if(!res){ if(RITM.parse(text).some(e=>e.type)) return false; bot("Не совсем понял. " + q.q.split(". ").slice(-1)[0], [act("Пропустить", {op:"rskip", k:q.k})], {kind:"routine:" + q.k}); return true; }
+  r.asked[q.k] = true; r.pending = null; saveRoutine(r); applyRoutineToSettings(r);
+  const nx = nextRoutineQ(r);
+  if(nx){ r.pending = nx.k; r.lastAsk = Date.now(); saveRoutine(r); bot(res + " " + nx.q, [act("Пропустить", {op:"rskip", k:nx.k})], {kind:"routine:" + nx.k}); }
+  else bot(res + " Спасибо! Теперь я знаю твой распорядок и буду учитывать его в планах и вопросах. Посмотреть можно командой «что ты обо мне знаешь».");
+  return true;
+}
+// free statements anywhere in chat: «я работаю с 10 до 19», «по субботам футбол в 12», «в выходные встаю в 11»
+function routineStatement(text){
+  const s = nrt(text), r = getRoutine(); const said = [];
+  if(/ (работаю|работа|учусь|учеба|на работе|в офисе) /.test(s) && !/ (сегодня|сейчас|вчера) /.test(s)){
+    const rg = parseRange(s); if(rg){ r.work = rg; r.asked.hours = true; said.push(`работа с ${rg.from} до ${rg.to}`); }
+    const d = parseDays(s); if(d && (d.days || d.shift)){ r.workDays = d.days; r.shift = d.shift||null; r.asked.days = true; said.push(d.shift ? "сменный график" : "рабочие дни: " + d.days.map(i=>DW[i].toLowerCase()).join(", ")); }
+    if(/ (удален|из дома) /.test(s) || / удал/.test(s)){ r.place = "home"; r.asked.place = true; said.push("удалёнка"); }
+  }
+  const wk = / (встаю|просыпаюсь|подъем) /.test(s);
+  if(wk){ const parts = s.split(/ (?:а )?(?:в )?выходн[а-я]* /); const a = parseOneTime(" "+parts[0]+" "), b = parts[1] ? parseOneTime(" "+parts[1]+" ") : null;
+    if(/ выходн/.test(s) && !b && a){ r.wakeWe = a; said.push("подъём в выходные " + a); } else { if(a){ r.wakeWd = a; said.push("подъём " + a); } if(b){ r.wakeWe = b; said.push("в выходные " + b); } }
+    if(a || b) r.asked.wake = true; }
+  if(/ (обедаю|обед обычно|обычно обед) /.test(s)){ const tm = parseOneTime(s); if(tm){ r.lunch = tm; r.asked.lunch = true; said.push("обед в " + tm); } }
+  if(/ (ложусь|отбой|засыпаю) /.test(s) && / (обычно|всегда|как правило) /.test(s)){ const tm = parseOneTime(s); if(tm){ settings.bedtime = tm; persistSettings(); said.push("отбой в " + tm); } }
+  // regular activities: «по субботам футбол в 12», «каждый вторник йога»
+  const rec = / (по|каждый|каждую|каждое) (понедельник|вторник|сред|четверг|пятниц|суббот|воскресень|будням|выходным)[а-я]* /.exec(s);
+  if(rec){
+    const e = RITM.parse(text.replace(/по\s+\S+|кажд\S+\s+\S+/gi, " ")).find(x => x.type && TYPES[x.type].unit === "min");
+    if(e){
+      const dayList = rec[2] === "будням" ? [0,1,2,3,4] : rec[2] === "выходным" ? [5,6] : [WD_ABBR.findIndex(([,f]) => rec[2].startsWith(f.slice(0,4)))];
+      r.recurring = (r.recurring||[]).filter(x => !(dayList.includes(x.day) && x.type === e.type));
+      for(const d of dayList) if(d >= 0) r.recurring.push({day:d, type:e.type, name:e.name, time:e.time||""});
+      said.push(`регулярно: ${lc(e.name)} ${rec[2] === "будням" ? "по будням" : rec[2] === "выходным" ? "по выходным" : DACC[dayList[0]]}${e.time ? " в "+e.time : ""}`);
+      saveRoutine(r); applyRecurring(curKey(), true); applyRecurring(iso(addDays(new Date(curKey()+"T00:00:00"),7)), true);
+    }
+  }
+  if(!said.length) return false;
+  saveRoutine(r); applyRoutineToSettings(r);
+  bot("Запомнил: " + said.join(", ") + ".");
+  // a new regular activity may clash with this week's plan
+  if(rec){ const ck = curKey(), w = getWeek(ck);
+    for(const x of (r.recurring||[]).filter(x => x.day >= todayI())){
+      const c = w.items.find(i => i.day===x.day && !i.done && i.cat!==x.type && MAJOR.has(i.cat) && MAJOR.has(x.type));
+      if(c){ const bd = bestDayInWeek(ck, c.cat, todayI(), x.day); const acts = [];
+        if(bd >= 0) acts.push(act(`Перенести ${DACC[bd]}`, {op:"move", key:ck, id:c.id, day:bd, t:c.t}));
+        acts.push(act("Убрать", {op:"remove", key:ck, id:c.id, t:c.t}), act("Оставить обе", {op:"keep"}));
+        bot(`На этой неделе ${DACC[x.day]} уже стоит «${c.t}». Что с ним сделать?`, acts); break; } } }
+  return true;
+}
+function routineSummary(){
+  const r = getRoutine(), L = [];
+  if(r.noWork) L.push("Работы по графику нет.");
+  else if(r.shift) L.push("График сменный.");
+  else if(r.workDays) L.push("Работаешь: " + r.workDays.map(i=>DW[i].toLowerCase()).join(", ") + (r.work ? `, с ${r.work.from} до ${r.work.to}` : "") + ".");
+  if(r.place) L.push({home:"Удалёнка.", office:"Ездишь в офис.", mixed:"Гибрид: то дома, то в офисе."}[r.place] + (r.commute ? ` Дорога около ${r.commute} мин.` : ""));
+  if(r.wakeWd) L.push(`Встаёшь в ${r.wakeWd}` + (r.wakeWe && r.wakeWe !== r.wakeWd ? `, в выходные в ${r.wakeWe}` : "") + ".");
+  L.push(`Обычно ложишься около ${usualBedtime().hm}.`);
+  if(r.lunch) L.push(`Обед около ${r.lunch}.`);
+  if(r.train) L.push("Тренироваться удобнее " + {morning:"утром", lunch:"в обед", evening:"вечером", any:"когда есть время"}[r.train] + ".");
+  for(const x of r.recurring||[]) L.push(`Регулярно ${DACC[x.day]}: ${lc(x.name)}${x.time ? " в "+x.time : ""}.`);
+  const left = ROUTINE_QS.filter(q => !r.asked[q.k]).length;
+  return (L.length ? "Вот что я о тебе знаю:\n" + L.join("\n") : "Я пока мало о тебе знаю.") + (left ? `\nОсталось уточнить ${left} ${plural(left,"вопрос","вопроса","вопросов")}, могу спросить сейчас.` : "\nЕсли что-то поменялось, просто напиши, например: «теперь работаю с 10 до 19».");
+}
+function applyRoutineToSettings(r){
+  if(r.wakeWd) settings.wake = r.wakeWd;
+  if(r.lunch) settings.lunch = r.lunch;
+  persistSettings();
+}
+function isWorkDay(d){ const r = getRoutine(); return Array.isArray(r.workDays) ? r.workDays.includes(d) : d < 5; }
+function wakeFor(d){ const r = getRoutine(); return (!isWorkDay(d) && r.wakeWe) ? r.wakeWe : (r.wakeWd || wakeTime()); }
+function busyAt(d, hm){ const r = getRoutine(); if(!r.work || !isWorkDay(d) || r.noWork) return false; const m = toMinHM(hm), a = toMinHM(r.work.from) - (r.commute||0), b = toMinHM(r.work.to) + (r.commute||0); return m >= a && m < b; }
+// time for a planned activity that respects work hours and training preference
+function smartTime(cat, d, fallback){
+  const r = getRoutine();
+  const major = MAJOR.has(cat);
+  if(major && r.train && r.train !== "any" && isWorkDay(d)){
+    if(r.train === "morning") return r.trainTime || fromMin(toMinHM(wakeFor(d)) + 30);
+    if(r.train === "lunch") return r.trainTime || r.lunch || "13:00";
+    if(r.train === "evening") return r.trainTime || (r.work ? fromMin(toMinHM(r.work.to) + (r.commute||0) + 60) : "19:00");
+  }
+  if(fallback && busyAt(d, fallback) && r.work) return fromMin(toMinHM(r.work.to) + (r.commute||0) + 45);
+  return fallback || "";
+}
+function applyRecurring(key, force){
+  const r = getRoutine(); if(!(r.recurring||[]).length) return;
+  const flag = "rec:" + key; if(!force && LS.get(flag)) return;
+  const w = getWeek(key); let changed = false;
+  const startDay = key === curKey() ? todayI() : 0;
+  for(const x of r.recurring){ if(x.day < startDay) continue; if(w.items.some(i => i.day===x.day && i.cat===x.type)) continue; w.items.push({id:uid(), day:x.day, cat:x.type, t:x.name, time:x.time||"", done:false, rec:true}); changed = true; }
+  if(changed) saveWeek(key, w); LS.set(flag, true);
+}
+
+/* ---------- app watcher settings & history ---------- */
+let lastWatchSync = "";
+function syncWatch(){
+  if(!NATIVE || !NATIVE.setWatch) return;
+  const r = getRoutine(), types = LS.get("appTypes") || {};
+  const ent = new Set(Object.entries(KNOWN_APPS).filter(([,g]) => APP_GROUPS[g] && APP_GROUPS[g].ent).map(([p]) => p));
+  for(const day of Object.values(health.apps||{})) for(const a of day.apps||[]) if(APP_GROUPS[appGroup(a)] && APP_GROUPS[appGroup(a)].ent) ent.add(a.p);
+  const nonEnt = Object.entries(types).filter(([,g]) => !(APP_GROUPS[g] && APP_GROUPS[g].ent)).map(([p]) => p);
+  for(const p of nonEnt) ent.delete(p);
+  const limits = {}, notes = {};
+  const seen = new Map(); for(const p of Object.keys(KNOWN_APPS)) seen.set(p, {p, c:-1});
+  for(const day of Object.values(health.apps||{})) for(const a of day.apps||[]) seen.set(a.p, a);
+  for(const a of seen.values()){ const inf = appInfo(a); limits[a.p] = inf.limit; notes[a.p] = inf.why; if(inf.limit > 0) ent.add(a.p); else ent.delete(a.p); }
+  const cfg = {limits, notes, enabled: !!(settings.notify && (settings.watchMin ?? 40) > 0 && health.usage), sessionMin: settings.watchMin ?? 40, dayLimit: settings.screenLimit, ent:[...ent], nonEnt,
+    wake: wakeFor(todayI()), off: settings.screensOff, workDays: Array.isArray(r.workDays) ? r.workDays : [], workFrom: r.work ? r.work.from : "", workTo: r.work ? r.work.to : ""};
+  const s = JSON.stringify(cfg); if(s !== lastWatchSync){ lastWatchSync = s; try{ NATIVE.setWatch(s); }catch(e){} }
+}
+function nudgeHistory(){ if(!NATIVE || !NATIVE.nudges) return []; try{ return JSON.parse(NATIVE.nudges()); }catch(e){ return []; } }
+function nudgeStats(fromMs, toMs){
+  const list = nudgeHistory().filter(n => n.at >= fromMs && n.at < toMs);
+  const c = k => list.filter(n => n.outcome === k).length;
+  return {n:list.length, obeyed:c("obeyed"), ignored:c("ignored"), exempt:c("exempt"), promisedIgnored:list.filter(n=>n.outcome==="ignored" && n.response==="comply").length, list};
+}
+
+/* ---------- what each app is and how it affects you ---------- */
+const GROUP_INFO = {
+  feeds:  {risk:"high", why:"Лента без конца: легко залипнуть, а сравнение себя с другими может портить настроение."},
+  video:  {risk:"medium", why:"Видео бывает и полезным, и бесконечной лентой рекомендаций. Короткие ролики затягивают сильнее всего."},
+  gaming: {risk:"medium", why:"Игры — нормальный отдых, но долгие сессии и игры перед сном мешают заснуть."},
+  series: {risk:"low", why:"Фильм или сериал — нормальный отдых, если не включать «ещё одну серию» до ночи."},
+  chat:   {risk:"none", why:"Мессенджер — в основном общение, сам по себе не вреден."},
+  browser:{risk:"none", why:"Браузер может быть чем угодно, поэтому к нему не придираюсь."},
+  music:  {risk:"none", why:"Музыка и подкасты обычно идут фоном, это не экранное время."},
+  work:   {risk:"none", why:"Работа, учёба, почта и календарь — это дело, а не развлечение."},
+  health: {risk:"none", why:"Здоровье и спорт — только плюс."},
+  maps:   {risk:"none", why:"Карты и такси — по делу."},
+  shop:   {risk:"low", why:"Покупки: иногда залипаешь в каталоге, но обычно по делу."},
+  other:  {risk:"none", why:"Обычное приложение, без претензий."}
+};
+const APP_NOTES = {
+  "com.zhiliaoapp.musically":["high","TikTok — бесконечная лента коротких видео: быстро съедает время и приучает к постоянной смене картинки."],
+  "com.ss.android.ugc.trill":["high","TikTok — бесконечная лента коротких видео: быстро съедает время и приучает к постоянной смене картинки."],
+  "com.instagram.android":["high","Instagram — лента и рилсы: легко залипнуть, а чужие «идеальные» жизни могут портить настроение."],
+  "com.google.android.youtube":["medium","YouTube бывает и полезным (обучение, разборы), и бесконечной лентой рекомендаций. Shorts затягивают сильнее всего."],
+  "com.vkontakte.android":["high","ВКонтакте — лента и клипы: легко пролистать час, не заметив."],
+  "com.reddit.frontpage":["high","Reddit — бесконечные ветки и обсуждения, затягивает надолго."],
+  "com.twitter.android":["high","X (Twitter) — быстрая лента новостей и споров, часто добавляет тревоги."],
+  "org.telegram.messenger":["none","Telegram — в первую очередь мессенджер. Если сидишь в каналах, отметь его как «Соцсети», и я буду присматривать."],
+  "com.whatsapp":["none","WhatsApp — общение, к нему не придираюсь."],
+  "com.duolingo":["none","Duolingo — учёба, это в плюс."],
+  "tv.twitch.android.app":["medium","Twitch — длинные стримы, легко просидеть весь вечер."],
+  "com.netflix.mediaclient":["low","Netflix — фильмы и сериалы: отдых, если без марафонов до ночи."],
+  "ru.kinopoisk":["low","Кинопоиск — фильмы и сериалы: отдых, если без марафонов до ночи."]
+};
+function appInfo(a){
+  const g = appGroup(a), base = GROUP_INFO[g] || GROUP_INFO.other, own = APP_NOTES[a.p];
+  const overridden = (LS.get("appTypes")||{})[a.p];
+  const risk = own && !overridden ? own[0] : base.risk, why = own && !overridden ? own[1] : base.why;
+  const b = settings.watchMin ?? 40;
+  const limit = risk === "high" ? Math.max(20, b - 10) : risk === "medium" ? b : risk === "low" ? b * 2 : 0;
+  return {group:g, risk, why, limit};
+}
 /* ---------- screen time by app (Android app, usage access) ---------- */
 const APP_GROUPS = {
   video:{n:"Видео", ent:true, c:"--c-games"}, series:{n:"Фильмы и сериалы", ent:true, c:"--c-games"}, gaming:{n:"Игры", ent:true, c:"--c-games"},
@@ -1018,7 +1249,8 @@ function phoneDay(ds){
   return {total:d.total||0, pickups:d.pickups||0, ent, by, apps, late:Math.round(late)};
 }
 function chooseAppGroup(a){
-  openSheet(`<h2>${esc(a.l)}: что это за приложение?</h2><p class="note">От этого зависит, считаю ли я его развлечением.</p>
+  const inf = appInfo(a);
+  openSheet(`<h2>${esc(a.l)}: что это за приложение?</h2><p class="note">${esc(inf.why)} ${inf.limit ? `Напомню о перерыве, если сидишь в нём дольше ${inf.limit} мин подряд.` : "Из-за него напоминать не буду."}</p><p class="note">Если я ошибся с типом, выбери правильный:</p>
     <div class="chips" id="agPick">${Object.entries(APP_GROUPS).map(([k,g]) => `<button type="button" class="chip ${appGroup(a)===k?"on":""}" data-ag="${k}"><i style="background:var(${g.c})"></i>${g.n}</button>`).join("")}</div>
     <div class="tools"><button class="btn" id="agCancel">Отмена</button></div>`);
   $("agPick").onclick = e => { const b = e.target.closest("[data-ag]"); if(!b) return; const m = LS.get("appTypes")||{}; m[a.p] = b.dataset.ag; LS.set("appTypes", m); closeSheet(); render(); toast("Запомнил"); };
@@ -1325,6 +1557,9 @@ function analyzeDay(rv){
     if(PD.total >= 300) bad.push(`Телефон ${fmtDur(PD.total)} за день.`); else if(PD.total <= 120 && new Date().getHours() >= 18) good.push(`Телефон всего ${fmtDur(PD.total)} за день.`);
     if(PD.pickups >= 80) bad.push(`${PD.pickups} разблокировок телефона.`);
   }
+  if(NATIVE){ const t0 = new Date(); t0.setHours(0,0,0,0); const ns = nudgeStats(t0.getTime(), Date.now()+1);
+    if(ns.obeyed) good.push(`Послушался и сделал перерыв от телефона: ${ns.obeyed} ${plural(ns.obeyed,"раз","раза","раз")}.`);
+    if(ns.ignored) bad.push(`Проигнорировал мои просьбы сделать перерыв: ${ns.ignored} ${plural(ns.ignored,"раз","раза","раз")}` + (ns.promisedIgnored ? `, хотя ${ns.promisedIgnored === 1 ? "один раз обещал" : "обещал"} выключить` : "") + "."); }
   const topEnt = PD ? PD.apps.filter(a => APP_GROUPS[a.grp] && APP_GROUPS[a.grp].ent)[0] : null;
   if(h.light) good.push("Был дневной свет. Это помогает и бодрости днём, и сну ночью.");
   if(sleepMin != null){ if(sleepMin >= 420) good.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: в норме.`); else if(sleepMin < 390) bad.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: меньше нормы в 7–9 часов.`); }
@@ -1408,7 +1643,7 @@ function proposeChanges(rv, m){
         const d = bestDay(c); if(d < 0) break;
         const idea = ideasFor(c, d, null, off++, recent) || {t:CATS[c].n, time:""};
         recent.add(idea.t);
-        props.push({type:"add", key, day:d, cat:c, t:idea.t, time:idea.time||"", text:`Добавить ${DACC[d]}: ${idea.t}`, why:`До цели недели не хватает: ${CATS[c].n.toLowerCase()}`});
+        props.push({type:"add", key, day:d, cat:c, t:idea.t, time:smartTime(c, d, idea.time||""), text:`Добавить ${DACC[d]}: ${idea.t}`, why:`До цели недели не хватает: ${CATS[c].n.toLowerCase()}`});
         load[d]++; need--;
       }
     }
@@ -1531,6 +1766,8 @@ if(NATIVE){
   $("nLunch").onchange = () => { if($("nLunch").value){ settings.lunch = $("nLunch").value; persistSettings(); render(); toast("Сохранено"); } };
   $("nFreq").onclick = e => { const b = e.target.closest("[data-freq]"); if(!b) return; settings.checkins = +b.dataset.freq; persistSettings(); render(); toast("Сохранено"); };
   $("nTestCheckin").onclick = () => { try{ NATIVE.testCheckin(); }catch(e){} };
+  $("nWatch").onclick = e => { const b = e.target.closest("[data-watch]"); if(!b) return; settings.watchMin = +b.dataset.watch; persistSettings(); render(); toast("Сохранено"); };
+  $("nTestWatch").onclick = () => { syncWatch(); try{ NATIVE.testWatch(); toast("Проверил. Если есть повод, придёт уведомление"); }catch(e){} };
   $("nBed").onchange = () => { if($("nBed").value){ settings.bedtime = $("nBed").value; persistSettings(); render(); toast("Время отбоя сохранено"); } };
   const saveTimes = () => { settings.morning = $("nMorning").value || settings.morning; settings.evening = $("nEvening").value || settings.evening; persistSettings(); if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Время сохранено"); };
   $("nMorning").onchange = saveTimes; $("nEvening").onchange = saveTimes;
