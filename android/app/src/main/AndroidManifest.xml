@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -62,6 +63,7 @@
         <receiver android:name=".CheckinReceiver" android:exported="false" />
         <receiver android:name=".ReplyReceiver" android:exported="false" />
         <receiver android:name=".WatchReceiver" android:exported="false" />
+        <receiver android:name=".WalkReceiver" android:exported="false" />
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

@@ -1,4 +1,4 @@
-const CACHE = "ritm-v28";
+const CACHE = "ritm-v29";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "app.css", "catalog.js", "food.js", "parser.js", "nlu.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-192.png", "icons/maskable-512.png", "icons/favicon-64.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

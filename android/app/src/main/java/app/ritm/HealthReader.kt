@@ -28,6 +28,7 @@ object HealthReader {
     private val STEPS = HealthPermission.getReadPermission(StepsRecord::class)
     private val SLEEP = HealthPermission.getReadPermission(SleepSessionRecord::class)
     val PERMISSIONS = setOf(STEPS, SLEEP)
+    const val BG = "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
     private val HM = DateTimeFormatter.ofPattern("HH:mm")
     private val DT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
 
@@ -116,9 +117,34 @@ object HealthReader {
             .put("sessions", sessions)
             .put("stepBuckets", buckets)
             .put("stepsGranted", STEPS in granted)
+            .put("bgGranted", BG in granted)
             .put("sleepGranted", SLEEP in granted)
             .put("usage", usage)
             .put("at", System.currentTimeMillis())
+    }
+
+    /** Шаги по 10 минут за последние [hours] часов; null, если нет доступа (в фоне нужно отдельное разрешение). */
+    suspend fun stepBuckets(ctx: Context, hours: Long): JSONArray? {
+        return try {
+            if (HealthConnectClient.getSdkStatus(ctx) != HealthConnectClient.SDK_AVAILABLE) return null
+            val client = HealthConnectClient.getOrCreate(ctx)
+            if (STEPS !in client.permissionController.getGrantedPermissions()) return null
+            val zone = ZoneId.systemDefault()
+            val end = ZonedDateTime.now(zone).withSecond(0).withNano(0)
+            val res = client.aggregateGroupByDuration(
+                AggregateGroupByDurationRequest(
+                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(end.minusHours(hours).toLocalDateTime(), end.toLocalDateTime()),
+                    timeRangeSlicer = Duration.ofMinutes(10)
+                )
+            )
+            val out = JSONArray()
+            for (r in res) {
+                val c = r.result[StepsRecord.COUNT_TOTAL] ?: continue
+                if (c > 0) out.put(JSONObject().put("t", r.startTime.atZone(zone).toInstant().toEpochMilli()).put("n", c))
+            }
+            out
+        } catch (e: Throwable) { null }
     }
 
     private fun putSleep(out: JSONObject, start: ZonedDateTime, end: ZonedDateTime, mins: Long, src: String) {

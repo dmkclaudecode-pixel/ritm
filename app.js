@@ -401,6 +401,7 @@ function renderHealthCard(){
     <div class="status"><span class="rl"><b>Health Connect</b><span class="note">шаги и сон</span></span>${hcLine}</div>
     <div class="status"><span class="rl"><b>История использования</b><span class="note">экранное время по приложениям и сон, если нет трекера</span></span>${health.usage ? `<span class="ok">включено</span>` : ""}</div>
     ${health.usage ? "" : usageHelpHtml()}
+    ${(health.stepsGranted && NATIVE.requestHealthBg) ? `<div class="status"><span class="rl"><b>Прогулки в фоне</b><span class="note">уведомление «заметил прогулку», даже когда приложение закрыто</span></span>${health.bgGranted ? `<span class="ok">включено</span>` : `<button class="btn" data-native="healthbg">Разрешить</button>`}</div>` : ""}
     <div class="field"><span class="label">Цель по шагам в день</span><div class="stepper"><button data-steps="-1000" aria-label="Меньше">−</button><span class="num" style="min-width:4em;text-align:center">${fmtNum(settings.stepsGoal)}</span><button data-steps="1000" aria-label="Больше">+</button></div></div>`;
 }
 
@@ -422,8 +423,15 @@ function buildSnapshot(){
   return {days};
 }
 let lastSnap = "", lastReviewSync = "";
+let lastWalkCfg = "";
+function syncWalkWatch(){
+  if(!NATIVE || !NATIVE.setWalkWatch) return;
+  const bad = LS.get("walkNo") || {}, cfg = JSON.stringify({enabled: !!(health && health.bgGranted && settings.notify), bad: Object.keys(bad).filter(h => bad[h] >= 2).map(Number)});
+  if(cfg !== lastWalkCfg){ lastWalkCfg = cfg; try{ NATIVE.setWalkWatch(cfg); }catch(e){} }
+}
 function syncNative(){
   if(!NATIVE) return;
+  syncWalkWatch();
   const s = JSON.stringify(buildSnapshot());
   if(s !== lastSnap){ lastSnap = s; try{ NATIVE.saveSnapshot(s); }catch(e){} }
   const rt = (settings.notify && settings.reviewOn ? "on " : "off ") + reviewTime();
@@ -709,6 +717,11 @@ function brainPrompt(text){
   const DN = ["понедельник","вторник","среда","четверг","пятница","суббота","воскресенье"];
   const items = []; for(const [wk, wob] of [[ck, w], [iso(addDays(new Date(ck + "T00:00:00"), 7)), w2]]) for(const i of wob.items){ const off = (wk === ck ? 0 : 7) + i.day - ti; if(off < -1 || off > 9) continue; items.push([off, i.time || "99", "id=" + i.id + " | день " + off + " | " + i.t + (i.time ? " | " + i.time : "") + (i.done ? " | сделано" : "")]); }
   items.sort((x, y) => x[0] - y[0] || x[1].localeCompare(y[1]));
+  // в запрос идут только пункты, о которых речь (совпало слово), и ближайшие дни: чем короче запрос, тем быстрее ответ
+  const words = String(text || "").toLowerCase().split(/[^а-яёa-z]+/).filter(x => x.length >= 4).map(x => x.slice(0, 4));
+  const mentioned = x => words.some(wd => x[2].toLowerCase().includes(wd));
+  const asksPlan = /отмен|убер|удал|перенес|перенош|сдвин|что .*план|план/i.test(text || "");
+  const pick = items.filter(x => mentioned(x) || (asksPlan && x[0] >= 0 && x[0] <= 3) || (x[0] >= 0 && x[0] <= 1)).slice(0, asksPlan ? 10 : 6);
   const st = stepsFor(dateOf(ck, ti));
   const sys = "Ты — Ритм, добрый помощник по планированию недели и здоровью. Человек пишет тебе по-русски. Ты отвечаешь ТОЛЬКО JSON: {\"reply\":\"ответ человеку, 1–2 коротких предложения\",\"actions\":[...]}.\n" +
     "Действия: {\"op\":\"log\",\"type\":ТИП,\"name\":\"как назвал человек\",\"min\":минуты,\"time\":\"ЧЧ:ММ\",\"day\":0} — человек УЖЕ сделал это (day: 0 сегодня, -1 вчера); " +
@@ -720,8 +733,8 @@ function brainPrompt(text){
     "«йогу отмени» (в плане id=ab1 Йога) → {\"reply\":\"Убрал йогу из плана.\",\"actions\":[{\"op\":\"cancel\",\"id\":\"ab1\"}]}\n" +
     "«вернулся с работы» → {\"reply\":\"С возвращением! Как прошёл день?\",\"actions\":[]}";
   const ctx = "Сейчас " + DN[ti] + " " + pad(now.getDate()) + "." + pad(now.getMonth() + 1) + ", " + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ". " + (st != null ? "Шагов сегодня: " + st + ". " : "") +
-    "План (день 0 — сегодня):\n" + (items.slice(0, 24).map(x => x[2]).join("\n") || "пусто");
-  const hist = getChat().filter(m => m.text && !m.thinking).slice(-5, -1).slice(-4);
+    "План (день 0 — сегодня):\n" + (pick.map(x => x[2]).join("\n") || "пусто");
+  const hist = getChat().filter(m => m.text && !m.thinking).slice(-5, -1).slice(-2);
   return {sys: sys + "\n\n" + ctx, hist};
 }
 function parseBrain(out, prefix){
@@ -871,7 +884,7 @@ document.addEventListener("click", e => {
   else if(ds.hab){ const k = curKey(); mutate(k, w => { const d = todayI(); const cur = ds.hab==="sleep" ? sleepOk(w,k,d) : !!(w.days[d]||{})[ds.hab]; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.hab] = !cur; }); }
   else if(ds.sc){ mutate(curKey(), w => { const d = todayI(), v = +ds.v; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.sc] = w.days[d][ds.sc]===v ? null : v; }); }
   else if(ds.light){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{}), light:true}; }); toast("Отмечено: дневной свет"); }
-  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
+  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="healthbg") NATIVE.requestHealthBg(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
   else if(ds.steps){ settings.stepsGoal = Math.max(2000, Math.min(20000, settings.stepsGoal + +ds.steps)); persistSettings(); render(); }
   else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"unplug", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
   else if(ds.dismiss){ dismissed.add(ds.dismiss); render(); }
@@ -3129,8 +3142,8 @@ window.__ritmNative = {
   onLlm(id, status, text){ const f = llmWait[id]; if(f){ delete llmWait[id]; f(status, text); } },
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
-      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
-      LS.set("health", health); try{ suggestWalks(); }catch(e){} render();
+      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, bgGranted:!!d.bgGranted, usage:!!d.usage, at:d.at};
+      LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} render();
     }catch(e){}
   },
   onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(tab === "chat" && !maybeWeeklyReport() && !morningBrief()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },

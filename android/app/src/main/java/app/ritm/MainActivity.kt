@@ -165,6 +165,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        /** Разрешение читать Health Connect в фоне (нужно для уведомлений о прогулках, когда приложение закрыто). */
+        @JavascriptInterface fun requestHealthBg() = runOnUiThread {
+            try { healthLauncher.launch(setOf(HealthReader.BG)) }
+            catch (e: Throwable) { Toast.makeText(this@MainActivity, "Фоновое чтение недоступно на этом телефоне", Toast.LENGTH_LONG).show() }
+        }
+        @JavascriptInterface fun setWalkWatch(json: String) = WalkWatcher.configure(this@MainActivity, json)
+
         @JavascriptInterface fun requestUsage() = runOnUiThread {
             try { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
             catch (e: ActivityNotFoundException) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
