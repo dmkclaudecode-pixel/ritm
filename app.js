@@ -411,7 +411,7 @@ function renderStats(){
 
 function renderMore(){
   $("subtitle").textContent = "Цели, уведомления, копия";
-  renderReminders(); renderHealthCard(); renderActs();
+  renderReminders(); renderHealthCard(); renderActs(); renderMisses();
   $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
   if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; $("nTestReview").hidden = !settings.notify;
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
@@ -515,6 +515,7 @@ document.addEventListener("click", e => {
   if(journalClick(ds, t)) return;
   if(appsClick(ds)) return;
   if(actsClick(ds)) return;
+  if(missClick(ds)) return;
   if(tab==="review" && reviewClick(ds)) return;
   if(ds.openreview){ openReview(); return; }
   if(ds.tab){ rvState = null; rvResult = null; tab = ds.tab; if(tab === "chat") askRoutine(); if(tab==="week") weekStart = mondayOf(new Date()); render(); window.scrollTo({top:0}); return; }
@@ -736,14 +737,21 @@ function runAction(msgId, i){
   else if(a.op === "time"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.time = a.time; }); reply = `Поставил «${a.t}» на ${a.time}.`; }
   else if(a.op === "remove"){ mutateQuiet(a.key, w => { w.items = w.items.filter(x=>x.id!==a.id); }); reply = `Убрал «${a.t}» из плана.`; }
   else if(a.op === "rskip"){ const r = getRoutine(); r.asked[a.k] = true; r.pending = null; saveRoutine(r); reply = "Хорошо, пропустим. Расскажешь потом, если захочешь."; }
+  else if(a.op === "notact"){ const pend = (m.pending||[])[a.idx];
+    if(pend){ RITM.forget(pend.text, pend.fuzzyWord); dropMiss(pend.text); }
+    reply = "Понял, не записываю. Запомнил: " + (pend && pend.fuzzyWord ? `«${pend.fuzzyWord}» — не занятие.` : `«${pend ? pend.text.trim() : ""}» — не занятие.`); }
   else if(a.op === "addOn"){ mutateQuiet(a.key, w => w.items.push({id:uid(), day:a.day, cat:a.cat, t:a.name, time:"", done:false})); reply = `Поставил «${a.name}» ${DACC[a.day]}.`; }
   else if(a.op === "unlog"){ let n = 0; mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const rm = (day.log||[]).filter(r => r.type === a.type && r.src === "chat"); n = rm.length;
-      day.log = (day.log||[]).filter(r => !rm.includes(r)); for(const r of rm) if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } });
+      day.log = (day.log||[]).filter(r => !rm.includes(r)); for(const r of rm) if(r.fuzzyWord) RITM.forget(r.text, r.fuzzyWord); for(const r of rm) if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } });
     reply = n ? "Убрал ошибочную запись, отметку в плане тоже снял. Прости, неправильно понял." : "Записей уже нет."; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
-    const pend = (m.pending||[])[a.idx]; if(pend){ pend.type = a.type; pend.changed = true; pend.wasUnknown = true; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend);
-      if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else logFromChat([pend]); reply = `Запомнил: «${pend.name}» — это ${CATS[a.type].full.toLowerCase()}.` + (pend.future ? "" : " " + (commentFor(pend)||"")); }
+    const pend = (m.pending||[])[a.idx]; if(pend){ const wasFz = pend.fuzzy; pend.type = a.type; pend.changed = true; pend.wasUnknown = true; pend.fuzzy = false; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend); dropMiss(pend.text);
+      if(wasFz && pend.fuzzyWord) RITM.remember(pend.fuzzyWord, a.type, a.keepName ? pend.name : null);
+      if(wasFz && a.keepName){ if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else { const ln = logFromChat([pend]); if(ln.length) reply = `Отметил в плане: ${ln.map(i=>"«"+i.t+"»").join(", ")}. `; }
+        reply = `Записал${pend.future ? " в план" : ""}: ${lc(pend.name)}. ` + (reply||"") + "Запомнил, как ты это пишешь." + (pend.future ? "" : " " + (commentFor(pend)||"")); }
+      else { if(wasFz){ const nm = (RITM.core(pend.text||"") || String(pend.text||"")).trim(); pend.name = nm.charAt(0).toUpperCase() + nm.slice(1, 50); }
+        if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else logFromChat([pend]); reply = `Запомнил: «${pend.name}» — это ${CATS[a.type].full.toLowerCase()}.` + (pend.future ? "" : " " + (commentFor(pend)||"")); } }
   }
   else if(a.op === "typechoose"){
     const pend = (m.pending||[])[a.idx];
@@ -768,7 +776,7 @@ function logFromChat(entries){
       for(const e of list){
         if((e.changed || e.wasUnknown) && !e.noLearn) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
         const rec = {id:uid(), type:e.type, name:e.name, time:e.time || (TYPES[e.type].unit === "min" || +off ? "" : nowHM()), text:e.text, src:"chat"};
-        for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived","sets","reps"]) if(e[f] != null) rec[f] = e[f];
+        for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived","sets","reps","fuzzyWord"]) if(e[f] != null) rec[f] = e[f];
         if(rec.stepsOnly) day.stepsManual = rec.steps;
         if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
           const it = w.items.find(i => i.day===d && i.cat===rec.type && !i.done);
@@ -833,6 +841,7 @@ function respond(text){
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
+  if(contextReply(text, s, A, pre)) return;
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
   if(A.meta === "tooEarly" && !hasSureAct){
     settings.statsHold = Math.max(settings.statsHold || 0, startedAt() + 14*86400000); persistSettings();
@@ -868,15 +877,16 @@ function respond(text){
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
   if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; }
-  if(A.question && !hasAct && !pre.some(e=>e.type)){ ruleMiss = true; return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
+  if(A.question && !hasAct && !pre.some(e=>e.type)){ ruleMiss = true; noteMiss(text, "question"); return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
   const entries = RITM.parse(text);
-  if(!entries.length){ ruleMiss = true; return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
+  if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return bot(chattyReply(null));
+  if(!entries.length){ ruleMiss = true; noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
   const lastBot = getChat().filter(m=>m.who==="bot").slice(-1)[0];
   const ctxKind = lastBot && Date.now() - lastBot.at < 3*3600*1000 ? lastBot.kind : null;
 
-  const past = [], future = [], unknown = [], negs = [], clar = [];
+  const past = [], future = [], unknown = [], negs = [], clar = [], fuzzies = [];
   for(const e of entries){
     if(e.neg && e.type){ negs.push(e); continue; }
     if(!e.type && e.ask){ clar.push(e); continue; }
@@ -884,7 +894,9 @@ function respond(text){
     fillDefaults(e);
     const cd = dayFromText(e.text) || msgDay;
     const fut = TYPES[e.type].unit === "min" && !e.stepsOnly && (isFutureClause(e.text, text, e) || (cd && dateKeyOf(cd)+dayIdxOf(cd) !== curKey()+todayI()));
-    if(fut){ e.future = true; e.date = (cd || new Date()).getTime(); future.push(e); } else past.push(e);
+    if(fut){ e.future = true; e.date = (cd || new Date()).getTime(); }
+    if(e.fuzzy && !e.learned){ fuzzies.push(e); continue; }
+    (fut ? future : past).push(e);
   }
   if(!past.length && !future.length && !negs.length && !clar.length && unknown.length && ctxKind !== "lunch") ruleMiss = true;
   // «сегодня будет бассейн, силовой не будет» — это замена одного на другое
@@ -969,12 +981,23 @@ function respond(text){
   if(pendingIssueDates.length){ postIssues(pendingIssueDates.splice(0), 2); }
   // разговорная фраза («ну я пока не знаю», «мы только начали») — не занятие, не спрашиваем тип
   const chatty = unknown.filter(u => isChatty(u, A));
-  if(chatty.length){ for(const u of chatty) unknown.splice(unknown.indexOf(u), 1);
-    if(!past.length && !future.length && !negs.length && !clar.length && !unknown.length) bot(chattyReply(ctxKind)); }
+  const fzChatty = fuzzies.filter(u => isChatty({...u, name:u.text, min:u.minGuess ? null : u.min}, A));
+  for(const u of fzChatty) fuzzies.splice(fuzzies.indexOf(u), 1);
+  if(chatty.length || fzChatty.length){ for(const u of chatty) unknown.splice(unknown.indexOf(u), 1);
+    noteMiss(text, "chat");
+    if(!past.length && !future.length && !negs.length && !clar.length && !unknown.length && !fuzzies.length) bot(chattyReply(ctxKind)); }
+  // неуверенная догадка (похоже на опечатку) — сначала спрашиваем
+  for(const e of fuzzies){
+    const what = lc(e.name) + (describe(e) && !e.minGuess ? " (" + describe(e) + ")" : "");
+    bot(`Не уверен, что правильно понял «${e.text.trim()}». Это ${what}${e.future ? " — в план" : ""}?`,
+      [act("Да", {op:"type", idx:0, type:e.type, keepName:true}), act("Нет, это не занятие", {op:"notact", idx:0}), act("Другое…", {op:"typechoose", idx:0})],
+      {pending:[{...e, date: e.date || (dayFromText(e.text) || msgDay || new Date()).getTime()}]});
+  }
   unknown.forEach((u, idx) => {
+    noteMiss(u.text || u.name, "unknown");
     const guesses = ["walk","strength","sport","hobby","relax","meal","work","other"].filter(t => TYPES[t]);
     const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
-      guesses.slice(0,6).map(t => act(CATS[t].n, {op:"type", idx:0, type:t})).concat([act("Другое…", {op:"typechoose", idx:0})]),
+      guesses.slice(0,6).map(t => act(CATS[t].n, {op:"type", idx:0, type:t})).concat([act("Другое…", {op:"typechoose", idx:0}), act("Это не занятие", {op:"notact", idx:0})]),
       {pending:[{...u, future: isFutureClause(u.text, text, u), date: (dayFromText(u.text) || msgDay || new Date()).getTime()}]});
     void m;
   });
@@ -982,6 +1005,8 @@ function respond(text){
 function isChatty(u, A){
   if(u.time || (u.qty && u.qty.length) || u.min) return false;
   const w = nrm(u.name).trim().split(" ").filter(Boolean);
+  if(u.fuzzy && w.length >= 3) return true;
+  if(w.some(x => /(ится|ется|ются|ятся|утся)$/.test(x)) || / (какая-то|какой-то|какие-то|что-то|кто-то|дичь|жесть|капец|ужас|кошмар|фигня|ерунда) /.test(nrm(u.name))) return true;   // «дичь какая-то творится»: опечатка в длинной фразе без цифр — скорее разговор
   if(w.length >= 4) return true;
   if(/ (я|мы|ты|он|она|они|это|не|нет|пока|еще|ещё|уже|никаких|ничего|знаю|понял|думаю|кажется|наверное|может|надо|нужно|хочу|рано|поздно|просто|вообще|короче|типа|вроде) /.test(nrm(u.name))) return true;
   return !!A.conversational && w.length >= 2;
@@ -990,6 +1015,74 @@ function chattyReply(kind){
   if(kind === "report" || kind === "insight") return "Понял тебя. Ничего не меняю, просто продолжаю наблюдать.";
   return pick(["Понял тебя.","Принято.","Окей, понял."]) + " Если что-то делал или собираешься — напиши, я запишу.";
 }
+/* ---------- контекст: на что отвечает пользователь ---------- */
+function refOf(m){
+  if(!m) return null;
+  let ref = m.ref;
+  if(!ref && m.acts) for(const x of m.acts) if(x.a && x.a.id && x.a.key){ ref = {key:x.a.key, id:x.a.id}; break; }
+  if(!ref) return null;
+  const w = getWeek(ref.key), it = w.items.find(i => i.id === ref.id);
+  return it ? {key:ref.key, it} : null;
+}
+function moveItemTo(f, date, time){
+  const key = dateKeyOf(date), d = dayIdxOf(date);
+  mutateQuiet(f.key, w => { w.items = w.items.filter(x => x.id !== f.it.id); });
+  mutateQuiet(key, w => { w.items.push({...f.it, day:d, time: time || f.it.time, done:false}); });
+}
+function skipPrompt(f, date){
+  mutateQuiet(f.key, w => { const x = w.items.find(i => i.id === f.it.id); if(x) x.skipped = (x.skipped||0) + 1; });
+  const from = f.key === curKey() ? Math.min(6, Math.max(todayI(), f.it.day) + 1) : 0;
+  const bd = bestDayInWeek(f.key, f.it.cat, from, f.it.day), acts = [];
+  if(bd >= 0) acts.push(act(`Перенести ${DACC[bd]}`, {op:"move", key:f.key, id:f.it.id, day:bd, t:f.it.t}));
+  acts.push(act("Убрать из плана", {op:"remove", key:f.key, id:f.it.id, t:f.it.t}), act("Оставить как есть", {op:"keep"}));
+  bot(pick(["Ничего страшного, бывает.","Понял, без проблем.","Окей, случается."]) + ` Что сделать с «${f.it.t}»?`, acts);
+}
+const CANCEL_RE = / (не будет|не пойду|не поеду|не получится|не получилось|не успею|не успел|не успела|отмена|отменяется|отменяю|отменил|не смогу|не смог|не сегодня|не хочу|пропущу|пропускаю|пропустил|не вышло|не сделал|не сделала|не было|не ходил|не ходила|сорвалось|слил) /;
+const DONE_RE = / (сделал|сделала|сделано|готово|сходил|сходила|отзанимался|отзанималась|сделал уже|уже сделал|выполнил|выполнила|получилось|отлично прошло|норм прошло|хорошо прошло|прошло|был|была|позанимался|потренировался|потренил|отходил|отплавал|отбегал|закрыл) /;
+const STILL_RE = / (в силе|иду|пойду|буду|еду|поеду|собираюсь|все в силе|всё в силе|по плану|да|ага|конечно|ок|окей|угу|да конечно|естественно) /;
+function contextReply(text, s, A, pre){
+  const lastBot = getChat().filter(m => m.who === "bot").slice(-1)[0];
+  if(!lastBot || lastBot.chosen != null || Date.now() - lastBot.at > 3*3600*1000) return false;
+  const f = refOf(lastBot); if(!f) return false;
+  // упомянуто другое занятие — это уже не ответ про этот пункт (замену разберёт общий разбор)
+  if(pre.some(e => e.type && !e.fuzzy && e.type !== f.it.cat && TYPES[e.type].unit === "min")) return false;
+  const kind = lastBot.kind || "";
+  const date = dayFromText(text), tm = /(?:^|\s)(?:в|на|к|около)\s*(\d{1,2})(?:[:.\s](\d{2}))?(?!\s*(?:мин|час|км|раз|дн))/.exec(" " + text.toLowerCase() + " ");
+  const time = tm && +tm[1] <= 23 ? pad(+tm[1]) + ":" + pad(+(tm[2]||0)) : null;
+  const itDate = addDays(new Date(f.key + "T00:00:00"), f.it.day);
+  const markAnswered = () => { const arr = getChat(); const m = arr.find(x => x.id === lastBot.id); if(m){ m.chosen = -1; saveChat(arr); } };
+  // «нет, завтра», «давай в четверг в 19», «перенеси на завтра»
+  if(date && dateKeyOf(date) + dayIdxOf(date) !== f.key + f.it.day){
+    moveItemTo(f, date, time); markAnswered();
+    bot(`Перенёс «${f.it.t}» на ${whenWord(date)}${time ? " в " + time : ""}.`); pendingIssueDates.push(date); postIssues(pendingIssueDates.splice(0), 2); return true;
+  }
+  // «давай в 19:30», «лучше на 20»
+  if(time && !date && !DONE_RE.test(s) && / (в|на|к|давай|лучше|перенеси|сдвинь|позже|раньше) /.test(s) && A.words <= 6){
+    mutateQuiet(f.key, w => { const x = w.items.find(i => i.id === f.it.id); if(x) x.time = time; }); markAnswered();
+    bot(`Поставил «${f.it.t}» на ${time}.`); pendingIssueDates.push(itDate); postIssues(pendingIssueDates.splice(0), 2); return true;
+  }
+  if(CANCEL_RE.test(s) || (/^ (нет|неа|не|не-а) $/.test(s) && /before|after|asked/.test(kind))){
+    markAnswered(); skipPrompt(f, itDate); return true;
+  }
+  if(DONE_RE.test(s) && !/ (не|ни) /.test(s) && /after|asked|before|doing/.test(kind)){
+    const e = {type:f.it.cat, name:f.it.t, text, time:""}; fillDefaults(e);
+    const qm = /(\d+)\s*(мин|час)/.exec(s); if(qm) e.min = /час/.test(qm[2]) ? +qm[1]*60 : +qm[1];
+    markAnswered(); logFromChat([e]);
+    mutateQuiet(f.key, w => { const x = w.items.find(i => i.id === f.it.id); if(x) x.done = true; });
+    bot(`Отметил: «${f.it.t}» сделано.` + " " + (commentFor(e) || pick(["Отлично!","Так держать!"]))); return true;
+  }
+  if(kind === "before" && STILL_RE.test(s) && A.words <= 4){ markAnswered(); bot(pick([`Отлично! После «${f.it.t}» напиши, как прошло.`, "Супер, удачи! Потом расскажешь, как прошло."])); return true; }
+  return false;
+}
+
+/* ---------- журнал непонятого ---------- */
+function noteMiss(text, why){
+  const t = String(text||"").trim(); if(!t) return;
+  const arr = (LS.get("misses") || []).filter(x => x.text !== t);
+  arr.push({at:Date.now(), text:t, why:why||"unknown"}); LS.set("misses", arr.slice(-60));
+}
+function dropMiss(text){ const t = String(text||"").trim(); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== t && !t.includes(x.text) && !x.text.includes(t))); }
+
 function setBedtime(hm){
   settings.bedtime = hm;
   const b = toMinHM(hm), bb = b < 6*60 ? b + 1440 : b, o = toMinHM(settings.screensOff || "22:30"), oo = o < 6*60 ? o + 1440 : o;
@@ -1075,7 +1168,7 @@ function removeCommand(what){
   const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}».`);
   bot(`Убрать «${f.it.t}» (${DACC[f.it.day]}) из плана?`, [act("Да, убрать", {op:"remove", key:f.key, id:f.it.id, t:f.it.t}), act("Нет", {op:"keep"})]);
 }
-const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\n• самочувствие: «устал», «не выспался», «болит спина», «заболел» — подстрою план\n• поправки: «не 30, а 45 минут», «это было вчера», «удали последнее»\n• выводы: «что ты заметил?», «отчёт», «что я пропускаю?», «составь план»\n• «пиши реже», «пиши чаще», «не пиши сегодня»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
+const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\n• самочувствие: «устал», «не выспался», «болит спина», «заболел» — подстрою план\n• поправки: «не 30, а 45 минут», «это было вчера», «удали последнее»\n• ответы на мои вопросы о плане: «нет, давай завтра», «лучше в 20:30», «сделал», «не получится»\n• если я что-то не так понял, нажми «Это не занятие», и я запомню. Всё непонятое собирается в «Ещё» → «Что я не понял»\n• выводы: «что ты заметил?», «отчёт», «что я пропускаю?», «составь план»\n• «пиши реже», «пиши чаще», «не пиши сегодня»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
 
 // ---------- check-ins: messages from Ritm during the day ----------
 function wakeTime(){
@@ -1086,7 +1179,7 @@ function wakeTime(){
 }
 const toMinHM = t => +t.slice(0,2)*60 + +t.slice(3,5);
 const fromMin = m => pad(Math.floor(((m%1440)+1440)%1440/60))+":"+pad(((m%60)+60)%60);
-const CI_KINDS = new Set(["morning","lunch","before","doing","work","water","evening","afterwork"]);
+const CI_KINDS = new Set(["morning","lunch","before","after","doing","work","water","evening","afterwork"]);
 const ciStats = () => LS.get("ciStats") || {};
 function ciRate(h){ const x = ciStats()[h] || {sent:0, ans:0}; return {sent:x.sent, ans:x.ans, rate:(x.ans + 0.6) / (x.sent + 1)}; }
 function ciNoteFired(f){ if(!CI_KINDS.has(f.kind)) return; const h = new Date(f.firedAt || f.at).getHours(), st = ciStats(); st[h] = st[h] || {sent:0, ans:0}; st[h].sent++; LS.set("ciStats", st); LS.set("lastCi", {at:f.firedAt || f.at, h, answered:false}); }
@@ -1109,6 +1202,8 @@ function buildCheckins(){
     if(freq >= 2) slots.push({m: lunch + jit("l"), kind:"lunch", title:"Время обеда", text: pick(["Пора пообедать. Что будет на обед?","Обеденное время! Что сегодня на обед?","Не забудь пообедать. Что ешь сегодня?"]), fixed:true});
     if(freq >= 2) for(const i of its.filter(i=>i.time && CATS[i.cat] && (CATS[i.cat].move || CATS[i.cat].grp==="social")).slice(0,3))
       slots.push({m: toMinHM(i.time) - 60, kind:"before", title:`Через час: ${lc(i.t)}`, text:`В ${i.time} по плану «${i.t}». Всё в силе? Если планы поменялись, напиши.`, fixed:true});
+    if(freq >= 2) for(const i of its.filter(i=>i.time && CATS[i.cat] && CATS[i.cat].move).slice(0,2))
+      slots.push({m: toMinHM(i.time) + Math.min(defaultMin(i), 120) + 20, kind:"after", title:`Как прошло: ${lc(i.t)}?`, text:`Получилось «${i.t}»? Напиши «сделал», «не вышло» или «перенёс на завтра».`, fixed:true});
     if(d === 6) slots.push({m: 19*60 + 30, kind:"report", title:"Неделя позади!", text:"Загляни в чат: там отчёт за неделю, что я заметил и готовый план на следующую.", fixed:true});
     // живые подсказки на сегодня: мало движения, мало воды, короткая ночь
     const dyn = [];
@@ -1167,7 +1262,9 @@ function pullNative(){
   try{ inbox = JSON.parse(NATIVE.consumeInbox() || "[]"); }catch(e){}
   const all = fired.map(f => ({t:f.firedAt || f.at, f})).concat(inbox.map(m => ({t:m.at, m}))).sort((a,b)=>a.t-b.t);
   for(const x of all){
-    if(x.f){ pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t}); ciNoteFired(x.f); }
+    if(x.f){ let ref = null; const tm = /«(.+?)»/.exec(x.f.text || "");
+      if(tm && /^(before|after)$/.test(x.f.kind)){ const fd = new Date(x.t), fk = dateKeyOf(fd), fdi = dayIdxOf(fd), it = getWeek(fk).items.find(i => i.day === fdi && i.t === tm[1]); if(it) ref = {key:fk, id:it.id}; }
+      pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t, ...(ref ? {ref} : {})}); ciNoteFired(x.f); }
     else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); if(x.m.ctx !== "nudge") handleUser(x.m.text, false); }
   }
   if(all.length) render();
@@ -1307,6 +1404,7 @@ function handleCorrection(c){
   const {L} = last, names = last.es.map(e => lc(e.name)).join(", ");
   if(c.op === "undo"){
     mutateQuiet(L.key, w => { const day = w.days[L.day] = {...(w.days[L.day]||{})};
+      for(const e of (day.log||[]).filter(e => L.ids.includes(e.id))) if(e.fuzzyWord) RITM.forget(e.text, e.fuzzyWord);
       for(const e of (day.log||[]).filter(e => L.ids.includes(e.id))) if(e.plan){ const it = w.items.find(i=>i.id===e.plan); if(it) it.done = false; }
       day.log = (day.log||[]).filter(e => !L.ids.includes(e.id)); });
     LS.set("lastLog", null); return bot(`Удалил: ${names}.`);
@@ -1347,7 +1445,7 @@ function handleSmall(small){
   if(small.includes("yes") || small.includes("no")){
     if(lastBot && lastBot.acts && lastBot.chosen == null && Date.now() - lastBot.at < 60*60*1000){
       if(small.includes("yes")){ const i = lastBot.acts.findIndex(a => !["keep","rskip","typechoose"].includes(a.a.op)); if(i >= 0){ runAction(lastBot.id, i); return true; } }
-      else { const i = lastBot.acts.findIndex(a => a.a.op === "keep" || a.a.op === "rskip"); if(i >= 0){ runAction(lastBot.id, i); return true; } const arr = getChat(); const m = arr.find(x=>x.id===lastBot.id); m.chosen = -1; saveChat(arr); bot("Хорошо, не буду."); return true; }
+      else { const i = lastBot.acts.findIndex(a => a.a.op === "keep" || a.a.op === "rskip" || a.a.op === "notact"); if(i >= 0){ runAction(lastBot.id, i); return true; } const arr = getChat(); const m = arr.find(x=>x.id===lastBot.id); m.chosen = -1; saveChat(arr); bot("Хорошо, не буду."); return true; }
     }
     bot(small.includes("yes") ? "Ок!" : "Понял."); return true;
   }
@@ -2106,6 +2204,29 @@ function renderActs(){
     base.innerHTML = res.map(e => `<div class="lrow"><span class="ldot" style="background:var(${CATS[e.t].c})"></span><span class="lt">${esc(e.n)}<small>${CATS[e.t].full}${e.s ? " · "+esc(e.s) : ""}</small></span></div>`).join("") || `<p class="note">Ничего не нашлось. Добавьте это занятие выше.</p>`; };
   srch.oninput = draw; draw();
 }
+/* что Ритм не понял: можно объяснить в одно нажатие или сохранить список */
+const MISS_WHY = {unknown:"не знал такого занятия", chat:"принял за разговор", nothing:"ничего не понял", question:"не нашёл ответа"};
+function renderMisses(){
+  const el = $("missCard"); if(!el) return;
+  const list = (LS.get("misses") || []).slice().reverse();
+  el.hidden = !list.length; if(!list.length){ el.innerHTML = ""; return; }
+  el.innerHTML = `<h2>Что я не понял</h2>
+    <p class="note">Фразы, на которых я споткнулся. Подскажи, что это было, и я запомню. Список можно сохранить и прислать разработчику, чтобы научить меня новым словам.</p>
+    ${list.slice(0, 20).map((x, i) => `<div class="lrow miss"><span class="lt">«${esc(x.text.length > 90 ? x.text.slice(0, 90) + "…" : x.text)}»<small>${fmtTime(x.at)} · ${MISS_WHY[x.why] || ""}</small></span>
+      <span class="mbtns"><button class="btn sm" data-missact="${esc(x.text)}">Занятие…</button><button class="btn sm" data-missnot="${esc(x.text)}">Не занятие</button><button class="x" data-missdel="${esc(x.text)}" aria-label="Убрать">×</button></span></div>`).join("")}
+    <div class="tools"><button class="btn" id="missSave">Сохранить список</button><button class="btn" id="missClear">Очистить</button></div>`;
+  $("missSave").onclick = () => download("ritm-ne-ponyal.txt", (LS.get("misses") || []).map(x => `${new Date(x.at).toISOString().slice(0,16).replace("T"," ")}\t${x.why}\t${x.text}`).join("\n"), "text/plain");
+  $("missClear").onclick = () => { LS.set("misses", []); renderMisses(); toast("Список очищен"); };
+}
+function missClick(ds){
+  if(ds.missdel != null){ LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== ds.missdel)); renderMisses(); return true; }
+  if(ds.missnot != null){ RITM.forget(ds.missnot); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== ds.missnot)); renderMisses(); toast("Запомнил: это не занятие"); return true; }
+  if(ds.missact != null){ const text = ds.missact;
+    chooseType(`Что такое «${text.slice(0, 40)}»?`, RITM.guessType(text), t => { const nm = (RITM.core(text) || text).trim(); RITM.remember(text, t, nm.charAt(0).toUpperCase() + nm.slice(1, 50));
+      LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== text)); renderMisses(); toast(`Запомнил: ${CATS[t].full.toLowerCase()}`); });
+    return true; }
+  return false;
+}
 function actsClick(ds){ if(ds.actdel == null) return false; const arr = customActs(); arr.splice(+ds.actdel, 1); LS.set("custom", arr); renderActs(); toast("Удалено"); return true; }
 
 /* ---------- day review: input, analysis, plan corrections ---------- */
@@ -2427,4 +2548,6 @@ if(tab === "chat" && getChat().length) { if(!maybeWeeklyReport()) askRoutine(); 
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
+// крючок для автотестов (без влияния на работу)
+window.__ritmT = {curKey, todayI, getWeek, pushMsg, render};
 })();

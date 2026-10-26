@@ -154,3 +154,7 @@ body.inchat .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 .mt{font-size:.68rem;color:var(--muted);padding:0 4px}
 
 label.tog{display:flex}
+.lrow.miss{flex-wrap:wrap}
+.lrow.miss .lt{flex:1 1 100%}
+.lrow.miss .mbtns{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.btn.sm{padding:5px 10px;font-size:.8rem;min-height:0}

@@ -393,7 +393,11 @@ const NLU = [
   ["Да пока рано мы только начали ещё никаких историй нет", {meta:"tooEarly"}],
   ["слишком мало данных для выводов", {meta:"tooEarly"}],
   ["не меняй план", {meta:"dontChange"}],
-  ["пока рано", {meta:"tooEarly"}]
+  ["пока рано", {meta:"tooEarly"}],
+  ["подходов не было потому что дела", {question:false}],
+  ["так что сегодня без зала", {question:false}],
+  ["что сегодня?", {question:true}],
+  ["сколько я выпил воды", {question:true}]
 ];
 
 module.exports = {PARSE, NLU};

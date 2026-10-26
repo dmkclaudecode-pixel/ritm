@@ -130,8 +130,11 @@ function fuzzyIndex(){
 // частые слова, в которых нельзя искать опечатки занятий
 const COMMON = new Set("начали начал начала начать начнем начинаем рано рановато пока только никаких никакой никакие ничего нету историй история истории данных данные данными статистика статистики статистику расписание расписании расписания правки правку вносить вносил менять меняй делать сделать сделали время времени дело дела делаю делаем делали работе работы работу работаю сейчас сегодня завтра вчера потом теперь просто очень много мало немного хорошо плохо нормально может можно нужно надо хочу хочется буду будешь было была были есть быть сказал сказала говорю говорил думаю думал кажется понял поняла понятно ясно давай давайте ладно согласен согласна конечно вообще вроде также тоже такой такая такое какой какая какие когда почему зачем потому поэтому если чтобы спасибо привет пожалуйста неделя недели неделю неделе месяц месяца день дней дня часов минут вопрос вопросы ответ ответил ответила смысл смысла пробовал пробую попробую стараюсь получилось получается вышло слишком совсем вместе всегда никогда иногда часто редко сильно правда точно наверное видимо значит короче кстати блин вообщем вобщем вывод выводы выводов выводу судить данные план плана плане планы планом планов планах планирую планировал меняй поменяй измени".split(" "));
 const UNIT_WORD = new RegExp("^(?:" + UNITS.map(u=>u[0]).join("|") + ")$");
+// слова, в которых пользователь уже говорил «это не занятие» — опечатки в них больше не ищем
+function notWords(){ try{ return new Set(JSON.parse(localStorage.getItem("ritm:notWords")||"[]")); }catch(e){ return new Set(); } }
 function fuzzyMatch(s){
-  const toks = s.trim().split(" ").filter(t => t.length >= 4 && /^[а-яa-z\-]+$/.test(t) && !COMMON.has(t) && !UNIT_WORD.test(t) && !new RegExp("^(?:" + FILLER.source.replace(/^\(\?<!\[a-zа-я0-9\]\)\(|\)\(\?!\[a-zа-я0-9\]\)$/g,"") + ")$").test(t));
+  const NW = notWords();
+  const toks = s.trim().split(" ").filter(t => t.length >= 4 && /^[а-яa-z\-]+$/.test(t) && !COMMON.has(t) && !NW.has(t) && !UNIT_WORD.test(t) && !new RegExp("^(?:" + FILLER.source.replace(/^\(\?<!\[a-zа-я0-9\]\)\(|\)\(\?!\[a-zа-я0-9\]\)$/g,"") + ")$").test(t));
   let best = null;
   for(const tok of toks) for(const f of fuzzyIndex()){
     const a = f.a, lim = a.length >= 6 ? 2 : 1;
@@ -139,16 +142,16 @@ function fuzzyMatch(s){
     const dFull = dist(tok, a), dPref = a.length >= 5 ? Math.min(dist(tok.slice(0, a.length), a), dist(tok.slice(0, a.length + 1), a)) : 9;
     const d = Math.min(dPref, dFull);
     const rel = d / a.length;
-    if(d <= lim && d > 0 && (!best || rel < best.rel || (rel === best.rel && a.length > best.a.length))) best = {d, rel, a, entry:f.entry, type:f.type};
+    if(d <= lim && d > 0 && (!best || rel < best.rel || (rel === best.rel && a.length > best.a.length))) best = {d, rel, a, entry:f.entry, type:f.type, tok};
   }
   if(!best) return null;
-  return {entry:best.entry, type:best.type, name:best.entry ? best.entry.n : null, score:best.a.length - 2, fuzzy:true, alias:best.a};
+  return {entry:best.entry, type:best.type, name:best.entry ? best.entry.n : null, score:best.a.length - 2, fuzzy:true, alias:best.a, tok:best.tok};
 }
 
 // ищем занятие: сначала то, что вы уже объясняли, потом ваши занятия, потом база, потом общие основы, потом без приставок и с опечатками
 function findActivity(text){
   const s = norm(text), c = core(text), L = learned();
-  if(c && L[c]) return {entry:L[c].entry || null, type:L[c].type, name:L[c].name, score:99, learned:true};
+  if(c && L[c]) return L[c].type === "none" ? {none:true, type:null, score:99, learned:true} : {entry:L[c].entry || null, type:L[c].type, name:L[c].name, score:99, learned:true};
   let res = exactMatch(s);
   if(!res){
     // «поотжимался», «покачался», «пробежался»: пробуем без глагольных приставок
@@ -260,7 +263,7 @@ function parse(text){
   // «бассейн силовой не будет», «бассейн а силовой не будет» — два занятия в одной фразе
   for(let i = 0; i < parts.length; i++){
     const m = parts[i].match(/^(.*\S)\s+(?:а\s+|но\s+)?([а-яёa-z]+\s+(?:не|ни разу не|вообще не)\s+(?:будет|будут|буду|будем|пойду|пойдем|поеду|поедем|получится|успею|смогу|сделаю|было|был|была)(?:\s.*)?)$/i);
-    if(m){ const L = findActivity(pre(norm(m[1]))), Rr = findActivity(pre(norm(m[2]))); if(L && Rr && !L.ambiguous && !Rr.ambiguous && L.type !== Rr.type) parts.splice(i, 1, m[1].replace(/\s+(а|но)$/i, ""), m[2]); }
+    if(m){ const L = findActivity(pre(norm(m[1]))), Rr = findActivity(pre(norm(m[2]))); if(L && Rr && L.type && Rr.type && !L.ambiguous && !Rr.ambiguous && L.type !== Rr.type) parts.splice(i, 1, m[1].replace(/\s+(а|но)$/i, ""), m[2]); }
   }
   let prev = null;
   for(const raw0 of parts){
@@ -272,6 +275,7 @@ function parse(text){
     const qty = parseQty(times.rest);
     const negated = NEG.test(s) || SKIP.test(s) || WITHOUT.test(s);
     let act = findActivity(times.rest);
+    if(act && act.none) continue;   // вы уже говорили, что это не занятие
     // «в 11:30» без занятия — повтор предыдущего («кофе в 9:30 и в 11:30»)
     if(!act && prev && (times.time || qty.length) && !core(raw)){
       const rep = {...prev.act};
@@ -295,6 +299,7 @@ function parse(text){
     }
     const e = buildEntry(act, raw, times, qty);
     if(act.learned) e.learned = true;
+    if(act.fuzzy){ e.fuzzy = true; e.fuzzyWord = act.tok; e.fuzzyAlias = act.alias; }
     if(offset) e.dayOffset = offset;
     if(negated){ e.neg = true; if(FUT_NEG.test(s)) e.negFuture = true; if(SKIP.test(s)) e.skip = true; }
     if(e.type === "sleep" && !e.time){ prev = null; continue; }
@@ -313,10 +318,15 @@ function parse(text){
 // угадать тип по названию (для своих занятий и новых дел в плане)
 function guessType(name){ const a = findActivity(name); return a && a.type ? a.type : null; }
 
+// «это не занятие»: фраза целиком и слово, в котором ошибочно нашлась опечатка
+function forget(text, word){
+  const c = core(text); if(c){ const L = learned(); L[c] = {type:"none"}; try{ localStorage.setItem("ritm:learned", JSON.stringify(L)); }catch(e){} }
+  if(word){ const NW = notWords(); NW.add(word); try{ localStorage.setItem("ritm:notWords", JSON.stringify([...NW])); }catch(e){} }
+}
 function remember(text, type, name){
   const c = core(text); if(!c) return;
   const L = learned(); L[c] = {type, name}; try{ localStorage.setItem("ritm:learned", JSON.stringify(L)); }catch(e){}
 }
 
-R.parse = parse; R.guessType = guessType; R.remember = remember; R.core = core; R.findActivity = findActivity; R.norm = norm; R.pre = pre; R.dist = dist;
+R.parse = parse; R.guessType = guessType; R.remember = remember; R.forget = forget; R.core = core; R.findActivity = findActivity; R.norm = norm; R.pre = pre; R.dist = dist;
 })();

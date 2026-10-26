@@ -20,6 +20,7 @@ for(const [t, exp] of NLU){
   if(exp.corr !== undefined){ if(exp.corr === null ? a.correction !== null : !(a.correction && Object.entries(exp.corr).every(([k,v]) => a.correction[k] === v))) pass = false; }
   if(exp.topics && !exp.topics.every(k => a.topics.includes(k))) pass = false;
   if(exp.meta && a.meta !== exp.meta) pass = false;
+  if(exp.question != null && a.question !== exp.question) pass = false;
   if(pass) ok++; else { bad++; fails.push(`NLU «${t}»\n   ждали: ${JSON.stringify(exp)}\n   вышло: ${JSON.stringify({crisis:a.crisis, states:a.states, small:a.small, corr:a.correction, topics:a.topics, meta:a.meta})}`); }
 }
 console.log(fails.join("\n"));

@@ -105,7 +105,7 @@ function analyze(text){
   out.correction = correction(s);
   if(META_TOO_EARLY.test(s)) out.meta = "tooEarly"; else if(META_DONT_CHANGE.test(s)) out.meta = "dontChange";
   out.conversational = CONVERSATIONAL.test(s) && !/\d/.test(s) && words(s) >= 4;
-  out.question = QUESTION.test(s);
+  out.question = QUESTION.test(s.replace(/ (потому что|так что|то что|за то что|раз что|что-то|что-нибудь|как-то|как будто|когда-то|как обычно|как всегда|как раз) /g, " _ "));
   for(const [k, re] of ASK_TOPICS) if(re.test(s)) out.topics.push(k);
   return out;
 }
