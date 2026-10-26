@@ -161,3 +161,13 @@ label.tog{display:flex}
 .norms{margin:10px 0 0;padding-left:18px;font-size:.88rem;line-height:1.45}
 .norms li{margin-bottom:8px}
 .norms a{color:var(--accent,#0f766e)}
+
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.logform.logrow{flex-direction:row;align-items:center;gap:8px}
+.logform.logrow input{flex:1 1 auto;min-width:0;font:inherit;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.logform.logrow .btn{flex:none;align-self:auto}
+.insight .dot.info{background:var(--muted)}
+.okline{margin:0;font-size:.9rem;color:var(--ink)}
+.weektools{margin-top:18px}
+.weektools summary{cursor:pointer;font-weight:600;padding:2px 0}
+.weektools .sep{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}

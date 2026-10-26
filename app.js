@@ -252,7 +252,7 @@ function suggestionsToday(){
     return {c, g, since, today, score, whyOver};
   }).filter(x => !dismissed.has(x.c)).sort((a,b) => b.score - a.score);
   for(const x of cands){
-    if(out.length >= 3) break;
+    if(out.length >= 2) break;
     if(x.score <= 0 && out.length >= 1) continue;
     const idea = ideasFor(x.c, ti, hour, offsets[x.c]||0, recent);
     if(!idea) continue;
@@ -260,7 +260,7 @@ function suggestionsToday(){
     if(x.whyOver) why = x.whyOver;
     else if(x.g.deficit > 0) why = `До цели недели не хватает ${x.g.deficit} ${plural(x.g.deficit,"раза","раз","раз")}: ${CATS[x.c].n.toLowerCase()} ${x.g.done}/${x.g.goal}`;
     else if(x.since >= 3 && x.since < 99) why = `Уже ${x.since} ${plural(x.since,"день","дня","дней")} без ${CATS[x.c].g}`;
-    else if(x.since === 99) why = `Давно не было ${CATS[x.c].g}`;
+    else if(x.since === 99) why = `Ещё не было на этой неделе: ${CATS[x.c].n.toLowerCase()}`;
     else why = "Для разнообразия: что-то новое";
     out.push({kind:"idea", cat:x.c, idea, why});
   }
@@ -309,7 +309,12 @@ function itemRow(it){
     <button class="body" data-edit="${it.id}"><span class="t">${esc(it.t)}</span><span class="meta"><span>${cat.n}</span>${it.time?`<span class="num ${late?"late":""}">${it.time}</span>`:""}${late?`<span class="late">поздно для экрана</span>`:""}</span></button></div>`;
 }
 
+function placeCheckin(){   // вечером оценка дня идёт сразу после плана, днём — в конце
+  const c = $("checkin"), plan = $("planBlock"), sugg = $("suggBlock"); if(!c || !plan || !sugg) return;
+  if(new Date().getHours() >= 17) plan.after(c); else sugg.after(c);
+}
 function renderToday(){
+  placeCheckin();
   const ck = curKey(), ti = todayI(), w = getWeek(ck), d = new Date();
   $("subtitle").textContent = `${DFULL[ti]}, ${d.getDate()} ${MONG[d.getMonth()]}`;
   const its = w.items.filter(i => i.day===ti).sort((a,b) => (a.time||"99").localeCompare(b.time||"99"));
@@ -435,7 +440,7 @@ function renderWeek(){
   if(ti === 7) gh = `<h2>Неделя прошла</h2><p class="note">Итоги этой недели — во вкладке «Итоги», когда она текущая. Можно скопировать её план на новую неделю во вкладке «Ещё».</p>`;
   else if(!w.items.length) gh = `<h2>Неделя пустая</h2><p class="note">Приложение может само составить план по вашим целям, с разными занятиями.</p><div class="tools"><button class="btn primary" data-autofill="1">Составить план за меня</button><button class="btn" data-act="tpl">По шаблону</button></div>`;
   else if(missing.length || aeroNeed > 0) gh = `<h2>Не хватает до целей</h2><p class="note">${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).concat(aeroNeed > 0 ? [`аэробной нагрузки ещё ~${aeroNeed} мин (норма ВОЗ ${AERO_GOAL})`] : []).join(", ")}</p><div class="tools"><button class="btn primary" data-autofill="1">Добавить недостающее</button></div><p class="note">Приложение раскидает занятия по самым свободным дням и подберёт разные идеи.</p>`;
-  else gh = `<h2>Все цели в плане</h2><p class="note">Если что-то не получится, перенесите дело: нажмите на него и выберите другой день.</p>`;
+  else gh = `<p class="okline"><b>✓ Все цели недели в плане.</b> Чтобы перенести дело, нажмите на него.</p>`;
   $("weekGaps").innerHTML = gh;
   $("days").innerHTML = DFULL.map((name,d) => {
     const date = addDays(ws,d), its = w.items.filter(i=>i.day===d).sort((x,y)=>(x.time||"99").localeCompare(y.time||"99"));
@@ -451,7 +456,7 @@ function renderStats(){
     const g = gs[c], col = `var(${CATS[c].c})`;
     return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.done}/${g.goal}</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.plan/g.goal*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.done/g.goal*100)}%;background:${col}"></div></div></div>`;
   }).join("") + (() => { const a = aeroMinutes(w), col = "var(" + CATS.walk.c + ")";
-    return `<div class="goal"><div class="gh"><span>Аэробная нагрузка</span><span class="num">${a.done}/${AERO_GOAL} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,a.plan/AERO_GOAL*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,a.done/AERO_GOAL*100)}%;background:${col}"></div></div></div>`; })()
+    return `<div class="goal"><div class="gh"><span>Аэробика</span><span class="num">${a.done}/${AERO_GOAL} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,a.plan/AERO_GOAL*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,a.done/AERO_GOAL*100)}%;background:${col}"></div></div></div>`; })()
     + `</div><p class="note">Яркая часть полосы — сделано, бледная — запланировано. Аэробная нагрузка — ходьба, плавание, бег, велосипед и спорт; норма ВОЗ — от 150 минут в неделю.</p>`;
 
   const ins = [];
@@ -468,11 +473,10 @@ function renderStats(){
   // сон считаем по последним 7 дням, а не по календарной неделе (в понедельник иначе всегда «данных мало»)
   for(let i = 0; i < 7; i++){ const dt = addDays(new Date(), -i), sv = sleepVerdict(getWeek(dateKeyOf(dt)), dateKeyOf(dt), dayIdxOf(dt)); if(sv !== null){ sleepN++; if(sv) sleep++; } }
   // выводы про сон и свет — только когда есть из чего: хотя бы 3 ночи / 3 дня
-  if(sleepN < 3) ins.push(["sun", `Сон: данных пока мало (${sleepN} из 3 нужных ночей). Норма у каждого своя: ${needText()}. Сон за сутки считаю вместе с дневным и вечерним; вывод по режиму появится, когда наберётся 3 ночи.`]);
+  if(sleepN < 3) ins.push(["info", `Сон: данных пока мало (${sleepN} из 3 нужных ночей). Норма у каждого своя: ${needText()}. Сон за сутки считаю вместе с дневным и вечерним; вывод по режиму появится, когда наберётся 3 ночи.`]);
   else { const need = Math.ceil(sleepN * 0.7);
     ins.push([sleep >= need ? "ok" : "warn", `Сон за 7 дней: ${sleep} из ${sleepN} ${plural(sleepN,"ночи","ночей","ночей")} в норме (${needText()}; хорошее самочувствие тоже засчитывается). ${sleep >= need ? "Так держать, это основа бодрости." : "Цель — большинство ночей по твоей норме. Ровное время отбоя помогает не меньше, чем длина сна."}`]); }
   if(elapsed >= 3) ins.push([light >= elapsed - 1 ? "ok" : "sun", `Дневной свет: ${light} из ${elapsed}. ${light >= elapsed - 1 ? "Отлично." : "Хватит 15–30 минут на улице до обеда: утренний свет настраивает суточный ритм."}`]);
-  else ins.push(["sun", "Отмечайте сон, свет, энергию и настроение вечером во вкладке «Сегодня». Выводы по сну и свету появятся примерно через 3 дня."]);
   const avg = a => a.reduce((x,y)=>x+y,0)/a.length;
   if(NATIVE || Object.keys(health.steps||{}).length){
     const sd = [], sl = [], eGood = [], eBad = [];
@@ -491,7 +495,7 @@ function renderStats(){
   if(eM.length >= 2 && eR.length >= 2){
     const diff = avg(eM) - avg(eR);
     ins.push([diff > 0 ? "ok" : "sun", diff > 0.2 ? `В дни с движением энергия выше в среднем на ${diff.toFixed(1).replace(".", ",")} балла. Движение вам реально помогает.` : `Пока разницы в энергии между днями с движением и без почти нет. Продолжайте отмечать, картина станет точнее.`]);
-  } else ins.push(["sun", "Отмечайте энергию каждый вечер во вкладке «Сегодня». Через неделю здесь появится, как движение влияет на ваше самочувствие."]);
+  } else ins.push(["info", "Отмечайте энергию, настроение и дневной свет вечером во вкладке «Сегодня». Через несколько дней здесь появится, как сон и движение влияют на ваше самочувствие."]);
   if(mood.length >= 3) ins.push(["ok", `Среднее настроение за неделю: ${avg(mood).toFixed(1).replace(".", ",")} из 5.`]);
   const doneNow = w.items.filter(i=>i.done && i.day<=ti).length, donePrev = pw.items.filter(i=>i.done && i.day<=ti).length;
   if(pw.items.length) ins.push(["ok", `К этому дню на прошлой неделе было сделано ${donePrev}, сейчас ${doneNow}.`]);
@@ -1373,7 +1377,9 @@ function postIssues(dates, max){
   let n = 0;
   for(const dt of dates) for(const x of planIssues(dt)){
     if(n >= (max||3)) return n;
-    bot(`«${x.it.t}» ${whenWord(dt)}: ${x.why}. Что сделать?`, issueActions(x)); n++;
+    const msg = `«${x.it.t}» ${whenWord(dt)}: ${x.why}. Что сделать?`;
+    if(getChat().slice(-15).some(m => m.who === "bot" && m.text === msg && m.chosen == null)){ n++; continue; }   // такой вопрос уже висит
+    bot(msg, issueActions(x)); n++;
   }
   return n;
 }
@@ -2357,8 +2363,8 @@ function journalHtml(ctx){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), log = ((w.days[ti]||{}).log||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
   const s = intakeOf(log);
   const bar = (v, max, col) => `<div class="bar"><div class="dn" style="width:${Math.min(100, max ? v/max*100 : 0)}%;background:var(${col})"></div></div>`;
-  let h = `<form data-log="${ctx}" class="logform"><label class="label" for="logInput-${ctx}">Что было? Пишите как удобно</label>
-    <textarea id="logInput-${ctx}" rows="2" placeholder="Например: выпил кофе в 9:30 и в 11:30, прогулка 40 минут, два скупа протеина с водой"></textarea>
+  let h = `<form data-log="${ctx}" class="logform logrow"><label class="sr" for="logInput-${ctx}">Что было? Пишите как удобно</label>
+    <input id="logInput-${ctx}" type="text" enterkeyhint="send" autocomplete="off" placeholder="Что делал? Кофе в 9:30…">
     <button class="btn primary" type="submit">Записать</button></form>`;
   if(logDraft && logDraft.ctx === ctx){
     h += `<div class="preview"><span class="label">Понял так</span>` + logDraft.items.map((e,i) => `<div class="lrow ${e.type ? "" : "unknown"}">
@@ -2386,7 +2392,7 @@ function journalHtml(ctx){
   }
   return h;
 }
-function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Журнал дня</h2></div>` + journalHtml("t"); }
+function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Записать и отметить</h2><span class="note">вода, кофе, белок, дела</span></div>` + journalHtml("t"); }
 
 function fillDefaults(e){
   const t = TYPES[e.type]; if(!t) return e;
@@ -2452,17 +2458,19 @@ function journalClick(ds, t){
 document.addEventListener("submit", e => { const f = e.target.closest("form[data-log]"); if(!f) return; e.preventDefault(); submitLog(f.dataset.log); });
 
 /* own activities */
-let actDraft = {n:"", t:null, manual:false};
+let actDraft = {n:"", t:null, manual:false}, actOpen = false;
 function renderActs(){
   const el = $("actsCard"); if(!el) return;
   const list = customActs();
   el.innerHTML = `<h2>Мои занятия</h2>
-    <p class="note">В базе больше ${RITM.CATALOG.length} занятий. Добавьте своё: приложение будет узнавать его в журнале и предлагать в советах. Тип определяется по названию, его можно поправить.</p>
+    <p class="note">В базе ${RITM.CATALOG.length} занятий${list.length ? ", ваших " + list.length : ""}. Своё занятие приложение будет узнавать в журнале и предлагать в советах.</p>
+    <details class="base" ${actOpen ? "open" : ""}><summary>Добавить своё занятие</summary>
     <div class="field"><label class="label" for="actName">Название</label><input id="actName" type="text" value="${esc(actDraft.n)}" placeholder="Например, флорбол или прогулка с собакой" autocomplete="off"></div>
     <div class="field"><span class="label">Тип ${actDraft.t && !actDraft.manual ? '<span class="note">— определил по названию</span>' : ""}</span><div id="actType">${typeChipsHtml(actDraft.t, k => k !== "sleep")}</div></div>
-    <div class="tools"><button class="btn primary" id="actAdd">Добавить занятие</button></div>
+    <div class="tools"><button class="btn primary" id="actAdd">Добавить занятие</button></div></details>
     ${list.length ? `<span class="label">Ваши занятия</span>` + list.map((a,i) => `<div class="lrow"><span class="ldot" style="background:var(${(CATS[a.t]||CATS.other).c})"></span><span class="lt">${esc(a.n)}<small>${(CATS[a.t]||CATS.other).full}</small></span><button class="x" data-actdel="${i}" aria-label="Удалить">×</button></div>`).join("") : ""}
     <details class="base"><summary>Посмотреть всю базу</summary><input id="actSearch" type="search" placeholder="Поиск по базе" autocomplete="off"><div id="actBase"></div></details>`;
+  const det = el.querySelector("details.base"); if(det) det.ontoggle = () => { actOpen = det.open; };
   const inp = $("actName");
   inp.oninput = () => { actDraft.n = inp.value; if(!actDraft.manual){ const g = RITM.guessType(actDraft.n); actDraft.t = g; $("actType").innerHTML = typeChipsHtml(actDraft.t, k => k !== "sleep"); } };
   $("actType").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; actDraft.t = b.dataset.cat; actDraft.manual = true; $("actType").innerHTML = typeChipsHtml(actDraft.t, k => k !== "sleep"); };
