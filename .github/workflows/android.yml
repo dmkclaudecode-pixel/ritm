@@ -41,6 +41,9 @@ jobs:
         if: failure()
         run: |
           grep -iE "error|e: |wrong|could not|unresolved|minSdk|incompatible|metadata|manifest" build.log | head -60 > /tmp/log.txt || true
+          J=$(find ~/.gradle -name "litertlm-android-*-api.jar" | head -1); echo "JAR $J" >> /tmp/log.txt
+          for c in Conversation Message Content Contents; do javap -cp "$J" com.google.ai.edge.litertlm.$c >> /tmp/log.txt 2>&1 || true; done
+          unzip -l "$J" | grep -i "litertlm/" | awk '{print $4}' | head -60 >> /tmp/log.txt || true
           echo "---- tail ----" >> /tmp/log.txt; tail -40 build.log >> /tmp/log.txt || true
           git config user.name ci; git config user.email ci@example.com
           git checkout --orphan ci-log; git rm -rf . -q
