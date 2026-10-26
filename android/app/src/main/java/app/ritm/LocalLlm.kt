@@ -1,6 +1,7 @@
 package app.ritm
 
 import android.content.Context
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import java.io.File
@@ -68,7 +69,7 @@ object LocalLlm {
         val f = file(ctx); if (!f.exists()) throw IllegalStateException("модель не скачана")
         val e = engine ?: Engine(EngineConfig(modelPath = f.absolutePath)).also { it.initialize(); engine = it }
         lastUse = System.currentTimeMillis()
-        val text = e.createConversation().use { c -> c.sendMessage(prompt).text }
+        val text = e.createConversation().use { c -> c.sendMessage(prompt).contents.contents.filterIsInstance<Content.Text>().joinToString("") { t -> t.text } }
         Thread { Thread.sleep(IDLE_MS + 500); synchronized(this) { if (System.currentTimeMillis() - lastUse >= IDLE_MS) { try { engine?.close() } catch (x: Exception) {}; engine = null } } }.start()
         return text
     }
