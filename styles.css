@@ -3,7 +3,7 @@
 :root{
   --bg:#F2F4F0; --surface:#FFFFFF; --ink:#1A2320; --muted:#5E6B66; --line:#DCE2DD;
   --accent:#0F7A73; --accent-soft:#D6ECE9; --sun:#C9821F; --sun-soft:#F6E7CF; --warn:#B4472F; --warn-soft:#F5DED7;
-  --c-strength:#C2553A; --c-walk:#3F8A4E; --c-pool:#2672A8; --c-social:#A8457E; --c-offline:#6E6A2C; --c-fun:#C9821F; --c-games:#6B5BB8; --c-other:#7A8580;
+  --c-strength:#C2553A; --c-walk:#3F8A4E; --c-pool:#2672A8; --c-social:#A8457E; --c-offline:#6E6A2C; --c-fun:#C9821F; --c-games:#6B5BB8; --c-other:#7A8580; --c-walk2:#3F8A4E; --c-mobility:#2F8F8A; --c-warn-tone:#9C3D52;
   --f-display:"Unbounded", "Golos Text", system-ui, sans-serif;
   --f-body:"Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
@@ -12,12 +12,12 @@
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#111816; --surface:#19221F; --ink:#E6ECE9; --muted:#93A19B; --line:#2A3531;
   --accent:#4FC2B8; --accent-soft:#183A36; --sun:#E8B060; --sun-soft:#3A2E1A; --warn:#EE8A72; --warn-soft:#3D221C;
-  --c-strength:#E77C61; --c-walk:#6CBD7B; --c-pool:#5DA6DB; --c-social:#D57AB0; --c-offline:#BDB75E; --c-fun:#E8B060; --c-games:#9D8FEA; --c-other:#9AA6A1;
+  --c-strength:#E77C61; --c-walk:#6CBD7B; --c-pool:#5DA6DB; --c-social:#D57AB0; --c-offline:#BDB75E; --c-fun:#E8B060; --c-games:#9D8FEA; --c-other:#9AA6A1; --c-mobility:#5CC3BC; --c-warn-tone:#E27C93;
   color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#111816; --surface:#19221F; --ink:#E6ECE9; --muted:#93A19B; --line:#2A3531;
   --accent:#4FC2B8; --accent-soft:#183A36; --sun:#E8B060; --sun-soft:#3A2E1A; --warn:#EE8A72; --warn-soft:#3D221C;
-  --c-strength:#E77C61; --c-walk:#6CBD7B; --c-pool:#5DA6DB; --c-social:#D57AB0; --c-offline:#BDB75E; --c-fun:#E8B060; --c-games:#9D8FEA; --c-other:#9AA6A1;
+  --c-strength:#E77C61; --c-walk:#6CBD7B; --c-pool:#5DA6DB; --c-social:#D57AB0; --c-offline:#BDB75E; --c-fun:#E8B060; --c-games:#9D8FEA; --c-other:#9AA6A1; --c-mobility:#5CC3BC; --c-warn-tone:#E27C93;
   color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45}

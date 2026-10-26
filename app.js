@@ -1,32 +1,28 @@
 (() => {
 "use strict";
-const CATS = {
-  strength:{n:"Силовая", g:"силовой", c:"--c-strength", move:true},
-  walk:{n:"Прогулка", g:"прогулки", c:"--c-walk", move:true},
-  pool:{n:"Бассейн", g:"бассейна", c:"--c-pool", move:true},
-  social:{n:"Общение", g:"живого общения", c:"--c-social"},
-  offline:{n:"Без экранов", g:"вечера без экранов", c:"--c-offline"},
-  fun:{n:"Удовольствие", g:"чего-то просто для удовольствия", c:"--c-fun"},
-  games:{n:"Ютуб и игры", c:"--c-games"},
-  other:{n:"Другое", c:"--c-other"}
-};
-const GOAL_CATS = ["strength","walk","pool","social","offline","fun"];
-const DEFAULT_SETTINGS = {goals:{strength:2,walk:4,pool:1,social:2,offline:1,fun:2}, screensOff:"22:30", morning:"08:45", evening:"19:45", stepsGoal:7000, notify:false, bedtime:"23:30", reviewOn:true};
+const TYPES = RITM.TYPES;
+const CATS = Object.fromEntries(Object.entries(TYPES).map(([k,t]) => [k, {n:t.short||t.n, full:t.n, g:t.gen, c:t.c, move:t.g==="move", grp:t.g, unit:t.unit}]));
+const GOALABLE = Object.keys(TYPES).filter(k => ["move","rest","social"].includes(TYPES[k].g) && TYPES[k].unit === "min");
+const isScreen = c => !!(CATS[c] && CATS[c].grp === "screen");
+const goalCats = () => GOALABLE.filter(c => (settings.goals[c]||0) > 0);
+const DEFAULT_SETTINGS = {goals:{strength:2,walk:3,swim:1,mobility:1,social:2,unplug:1,outing:1,nature:1}, waterGoal:2000, caffeineMax:400, caffeineCutoff:"14:00", proteinGoal:100, screenLimit:120, screensOff:"22:30", morning:"08:45", evening:"19:45", stepsGoal:7000, notify:false, bedtime:"23:30", reviewOn:true};
 const DW = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 const DFULL = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
 const DACC = ["в понедельник","во вторник","в среду","в четверг","в пятницу","в субботу","в воскресенье"];
 const MON = ["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
 const MONG = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
 const TEMPLATE = [
-  [0,"strength","Домашняя силовая, 20 мин","19:00"],[0,"games","Ютуб или игры","21:00"],
-  [1,"walk","Быстрая прогулка 30–40 мин","18:30"],[1,"social","Звонок или встреча с близким",""],
-  [2,"walk","Прогулка или растяжка 15 мин",""],[2,"offline","Вечер без экранов","21:00"],
-  [3,"strength","Домашняя силовая, 20 мин","19:00"],[3,"games","Ютуб или игры","21:00"],
-  [4,"walk","Прогулка 30–40 мин",""],[4,"fun","Что-то приятное: кино, кафе, друзья",""],[4,"games","Игровой вечер","21:00"],
-  [5,"pool","Бассейн с ускорениями","11:00"],[5,"fun","Новое место или занятие",""],
-  [6,"walk","Длинная прогулка на природе","12:00"],[6,"fun","Отдых и план на неделю","19:00"]
+  [0,"strength","Силовая дома: всё тело","19:00"],[0,"gaming","Видеоигры, до часа","21:00"],
+  [1,"walk","Быстрая прогулка","18:30"],[1,"social","Позвонить родителям или близким",""],
+  [2,"mobility","Растяжка","21:00"],[2,"unplug","Вечер без экранов","21:00"],
+  [3,"strength","Силовая дома: ноги и кор","19:00"],[3,"video","Ютуб, до часа","21:00"],
+  [4,"walk","Прогулка после ужина","20:00"],[4,"outing","Кино, кафе или встреча с друзьями",""],[4,"gaming","Видеоигры с друзьями голосом","21:30"],
+  [5,"swim","Бассейн с ускорениями","11:00"],[5,"nature","Парк или набережная","13:00"],
+  [6,"walk","Прогулка в новом районе","12:00"],[6,"relax","Отдых и план на неделю","19:00"]
 ];
-const IDEAS = window.RITM_IDEAS || [];
+const customActs = () => LS.get("custom") || [];
+const IDEAS_BASE = RITM.CATALOG.filter(e => e.s).map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:e.w||"any", time:e.tm||"", note:e.s}));
+const ideasAll = () => IDEAS_BASE.concat(customActs().filter(e => TYPES[e.t] && TYPES[e.t].unit === "min").map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:"any", time:"", note:"Ваше занятие"})));
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -47,6 +43,23 @@ const LS = {
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 function getWeek(key){ const w = LS.get("w:"+key); return w ? {items:w.items||[], days:w.days||{}} : {items:[], days:{}}; }
 function saveWeek(key, w){ LS.set("w:"+key, {items:w.items, days:w.days, week:key, updated:new Date().toISOString()}); }
+(function migrate(){
+  if((LS.get("schema")||1) >= 2) return;
+  const MAP = {pool:"swim", offline:"unplug", fun:"outing", games:"gaming"};
+  const RENAME = {"Ютуб или игры":"Видеоигры, до часа", "Игровой вечер":"Видеоигры с друзьями голосом", "Домашняя силовая, 20 мин":"Силовая дома: всё тело"};
+  for(const k of LS.keys()) if(k.startsWith("w:")){
+    const w = LS.get(k); if(!w) continue;
+    for(const it of w.items||[]){
+      if(RENAME[it.t]) it.t = RENAME[it.t];
+      if(!RITM.TYPES[it.cat] || MAP[it.cat]){ const g = RITM.guessType(it.t); it.cat = (g && RITM.TYPES[g].g !== "intake" && g !== "sleep") ? g : (MAP[it.cat] || "other"); }
+    }
+    for(const day of Object.values(w.days||{})) for(const x of ((day.review||{}).extras||[])) if(MAP[x.cat]) x.cat = MAP[x.cat];
+    LS.set(k, w);
+  }
+  const st = LS.get("settings");
+  if(st && st.goals){ const g = {}; for(const [c,v] of Object.entries(st.goals)) g[MAP[c]||c] = v; st.goals = {...DEFAULT_SETTINGS.goals, ...g}; LS.set("settings", st); }
+  LS.set("schema", 2);
+})();
 function loadSettings(){ const s = LS.get("settings") || {}; return {...DEFAULT_SETTINGS, ...s, goals:{...DEFAULT_SETTINGS.goals, ...(s.goals||{})}}; }
 let settings = loadSettings();
 const persistSettings = () => LS.set("settings", settings);
@@ -57,8 +70,20 @@ let health = LS.get("health") || {steps:{}, sleep:{}};
 const fmtDur = m => `${Math.floor(m/60)} ч ${pad(m%60)} мин`;
 const fmtNum = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
 const dateOf = (key, d) => iso(addDays(new Date(key+"T00:00:00"), d));
-const sleepFor = ds => (health.sleep && health.sleep[ds]) || null;
-const stepsFor = ds => (health.steps && health.steps[ds] != null) ? health.steps[ds] : null;
+function dayLog(ds){ const d = new Date(ds+"T00:00:00"); const w = LS.get("w:"+iso(mondayOf(d))); return (w && w.days && w.days[(d.getDay()+6)%7]) || {}; }
+function sleepFromLog(ds){
+  const today = dayLog(ds), prev = dayLog(iso(addDays(new Date(ds+"T00:00:00"),-1)));
+  const wake = (today.log||[]).filter(e=>e.type==="sleep" && e.event==="wake" && e.time).map(e=>e.time).sort()[0];
+  const beds = (prev.log||[]).filter(e=>e.type==="sleep" && e.event==="bed" && e.time >= "18:00").map(e=>e.time).sort();
+  const early = (today.log||[]).filter(e=>e.type==="sleep" && e.event==="bed" && e.time < "06:00").map(e=>e.time).sort();
+  const bed = early.length ? early[early.length-1] : beds[beds.length-1];
+  if(!wake || !bed) return null;
+  const toM = t => +t.slice(0,2)*60 + +t.slice(3,5);
+  let min = toM(wake) - toM(bed); if(min <= 0) min += 1440;
+  return min >= 120 && min <= 16*60 ? {start:bed, end:wake, min, src:"log"} : null;
+}
+const sleepFor = ds => (health.sleep && health.sleep[ds]) || sleepFromLog(ds);
+const stepsFor = ds => { if(health.steps && health.steps[ds] != null) return health.steps[ds]; const d = dayLog(ds); return d.stepsManual != null ? d.stepsManual : ((d.review||{}).steps ?? null); };
 function bedMin(hm){ const [h,m] = hm.split(":").map(Number); let t = h*60+m; if(t < 12*60) t += 24*60; return t; }
 function sleepRegular(ds){
   const s = sleepFor(ds); if(!s) return null;
@@ -86,9 +111,10 @@ function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key <
 /* ---------- analysis ---------- */
 function goalState(w, ti){
   const out = {};
-  for(const c of GOAL_CATS){
+  for(const c of goalCats()){
     const goal = settings.goals[c]||0; let done=0, future=0, missed=0, plan=0;
     for(const it of w.items){ if(it.cat!==c) continue; plan++; if(it.done) done++; else if(it.day >= ti) future++; else missed++; }
+    for(const [d, day] of Object.entries(w.days||{})) for(const e of (day.log||[])) if(e.type===c && !e.plan && (e.min||0) >= 5){ done++; plan++; }
     out[c] = {goal, done, future, missed, plan, deficit: Math.max(0, goal - done - future)};
   }
   return out;
@@ -98,6 +124,8 @@ function daysSinceDone(cat){
   let best = 99;
   for(const it of cw.items) if(it.cat===cat && it.done && it.day<=ti) best = Math.min(best, ti - it.day);
   for(const it of pw.items) if(it.cat===cat && it.done) best = Math.min(best, ti + 7 - it.day);
+  for(const [d, day] of Object.entries(cw.days||{})) if(+d <= ti && (day.log||[]).some(e=>e.type===cat)) best = Math.min(best, ti - +d);
+  for(const [d, day] of Object.entries(pw.days||{})) if((day.log||[]).some(e=>e.type===cat)) best = Math.min(best, ti + 7 - +d);
   return best;
 }
 function recentTitles(){
@@ -112,13 +140,13 @@ function ideaFits(idea, day, hour){
   if(idea.when === "weekend" && !weekend) return false;
   if(hour != null){
     if(idea.when === "day" && hour >= 17) return false;
-    if(idea.cat === "pool" && hour >= 20) return false;
+    if(idea.cat === "swim" && hour >= 20) return false;
     if(idea.when === "evening" && idea.time && hour > +idea.time.slice(0,2)+2) return false;
   }
   return true;
 }
 function ideasFor(cat, day, hour, offset, recent){
-  const pool = IDEAS.filter(i => i.cat===cat && ideaFits(i, day, hour));
+  const pool = ideasAll().filter(i => i.cat===cat && ideaFits(i, day, hour));
   const fresh = pool.filter(i => !recent.has(i.t));
   const list = shuffled(fresh.length ? fresh : pool, hash(curKey()+cat+day));
   return list.length ? list[offset % list.length] : null;
@@ -135,11 +163,11 @@ function suggestionsToday(){
   const tds = dateOf(ck, ti), stepsNow = stepsFor(tds), lastSleep = sleepFor(tds), goalSteps = settings.stepsGoal;
   const shortSleep = !!(lastSleep && lastSleep.min < 360), lowSteps = stepsNow != null && hour >= 14 && stepsNow < goalSteps*0.5;
   if(shortSleep && hour >= 17 && !dismissed.has("early") && !w.items.some(i=>i.day===ti && i.t.startsWith("Лечь пораньше"))) out.push({kind:"early"});
-  const cands = GOAL_CATS.filter(c => settings.goals[c] > 0).map(c => {
+  const cands = goalCats().filter(c => settings.goals[c] > 0).map(c => {
     const g = gs[c], since = daysSinceDone(c), today = w.items.some(i => i.day===ti && i.cat===c);
     let score = g.deficit*10 + Math.min(since,10) - (today?40:0), whyOver = null;
-    if(c === "pool" && g.deficit === 0) score -= 6;
-    if(shortSleep && (c === "strength" || c === "pool")) score -= 15;
+    if(c === "swim" && g.deficit === 0) score -= 6;
+    if(shortSleep && (c === "strength" || c === "swim")) score -= 15;
     if(c === "walk" && lowSteps){ score += 14; whyOver = `Сегодня пока ${fmtNum(stepsNow)} шагов из ${fmtNum(goalSteps)}`; }
     else if(c === "walk" && shortSleep){ score += 4; whyOver = `Сон был ${fmtDur(lastSleep.min)}: сегодня лучше лёгкая прогулка, чем силовая`; }
     return {c, g, since, today, score, whyOver};
@@ -166,14 +194,14 @@ function autoFill(key){
   if(relIdx(key) === 7){ toast("Эта неделя уже прошла"); return 0; }
   const gs = goalState(w, ti), recent = recentTitles(), added = [];
   const load = Array(7).fill(0); w.items.forEach(i => load[i.day]++);
-  for(const c of GOAL_CATS){
+  for(const c of goalCats()){
     let need = gs[c].deficit;
     let off = 0;
     while(need > 0){
       let best = -1, bl = 99;
       for(let d = ti; d < 7; d++){
         if(w.items.some(i => i.day===d && i.cat===c)) continue;
-        let l = load[d] + (c==="pool" && d<5 ? 2 : 0) + (d===ti && new Date().getHours()>=20 ? 5 : 0) + (w.items.some(i => i.cat===c && Math.abs(i.day-d)===1) ? 2 : 0);
+        let l = load[d] + (c==="swim" && d<5 ? 2 : 0) + (d===ti && new Date().getHours()>=20 ? 5 : 0) + (w.items.some(i => i.cat===c && Math.abs(i.day-d)===1) ? 2 : 0);
         if(l < bl){ bl = l; best = d; }
       }
       if(best < 0) break;
@@ -189,7 +217,7 @@ function autoFill(key){
 
 /* ---------- rendering ---------- */
 function itemRow(it){
-  const cat = CATS[it.cat]||CATS.other, late = it.cat==="games" && it.time && it.time >= settings.screensOff;
+  const cat = CATS[it.cat]||CATS.other, late = isScreen(it.cat) && it.time && it.time >= settings.screensOff;
   return `<div class="item ${it.done?"done":""}"><span class="stripe" style="background:var(${cat.c})"></span>
     <button class="tick" data-tick="${it.id}" aria-label="${it.done?"Снять отметку":"Отметить сделанным"}"><span></span></button>
     <button class="body" data-edit="${it.id}"><span class="t">${esc(it.t)}</span><span class="meta"><span>${cat.n}</span>${it.time?`<span class="num ${late?"late":""}">${it.time}</span>`:""}${late?`<span class="late">поздно для экрана</span>`:""}</span></button></div>`;
@@ -208,6 +236,7 @@ function renderToday(){
   const C = 2*Math.PI*30;
   $("todayHero").innerHTML = `<div class="ring"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="36" cy="36" r="30" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-frac)}"/></svg><span class="rv">${done}/${total}</span></div><div class="ht"><span class="big">${msg}</span><span class="note">Нажмите на кружок, когда сделаете дело</span></div>`;
   renderBody(ck, ti);
+  renderJournal();
   const rvDone = !!((w.days[ti]||{}).review||{}).done, hr = new Date().getHours();
   $("reviewCta").hidden = !(hr >= 17 || rvDone);
   $("reviewCta").innerHTML = rvDone
@@ -284,7 +313,7 @@ function buildSnapshot(){
   for(let d=0; d<7; d++){
     const its = w.items.filter(i=>i.day===d).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
     const undone = its.filter(i=>!i.done);
-    const gs = goalState(w, d), miss = GOAL_CATS.filter(c=>gs[c].deficit>0).map(c=>CATS[c].n.toLowerCase()+" ×"+gs[c].deficit);
+    const gs = goalState(w, d), miss = goalCats().filter(c=>gs[c].deficit>0).map(c=>CATS[c].n.toLowerCase()+" ×"+gs[c].deficit);
     const list = its.slice(0,4).map(i=>(i.time? i.time+" ":"")+i.t).join("; ");
     days[dateOf(ck,d)] = {
       morning: its.length ? {title:`Сегодня ${its.length} ${plural(its.length,"дело","дела","дел")}`, text: list + (its.length>4 ? " и ещё "+(its.length-4) : "") + ". И 15 минут дневного света до обеда."}
@@ -313,7 +342,7 @@ function renderWeek(){
     const dots = w.items.filter(i=>i.day===d).slice(0,5).map(i=>`<i class="${i.done?"on":""}"></i>`).join("");
     return `<button class="dchip ${d===ti?"today":""}" data-jump="${d}" aria-label="${DFULL[d]}"><span class="dw">${dw}</span><span class="dn">${addDays(ws,d).getDate()}</span><span class="dots">${dots}</span></button>`;
   }).join("");
-  const gs = goalState(w, Math.max(0, ti)), missing = GOAL_CATS.filter(c => gs[c].deficit > 0);
+  const gs = goalState(w, Math.max(0, ti)), missing = goalCats().filter(c => gs[c].deficit > 0);
   let gh;
   if(ti === 7) gh = `<h2>Неделя прошла</h2><p class="note">Итоги этой недели — во вкладке «Итоги», когда она текущая. Можно скопировать её план на новую неделю во вкладке «Ещё».</p>`;
   else if(!w.items.length) gh = `<h2>Неделя пустая</h2><p class="note">Приложение может само составить план по вашим целям, с разными занятиями.</p><div class="tools"><button class="btn primary" data-autofill="1">Составить план за меня</button><button class="btn" data-act="tpl">По шаблону</button></div>`;
@@ -330,15 +359,15 @@ function renderWeek(){
 function renderStats(){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), gs = goalState(w, ti), pw = getWeek(iso(addDays(mondayOf(new Date()),-7)));
   $("subtitle").textContent = "Эта неделя";
-  $("goalsCard").innerHTML = `<div class="bhead"><h2>Цели недели</h2><span class="note num">${w.items.filter(i=>i.done).length} сделано</span></div><div class="goals">` + GOAL_CATS.filter(c=>settings.goals[c]).map(c => {
+  $("goalsCard").innerHTML = `<div class="bhead"><h2>Цели недели</h2><span class="note num">${w.items.filter(i=>i.done).length} сделано</span></div><div class="goals">` + goalCats().filter(c=>settings.goals[c]).map(c => {
     const g = gs[c], col = `var(${CATS[c].c})`;
     return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.done}/${g.goal}</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.plan/g.goal*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.done/g.goal*100)}%;background:${col}"></div></div></div>`;
   }).join("") + `</div><p class="note">Яркая часть полосы — сделано, бледная — запланировано.</p>`;
 
   const ins = [];
-  const missing = GOAL_CATS.filter(c => gs[c].deficit > 0);
+  const missing = goalCats().filter(c => gs[c].deficit > 0);
   if(missing.length) ins.push(["warn", `Не хватает до целей: ${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).join(", ")}. Во вкладке «Неделя» можно добавить это одной кнопкой.`]);
-  const missed = GOAL_CATS.reduce((s,c)=>s+gs[c].missed,0);
+  const missed = goalCats().reduce((s,c)=>s+gs[c].missed,0);
   if(missed) ins.push(["sun", `Пропущено ${missed} ${plural(missed,"дело","дела","дел")}. Не страшно: переносите их на свободные дни, а не отменяйте.`]);
   const elapsed = ti+1; let sleep=0, light=0; const eM=[], eR=[], mood=[];
   for(let d=0; d<=ti; d++){
@@ -373,14 +402,14 @@ function renderStats(){
   if(mood.length >= 3) ins.push(["ok", `Среднее настроение за неделю: ${avg(mood).toFixed(1)} из 5.`]);
   const doneNow = w.items.filter(i=>i.done && i.day<=ti).length, donePrev = pw.items.filter(i=>i.done && i.day<=ti).length;
   if(pw.items.length) ins.push(["ok", `К этому дню на прошлой неделе было сделано ${donePrev}, сейчас ${doneNow}.`]);
-  const games = w.items.filter(i=>i.cat==="games"), late = games.filter(i=>i.time && i.time >= settings.screensOff);
+  const games = w.items.filter(i=>isScreen(i.cat)), late = games.filter(i=>i.time && i.time >= settings.screensOff);
   if(late.length) ins.push(["warn", `Игры после ${settings.screensOff} стоят ${late.length} ${plural(late.length,"раз","раза","раз")}. Это мешает заснуть; лучше сдвинуть раньше.`]);
   $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + ins.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("");
 }
 
 function renderMore(){
   $("subtitle").textContent = "Цели, уведомления, копия";
-  renderReminders(); renderHealthCard();
+  renderReminders(); renderHealthCard(); renderActs();
   $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
   if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; $("nTestReview").hidden = !settings.notify;
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
@@ -467,12 +496,14 @@ function findIn(w, id){ return w.items.find(i=>i.id===id); }
 function keyOfItem(id){ for(const k of [curKey(), viewKey()]) if(getWeek(k).items.some(i=>i.id===id)) return k; return tab==="week" ? viewKey() : curKey(); }
 function bestDayFor(cat, key){
   const w = getWeek(key), from = Math.max(0, relIdx(key)), load = Array(7).fill(0); w.items.forEach(i=>load[i.day]++);
-  let best = from, bl = 99; for(let d=from; d<7; d++){ if(w.items.some(i=>i.day===d && i.cat===cat)) continue; const l = load[d] + (cat==="pool" && d<5 ? 2 : 0); if(l<bl){ bl=l; best=d; } } return best;
+  let best = from, bl = 99; for(let d=from; d<7; d++){ if(w.items.some(i=>i.day===d && i.cat===cat)) continue; const l = load[d] + (cat==="swim" && d<5 ? 2 : 0); if(l<bl){ bl=l; best=d; } } return best;
 }
 
 document.addEventListener("click", e => {
   const t = e.target.closest("button"); if(!t) return;
   const ds = t.dataset;
+  if(journalClick(ds, t)) return;
+  if(actsClick(ds)) return;
   if(tab==="review" && reviewClick(ds)) return;
   if(ds.openreview){ openReview(); return; }
   if(ds.tab){ rvState = null; rvResult = null; tab = ds.tab; if(tab==="week") weekStart = mondayOf(new Date()); render(); window.scrollTo({top:0}); return; }
@@ -485,7 +516,7 @@ document.addEventListener("click", e => {
   else if(ds.light){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{}), light:true}; }); toast("Отмечено: дневной свет"); }
   else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
   else if(ds.steps){ settings.stepsGoal = Math.max(2000, Math.min(20000, settings.stepsGoal + +ds.steps)); persistSettings(); render(); }
-  else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"offline", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
+  else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"unplug", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
   else if(ds.dismiss){ dismissed.add(ds.dismiss); render(); }
   else if(ds.snext){ offsets[ds.snext] = (offsets[ds.snext]||0) + 1; render(); }
   else if(ds.sadd){ const s = lastSugg[+ds.sadd]; if(!s) return; const tm = s.idea.time && s.idea.time > nowHM() ? s.idea.time : "";
@@ -518,16 +549,17 @@ function openSheet(html){ $("sheetIn").innerHTML = html; $("sheet").hidden = fal
 function closeSheet(){ $("sheet").hidden = true; $("scrim").hidden = true; }
 $("scrim").onclick = closeSheet;
 document.addEventListener("keydown", e => { if(e.key==="Escape") closeSheet(); });
-const defaultTitle = c => ({strength:"Домашняя силовая, 20 мин", walk:"Прогулка 30 мин", pool:"Бассейн с ускорениями", social:"Встреча или звонок", offline:"Вечер без экранов", fun:"Что-то приятное", games:"Ютуб или игры"}[c]||"");
+const defaultTitle = c => (CATS[c]||CATS.other).n;
 
 function openItem(key, it){
   const draft = {...it}, ws = new Date(key+"T00:00:00");
-  const catChips = () => Object.entries(CATS).map(([k,v]) => `<button type="button" class="chip ${draft.cat===k?"on":""}" data-cat="${k}"><i style="background:var(${v.c})"></i>${v.n}</button>`).join("");
+  let catManual = !!it.id;
+  const catChips = () => typeChipsHtml(draft.cat, k => !["intake"].includes(TYPES[k].g) && k !== "sleep");
   const dayChips = () => DW.map((w,d) => `<button type="button" class="chip ${draft.day===d?"on":""}" data-day="${d}">${w} ${addDays(ws,d).getDate()}</button>`).join("");
   const calHref = () => gcalUrl({title:draft.t || CATS[draft.cat].n, date:addDays(ws,draft.day), time:draft.time, minutes:30, details:"Ритм недели\n"+APP_URL});
   openSheet(`<h2>${it.id ? "Изменить дело" : "Новое дело"}</h2>
     <div class="field"><label class="label" for="fT">Что делаем</label><input id="fT" type="text" value="${esc(draft.t)}" placeholder="Например, прогулка в парке" autocomplete="off"></div>
-    <div class="field"><span class="label">Тип</span><div class="chips" id="fCat">${catChips()}</div></div>
+    <div class="field"><span class="label">Тип <span class="note" id="fGuess"></span></span><div id="fCat">${catChips()}</div></div>
     <div class="field"><span class="label">День</span><div class="chips" id="fDay">${dayChips()}</div></div>
     <div class="field"><label class="label" for="fTime">Время (необязательно)</label><input id="fTime" type="time" value="${esc(draft.time||"")}"></div>
     <div class="tools"><button class="btn primary" id="fSave">Сохранить</button>
@@ -536,9 +568,10 @@ function openItem(key, it){
       ${it.id ? `<button class="btn danger" id="fDel">Удалить</button>`:""}
       <button class="btn" id="fCancel">Отмена</button></div>`);
   const sync = () => { $("fCat").innerHTML = catChips(); $("fDay").innerHTML = dayChips(); $("fCal").href = calHref(); };
-  $("fT").oninput = () => { draft.t = $("fT").value; $("fCal").href = calHref(); };
+  $("fT").oninput = () => { draft.t = $("fT").value; $("fCal").href = calHref();
+    if(!catManual){ const g = RITM.guessType(draft.t); if(g && g !== draft.cat && TYPES[g].g !== "intake" && g !== "sleep"){ draft.cat = g; $("fGuess").textContent = "— определил по названию"; sync(); } } };
   $("fTime").oninput = () => { draft.time = $("fTime").value; $("fCal").href = calHref(); };
-  $("fCat").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; const wasDefault = !draft.t || draft.t===defaultTitle(draft.cat); draft.cat = b.dataset.cat; if(wasDefault && !it.id){ draft.t = defaultTitle(draft.cat); $("fT").value = draft.t; } sync(); };
+  $("fCat").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; catManual = true; $("fGuess").textContent = ""; const wasDefault = !draft.t || draft.t===defaultTitle(draft.cat); draft.cat = b.dataset.cat; if(wasDefault && !it.id){ draft.t = defaultTitle(draft.cat); $("fT").value = draft.t; } sync(); };
   $("fDay").onclick = e => { const b = e.target.closest("[data-day]"); if(!b) return; draft.day = +b.dataset.day; sync(); };
   $("fCancel").onclick = closeSheet;
   $("fSave").onclick = () => {
@@ -553,15 +586,29 @@ function openItem(key, it){
 
 function openGoals(){
   const draft = {...settings.goals};
-  const rows = () => GOAL_CATS.map(c => `<div class="goalrow"><span style="display:flex;align-items:center;gap:8px"><i style="width:10px;height:10px;border-radius:50%;background:var(${CATS[c].c})"></i>${CATS[c].n}</span>
-    <span class="stepper"><button data-g="${c}" data-d="-1" aria-label="Меньше">−</button><span class="num" style="min-width:1.5em;text-align:center">${draft[c]}</span><button data-g="${c}" data-d="1" aria-label="Больше">+</button></span></div>`).join("");
-  openSheet(`<h2>Цели на неделю</h2><p class="note">Сколько раз в неделю. По этим числам приложение считает, чего не хватает, и подбирает советы.</p>
+  const lim = {waterGoal:settings.waterGoal, proteinGoal:settings.proteinGoal, caffeineMax:settings.caffeineMax, screenLimit:settings.screenLimit};
+  const LIMITS = [["waterGoal","Вода в день", 250, 500, 5000, v => String(v/1000).replace(".",",")+" л"], ["proteinGoal","Белок в день", 10, 30, 250, v => v+" г"],
+                  ["caffeineMax","Кофеин не больше", 50, 0, 600, v => v+" мг"], ["screenLimit","Экраны для развлечений не больше", 30, 0, 480, v => fmtDur(v)]];
+  const row = (id, color, name, val, step, attr) => `<div class="goalrow"><span style="display:flex;align-items:center;gap:8px">${color ? `<i style="width:10px;height:10px;border-radius:50%;background:var(${color})"></i>` : ""}${name}</span>
+    <span class="stepper"><button data-${attr}="${id}" data-d="-${step}" aria-label="Меньше">−</button><span class="num" style="min-width:3.6em;text-align:center">${val}</span><button data-${attr}="${id}" data-d="${step}" aria-label="Больше">+</button></span></div>`;
+  const rows = () => {
+    const groups = {}; for(const c of GOALABLE) (groups[TYPES[c].g] = groups[TYPES[c].g] || []).push(c);
+    return Object.entries(groups).map(([g, cs]) => `<span class="label">${RITM.GROUPS[g].n}, раз в неделю</span>` + cs.map(c => row(c, CATS[c].c, CATS[c].full, draft[c]||0, 1, "g")).join("")).join("")
+      + `<span class="label">Каждый день</span>` + LIMITS.map(([k,n,st,,,f]) => row(k, null, n, f(lim[k]), st, "lim")).join("");
+  };
+  openSheet(`<h2>Цели</h2><p class="note">Сколько раз в неделю вы хотите каждое занятие и дневные нормы. По ним приложение считает, чего не хватает, и подбирает советы. Ноль — без цели.</p>
     <div id="gRows">${rows()}</div>
+    <div class="field"><label class="label" for="gCaf">Последний кофе до</label><input id="gCaf" type="time" value="${settings.caffeineCutoff}"></div>
     <div class="field"><label class="label" for="gOff">Экраны выключаю в</label><input id="gOff" type="time" value="${settings.screensOff}"></div>
     <div class="tools"><button class="btn primary" id="gSave">Сохранить</button><button class="btn" id="gCancel">Отмена</button></div>`);
-  $("gRows").onclick = e => { const b = e.target.closest("[data-g]"); if(!b) return; const c = b.dataset.g; draft[c] = Math.max(0, Math.min(7, draft[c] + +b.dataset.d)); $("gRows").innerHTML = rows(); };
+  $("gRows").onclick = e => {
+    const b = e.target.closest("[data-g],[data-lim]"); if(!b) return;
+    if(b.dataset.g){ const c = b.dataset.g; draft[c] = Math.max(0, Math.min(7, (draft[c]||0) + +b.dataset.d)); }
+    else { const k = b.dataset.lim, L = LIMITS.find(x=>x[0]===k); lim[k] = Math.max(L[3], Math.min(L[4], lim[k] + +b.dataset.d)); }
+    $("gRows").innerHTML = rows();
+  };
   $("gCancel").onclick = closeSheet;
-  $("gSave").onclick = () => { settings = {...settings, goals:draft, screensOff:$("gOff").value || "22:30"}; persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
+  $("gSave").onclick = () => { settings = {...settings, ...lim, goals:draft, screensOff:$("gOff").value || "22:30", caffeineCutoff:$("gCaf").value || "14:00"}; persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
 }
 
 function openIntro(){
@@ -579,9 +626,179 @@ function openIntro(){
 let toastT = null;
 function toast(msg){ const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
 
+/* ---------- journal: free-text log, intake, own activities ---------- */
+function typeChipsHtml(cur, filter){
+  const groups = {};
+  for(const [k,t] of Object.entries(TYPES)){ if(filter && !filter(k)) continue; (groups[t.g] = groups[t.g]||[]).push(k); }
+  return Object.entries(groups).map(([g, ks]) => `<div class="tgroup"><span class="label">${RITM.GROUPS[g].n}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${cur===k?"on":""}" data-cat="${k}"><i style="background:var(${CATS[k].c})"></i>${CATS[k].n}</button>`).join("")}</div></div>`).join("");
+}
+function chooseType(title, cur, cb){
+  openSheet(`<h2>${esc(title)}</h2><div id="tcPick">${typeChipsHtml(cur)}</div><div class="tools"><button class="btn" id="tcCancel">Отмена</button></div>`);
+  $("tcPick").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; closeSheet(); cb(b.dataset.cat); };
+  $("tcCancel").onclick = closeSheet;
+}
+function describe(e){
+  const p = [];
+  if(e.time) p.push("в " + e.time);
+  if(e.type === "sleep") return p.join(" · ");
+  if(e.stepsOnly) p.push(fmtNum(e.steps) + " шагов");
+  else if(e.min) p.push(e.min >= 60 && e.min % 30 === 0 ? String(e.min/60).replace(".",",") + " ч" : e.min + " мин");
+  if(e.km) p.push(String(e.km).replace(".",",") + " км");
+  if(e.ml) p.push(e.ml >= 1000 ? String(e.ml/1000).replace(".",",") + " л" : e.ml + " мл");
+  if(e.mg) p.push("≈" + e.mg + " мг кофеина");
+  if(e.g) p.push(e.g + " г белка");
+  if(e.srv && !e.mg && !e.g && !e.ml){ const n = Math.round(e.srv*10)/10; p.push(String(n).replace(".",",") + " " + plural(Math.ceil(n),"порция","порции","порций")); }
+  if(e.dose) p.push(e.dose);
+  return p.join(" · ");
+}
+function intakeOf(log){
+  const s = {water:0, mg:0, protein:0, alcohol:0, sweets:0, lastCaf:"", screen:0, lateScreen:0, move:0, groups:new Set()};
+  for(const e of log||[]){
+    if(e.type === "water") s.water += e.ml||0;
+    if(e.type === "caffeine"){ s.mg += e.mg||0; if(e.time && e.time > s.lastCaf) s.lastCaf = e.time; }
+    if(e.type === "protein") s.protein += e.g||0;
+    if(e.type === "alcohol") s.alcohol += e.srv||1;
+    if(e.type === "sweets") s.sweets += e.srv||1;
+    if(isScreen(e.type)){
+      if(!e.plan) s.screen += e.min||0;
+      if(e.time){ const st = +e.time.slice(0,2)*60 + +e.time.slice(3,5), off = +settings.screensOff.slice(0,2)*60 + +settings.screensOff.slice(3,5);
+        const a = st < 6*60 ? st + 1440 : st, end = a + (e.min||0); s.lateScreen += Math.max(0, Math.min(end, 30*60) - Math.max(a, off)); }
+    }
+    if(CATS[e.type] && CATS[e.type].move && !e.plan) s.move += e.min||0;
+    if(TYPES[e.type]) s.groups.add(TYPES[e.type].g);
+  }
+  return s;
+}
+
+let logDraft = null, logShowAll = false;
+function journalHtml(ctx){
+  const ck = curKey(), ti = todayI(), w = getWeek(ck), log = ((w.days[ti]||{}).log||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+  const s = intakeOf(log);
+  const bar = (v, max, col) => `<div class="bar"><div class="dn" style="width:${Math.min(100, max ? v/max*100 : 0)}%;background:var(${col})"></div></div>`;
+  let h = `<form data-log="${ctx}" class="logform"><label class="label" for="logInput-${ctx}">Что было? Пишите как удобно</label>
+    <textarea id="logInput-${ctx}" rows="2" placeholder="Например: выпил кофе в 9:30 и в 11:30, прогулка 40 минут, два скупа протеина с водой"></textarea>
+    <button class="btn primary" type="submit">Записать</button></form>`;
+  if(logDraft && logDraft.ctx === ctx){
+    h += `<div class="preview"><span class="label">Понял так</span>` + logDraft.items.map((e,i) => `<div class="lrow ${e.type ? "" : "unknown"}">
+      <span class="ldot" style="background:var(${e.type ? CATS[e.type].c : "--line"})"></span>
+      <span class="lt">${esc(e.name)}<small>${e.type ? esc(describe(e)) : "Не знаю, что это. Выберите тип, и я запомню"}</small></span>
+      <button class="chip ${e.type ? "" : "on"}" data-lpt="${i}">${e.type ? CATS[e.type].n : "Выбрать тип"}</button>
+      <button class="x" data-lpx="${i}" aria-label="Убрать">×</button></div>`).join("") +
+      (logDraft.items.length ? `<div class="tools"><button class="btn primary" data-lpsave="1">Сохранить</button><button class="btn" data-lpcancel="1">Отмена</button></div>`
+                             : `<p class="note">Ничего не нашёл. Попробуйте написать иначе.</p><div class="tools"><button class="btn" data-lpcancel="1">Закрыть</button></div>`) + `</div>`;
+  }
+  const wg = settings.waterGoal, pg = settings.proteinGoal, cm = settings.caffeineMax;
+  h += `<div class="intake">
+    <div class="metric"><span class="mv">${s.water >= 1000 ? (s.water/1000).toFixed(1).replace(".",",")+" л" : s.water+" мл"}</span><span class="mk">воды из ${String(wg/1000).replace(".",",")} л</span>${bar(s.water, wg, "--c-pool")}
+      <div class="qbtn"><button data-qw="250">+ стакан</button><button data-qw="500">+ бутылка</button></div></div>
+    <div class="metric"><span class="mv">${s.mg} мг</span><span class="mk">кофеина${s.lastCaf ? ", последний в "+s.lastCaf : ""}</span>${bar(s.mg, cm, s.mg > cm ? "--warn" : "--c-fun")}</div>
+    <div class="metric"><span class="mv">${s.protein} г</span><span class="mk">белка из ${pg} г</span>${bar(s.protein, pg, "--c-strength")}</div>
+  </div>`;
+  if(log.length){
+    const shown = logShowAll || log.length <= 6 ? log : log.slice(-6);
+    h += `<div class="loglist"><span class="label">Записано сегодня</span>` + shown.map(e => `<div class="lrow">
+      <span class="ldot" style="background:var(${(CATS[e.type]||CATS.other).c})"></span>
+      <span class="lt">${esc(e.name)}<small>${esc(describe(e))}${e.plan ? " · из плана" : ""}</small></span>
+      <button class="x" data-ldel="${e.id}" aria-label="Удалить">×</button></div>`).join("") +
+      (log.length > 6 && !logShowAll ? `<button class="btn" data-lall="1">Показать все ${log.length}</button>` : "") + `</div>`;
+  }
+  return h;
+}
+function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Журнал дня</h2></div>` + journalHtml("t"); }
+
+function fillDefaults(e){
+  const t = TYPES[e.type]; if(!t) return e;
+  if(t.unit === "min" && !e.stepsOnly && e.min == null) e.min = t.def;
+  if(e.type === "water" && !e.ml) e.ml = 250;
+  if(e.type === "caffeine" && !e.mg) e.mg = 90 * (e.srv||1);
+  if(e.type === "protein" && !e.g) e.g = 25 * (e.srv||1);
+  if(t.unit === "srv" && !e.srv) e.srv = 1;
+  if(e.type === "sleep" && !e.event) e.event = "bed";
+  return e;
+}
+function submitLog(ctx){
+  const ta = $("logInput-"+ctx); const text = ta ? ta.value.trim() : ""; if(!text) return;
+  const items = RITM.parse(text).map(e => { if(e.unknown) e.wasUnknown = true; return e.type ? fillDefaults(e) : e; });
+  logDraft = {ctx, items, text};
+  render();
+}
+function saveLogDraft(){
+  if(!logDraft) return;
+  if(logDraft.items.some(e => !e.type)){ toast("Выберите тип для записей без типа или уберите их"); return; }
+  const k = curKey(), d = todayI(), items = logDraft.items;
+  mutateQuiet(k, w => {
+    const day = w.days[d] = {...(w.days[d]||{})}; day.log = (day.log||[]).slice();
+    for(const e of items){
+      if(e.changed || e.wasUnknown) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
+      const rec = {id:uid(), type:e.type, name:e.name, time:e.time||"", text:e.text};
+      for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived"]) if(e[f] != null) rec[f] = e[f];
+      if(rec.stepsOnly) day.stepsManual = rec.steps;
+      if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
+        const it = w.items.find(i => i.day===d && i.cat===rec.type && !i.done);
+        if(it){ it.done = true; rec.plan = it.id; if(day.review && day.review.entries && day.review.entries[it.id]) day.review.entries[it.id] = {done:true, min:rec.min}; }
+      }
+      day.log.push(rec);
+    }
+  });
+  const n = items.length; logDraft = null;
+  if(rvState) rvState = getReview(getWeek(k), d);
+  render(); toast(`Записано: ${n} ${plural(n,"запись","записи","записей")}`);
+}
+function quickWater(ml){
+  const k = curKey(), d = todayI();
+  mutateQuiet(k, w => { const day = w.days[d] = {...(w.days[d]||{})}; day.log = (day.log||[]).concat([{id:uid(), type:"water", name:"Вода", time:nowHM(), ml}]); });
+  render(); toast(`+${ml} мл воды`);
+}
+function deleteLog(id){
+  const k = curKey(), d = todayI();
+  mutateQuiet(k, w => { const day = w.days[d] = {...(w.days[d]||{})}; const e = (day.log||[]).find(x=>x.id===id);
+    if(e && e.plan){ const it = w.items.find(i=>i.id===e.plan); if(it) it.done = false; }
+    day.log = (day.log||[]).filter(x=>x.id!==id); });
+  if(rvState) rvState = getReview(getWeek(k), d);
+  render(); toast("Запись удалена");
+}
+function journalClick(ds, t){
+  if(ds.lpt != null && logDraft){ const e = logDraft.items[+ds.lpt]; chooseType(`Что такое «${e.name}»?`, e.type, c => { e.type = c; e.changed = true; e.unknown = false; if(e.wasUnknown && !e.name) e.name = CATS[c].n; fillDefaults(e); render(); }); return true; }
+  if(ds.lpx != null && logDraft){ logDraft.items.splice(+ds.lpx, 1); render(); return true; }
+  if(ds.lpsave){ saveLogDraft(); return true; }
+  if(ds.lpcancel){ logDraft = null; render(); return true; }
+  if(ds.qw){ quickWater(+ds.qw); return true; }
+  if(ds.ldel){ confirmIn(t, "Удалить?", () => deleteLog(ds.ldel)); return true; }
+  if(ds.lall){ logShowAll = true; render(); return true; }
+  return false;
+}
+document.addEventListener("submit", e => { const f = e.target.closest("form[data-log]"); if(!f) return; e.preventDefault(); submitLog(f.dataset.log); });
+
+/* own activities */
+let actDraft = {n:"", t:null, manual:false};
+function renderActs(){
+  const el = $("actsCard"); if(!el) return;
+  const list = customActs();
+  el.innerHTML = `<h2>Мои занятия</h2>
+    <p class="note">В базе больше ${RITM.CATALOG.length} занятий. Добавьте своё: приложение будет узнавать его в журнале и предлагать в советах. Тип определяется по названию, его можно поправить.</p>
+    <div class="field"><label class="label" for="actName">Название</label><input id="actName" type="text" value="${esc(actDraft.n)}" placeholder="Например, флорбол или прогулка с собакой" autocomplete="off"></div>
+    <div class="field"><span class="label">Тип ${actDraft.t && !actDraft.manual ? '<span class="note">— определил по названию</span>' : ""}</span><div id="actType">${typeChipsHtml(actDraft.t, k => k !== "sleep")}</div></div>
+    <div class="tools"><button class="btn primary" id="actAdd">Добавить занятие</button></div>
+    ${list.length ? `<span class="label">Ваши занятия</span>` + list.map((a,i) => `<div class="lrow"><span class="ldot" style="background:var(${(CATS[a.t]||CATS.other).c})"></span><span class="lt">${esc(a.n)}<small>${(CATS[a.t]||CATS.other).full}</small></span><button class="x" data-actdel="${i}" aria-label="Удалить">×</button></div>`).join("") : ""}
+    <details class="base"><summary>Посмотреть всю базу</summary><input id="actSearch" type="search" placeholder="Поиск по базе" autocomplete="off"><div id="actBase"></div></details>`;
+  const inp = $("actName");
+  inp.oninput = () => { actDraft.n = inp.value; if(!actDraft.manual){ const g = RITM.guessType(actDraft.n); actDraft.t = g; $("actType").innerHTML = typeChipsHtml(actDraft.t, k => k !== "sleep"); } };
+  $("actType").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; actDraft.t = b.dataset.cat; actDraft.manual = true; $("actType").innerHTML = typeChipsHtml(actDraft.t, k => k !== "sleep"); };
+  $("actAdd").onclick = () => {
+    const n = actDraft.n.trim(); if(!n){ toast("Напишите название"); return; } if(!actDraft.t){ toast("Выберите тип"); return; }
+    const arr = customActs(); arr.push({n, t:actDraft.t, a:n.toLowerCase().replace(/ё/g,"е"), m:TYPES[actDraft.t].def}); LS.set("custom", arr);
+    actDraft = {n:"", t:null, manual:false}; renderActs(); toast("Занятие добавлено");
+  };
+  const srch = $("actSearch"), base = $("actBase");
+  const draw = () => { const q = (srch.value||"").toLowerCase().replace(/ё/g,"е"); const res = RITM.CATALOG.filter(e => !q || e.n.toLowerCase().replace(/ё/g,"е").includes(q) || CATS[e.t].full.toLowerCase().includes(q)).slice(0, 60);
+    base.innerHTML = res.map(e => `<div class="lrow"><span class="ldot" style="background:var(${CATS[e.t].c})"></span><span class="lt">${esc(e.n)}<small>${CATS[e.t].full}${e.s ? " · "+esc(e.s) : ""}</small></span></div>`).join("") || `<p class="note">Ничего не нашлось. Добавьте это занятие выше.</p>`; };
+  srch.oninput = draw; draw();
+}
+function actsClick(ds){ if(ds.actdel == null) return false; const arr = customActs(); arr.splice(+ds.actdel, 1); LS.set("custom", arr); renderActs(); toast("Удалено"); return true; }
+
 /* ---------- day review: input, analysis, plan corrections ---------- */
 const MOVE = c => !!(CATS[c] && CATS[c].move);
-const defaultMin = it => { const m = /(\d+)\s*(?:–\d+\s*)?мин/.exec(it.t || ""); if(m) return +m[1]; if(it.cat==="games") return 60; if(it.cat==="pool") return 45; return 30; };
+const defaultMin = it => { const m = /(\d+)\s*(?:–\d+\s*)?мин/.exec(it.t || ""); if(m) return +m[1]; const c = RITM.CATALOG.find(e=>e.n===it.t) || customActs().find(e=>e.n===it.t); if(c && c.m) return c.m; return (TYPES[it.cat]||TYPES.other).def || 30; };
 const hmMinus = (hm, m) => { const [h,mm] = hm.split(":").map(Number); let t = (h*60+mm-m+1440)%1440; return pad(Math.floor(t/60))+":"+pad(t%60); };
 function usualBedtime(){
   const starts = []; const t = new Date();
@@ -595,7 +812,8 @@ function getReview(w, d){
   const its = w.items.filter(i=>i.day===d);
   const old = (w.days[d]||{}).review || {};
   const entries = {};
-  for(const it of its){ const e = (old.entries||{})[it.id]; entries[it.id] = e ? {...e} : {done:!!it.done, min:defaultMin(it)}; }
+  const linked = {}; for(const x of ((w.days[d]||{}).log||[])) if(x.plan) linked[x.plan] = x;
+  for(const it of its){ const e = (old.entries||{})[it.id]; entries[it.id] = e ? {...e} : (linked[it.id] ? {done:true, min:linked[it.id].min||defaultMin(it)} : {done:!!it.done, min:defaultMin(it)}); }
   return {entries, extras:(old.extras||[]).map(x=>({...x})), steps:old.steps ?? null, sleepH:old.sleepH ?? null, screen:old.screen ?? null, caffeine:!!old.caffeine, alcohol:!!old.alcohol, stress:old.stress ?? null, done:!!old.done};
 }
 function saveReview(rv){
@@ -623,16 +841,18 @@ function analyzeDay(rv){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), h = w.days[ti]||{}, ds = dateOf(ck, ti);
   const its = w.items.filter(i=>i.day===ti);
   const doneIts = its.filter(i=>rv.entries[i.id] && rv.entries[i.id].done);
-  const undone = its.filter(i=>i.cat!=="games" && !(rv.entries[i.id] && rv.entries[i.id].done));
-  const moveMin = doneIts.filter(i=>MOVE(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>MOVE(x.cat)).reduce((s,x)=>s+(x.min||0),0);
-  const gamesMin = doneIts.filter(i=>i.cat==="games").reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>x.cat==="games").reduce((s,x)=>s+(x.min||0),0);
+  const L = intakeOf(h.log);
+  const undone = its.filter(i=>!isScreen(i.cat) && !(rv.entries[i.id] && rv.entries[i.id].done));
+  const moveMin = doneIts.filter(i=>MOVE(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>MOVE(x.cat)).reduce((s,x)=>s+(x.min||0),0) + L.move;
+  const screenMin = doneIts.filter(i=>isScreen(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>isScreen(x.cat)).reduce((s,x)=>s+(x.min||0),0) + L.screen;
   const steps = stepsFor(ds) ?? rv.steps;
   const sl = sleepFor(ds);
   const sleepMin = sl ? sl.min : (rv.sleepH != null ? rv.sleepH*60 : null);
   const goalSteps = settings.stepsGoal;
-  const screenH = rv.screen != null ? rv.screen : (gamesMin ? Math.round(gamesMin/60) : null);
+  const screenH = screenMin ? screenMin/60 : (rv.screen != null ? rv.screen : null);
   const weekMin = activeMinutesWeek(w, ck, ti, rv), pace = Math.round(150/7*(ti+1));
-  const did = c => doneIts.some(i=>i.cat===c) || rv.extras.some(x=>x.cat===c);
+  const did = c => doneIts.some(i=>i.cat===c) || rv.extras.some(x=>x.cat===c) || (h.log||[]).some(e=>e.type===c);
+  const cafLate = rv.caffeine || (L.lastCaf && L.lastCaf > settings.caffeineCutoff), hadAlcohol = rv.alcohol || L.alcohol > 0;
   const good = [], bad = [], tips = [];
 
   if(steps != null){ if(steps >= goalSteps) good.push(`${fmtNum(steps)} шагов: дневная цель выполнена.`); else if(steps >= goalSteps*0.7) good.push(`${fmtNum(steps)} шагов: почти цель.`); else if(steps < goalSteps*0.5) bad.push(`Всего ${fmtNum(steps)} шагов при цели ${fmtNum(goalSteps)}.`); }
@@ -641,24 +861,40 @@ function analyzeDay(rv){
   else bad.push("Сегодня не было движения сверх обычного.");
   if(did("strength")) good.push("Силовая сделана. Мышцам нужно 2 таких дня в неделю.");
   if(did("social")) good.push("Было живое общение. Это один из самых сильных факторов настроения.");
-  if(did("offline")) good.push("Было время без экранов.");
-  if(did("fun")) good.push("Нашлось время просто для удовольствия.");
+  if(did("unplug")) good.push("Было время без экранов.");
+  if(did("outing") || did("hobby")) good.push("Нашлось время просто для удовольствия.");
+  if(did("nature")) good.push("Время на природе: один из самых простых способов снизить стресс.");
+  if(did("reading") || did("learning")) good.push("Было время на чтение или развитие.");
+  if(did("mobility") || did("relax")) good.push("Позаботились о восстановлении: растяжка или отдых.");
+  if(["move","social","rest"].filter(g => L.groups.has(g) || doneIts.some(i=>TYPES[i.cat] && TYPES[i.cat].g===g)).length >= 3) good.push("Разнообразный день: движение, люди и отдых.");
+  const wg = settings.waterGoal, pg = settings.proteinGoal;
+  if(L.water >= wg) good.push(`Воды ${String(L.water/1000).replace(".",",")} л: норма выполнена.`);
+  else if(L.water > 0 && L.water < wg*0.6) bad.push(`Воды всего ${L.water} мл при цели ${String(wg/1000).replace(".",",")} л.`);
+  if(L.protein >= pg) good.push(`Белка ${L.protein} г: цель закрыта.`);
+  if(L.mg > settings.caffeineMax) bad.push(`Кофеина около ${L.mg} мг: больше безопасных ${settings.caffeineMax} мг в день.`);
+  if(L.sweets >= 3) bad.push("Много сладкого за день.");
+  if(L.lateScreen) bad.push(`Экраны после ${settings.screensOff}: ${L.lateScreen} мин.`);
   if(h.light) good.push("Был дневной свет. Это помогает и бодрости днём, и сну ночью.");
   if(sleepMin != null){ if(sleepMin >= 420) good.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: в норме.`); else if(sleepMin < 390) bad.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: меньше нормы в 7–9 часов.`); }
   if(its.length && !undone.length) good.push("Все дела из плана выполнены.");
   else if(undone.length) bad.push(`Не получилось: ${undone.map(i=>i.t).join("; ")}.`);
-  if(screenH != null){ if(screenH >= 2) bad.push("Больше 2 часов на экраны и игры."); else if(screenH === 0) good.push("Вечер без игр и Ютуба."); }
-  if(rv.caffeine) bad.push("Кофе после 15:00: может сдвинуть засыпание на час и больше.");
-  if(rv.alcohol) bad.push("Алкоголь: засыпается легче, но глубокий сон хуже.");
+  if(screenMin > settings.screenLimit) bad.push(`Экраны ${fmtDur(screenMin)} при вашем лимите ${fmtDur(settings.screenLimit)}.`);
+  else if(screenMin === 0 && rv.screen != null && rv.screen >= 2) bad.push("Больше 2 часов на экраны.");
+  else if(screenMin === 0 && rv.screen === 0) good.push("День почти без развлекательных экранов.");
+  if(cafLate) bad.push(L.lastCaf ? `Последний кофеин в ${L.lastCaf}: после ${settings.caffeineCutoff} он может сдвинуть засыпание на час и больше.` : "Кофе во второй половине дня: может сдвинуть засыпание.");
+  if(hadAlcohol) bad.push("Алкоголь: засыпается легче, но глубокий сон хуже.");
   if(h.energy && h.energy <= 2) bad.push(`Энергия низкая (${h.energy} из 5).`);
   if(h.energy && h.energy >= 4) good.push(`Энергия ${h.energy} из 5.`);
   if(rv.stress != null && rv.stress >= 4) bad.push(`Высокий стресс (${rv.stress} из 5).`);
 
   const bed = usualBedtime().hm;
   if(sleepMin != null && sleepMin < 390) tips.push(`Сегодня ложитесь не позже ${bed}, а лучше на 30 минут раньше: после короткой ночи организму нужно наверстать.`);
-  if(rv.caffeine) tips.push("Завтра последний кофе до 14:00.");
-  if(rv.alcohol) tips.push("Если завтра хочется отдохнуть, попробуйте без алкоголя и сравните, как будете спать.");
-  if(screenH != null && screenH >= 2) tips.push(`Ограничьте игры и Ютуб часом и заканчивайте к ${settings.screensOff}.`);
+  if(cafLate) tips.push(`Завтра последний кофе до ${settings.caffeineCutoff}.`);
+  if(L.water > 0 && L.water < wg*0.6) tips.push("Выпивайте стакан воды с каждым приёмом пищи и держите бутылку на столе: так проще добрать норму.");
+  if(L.water === 0) tips.push("Записывайте воду кнопкой «+ стакан» в журнале: так я смогу подсказать, хватает ли её.");
+  if((did("strength") || did("sport")) && L.protein < pg*0.6) tips.push("В день силовой белок помогает восстановлению: творог, яйца, мясо, рыба или протеин.");
+  if(hadAlcohol) tips.push("Если завтра хочется отдохнуть, попробуйте без алкоголя и сравните, как будете спать.");
+  if((screenMin > settings.screenLimit) || (rv.screen != null && rv.screen >= 2)) tips.push(`Ограничьте игры и Ютуб часом и заканчивайте к ${settings.screensOff}.`);
   if(steps != null && steps < goalSteps*0.7) tips.push(`Добавьте 20–30 минут ходьбы: прогулка после ужина даёт около 2 000–3 000 шагов.`);
   if(weekMin < pace) tips.push(`За неделю пока ${weekMin} минут движения при ориентире ${pace} на сегодня (150 в неделю — рекомендация ВОЗ). Небольшие прогулки быстро закрывают разницу.`);
   if(rv.stress != null && rv.stress >= 4) tips.push("Перед сном 10 минут спокойной прогулки или медленного дыхания (вдох на 4, выдох на 6) снижают напряжение.");
@@ -667,7 +903,7 @@ function analyzeDay(rv){
 
   const score = good.length - bad.length;
   const verdict = score >= 3 ? "Сильный день" : score >= 1 ? "Хороший день" : score >= -1 ? "Неплохой день, есть что подтянуть" : "Тяжёлый день. Бывает, завтра будет легче";
-  return {verdict, good, bad, tips: tips.slice(0,4), props: proposeChanges(rv, {sleepMin, steps, screenH, energy:h.energy, stress:rv.stress})};
+  return {verdict, good, bad, tips: tips.slice(0,5), props: proposeChanges(rv, {sleepMin, steps, screenH, energy:h.energy, stress:rv.stress})};
 }
 
 function proposeChanges(rv, m){
@@ -679,22 +915,22 @@ function proposeChanges(rv, m){
   const tomorrow = last ? 0 : ti+1;
   const load = Array(7).fill(0); w.items.forEach(i=>load[i.day]++);
   const taken = (d,c) => w.items.some(i=>i.day===d && i.cat===c) || props.some(p=>p.day===d && p.cat===c);
-  const bestDay = (c, avoid=-1) => { let b=-1, bl=99; for(let d=from; d<=to; d++){ if(d===avoid || taken(d,c)) continue; const l = load[d] + (c==="pool" && d<5 ? 2 : 0) + (d===tomorrow && (m.sleepMin!=null && m.sleepMin<390) && (c==="strength"||c==="pool") ? 5 : 0); if(l<bl){ bl=l; b=d; } } return b; };
+  const bestDay = (c, avoid=-1) => { let b=-1, bl=99; for(let d=from; d<=to; d++){ if(d===avoid || taken(d,c)) continue; const l = load[d] + (c==="swim" && d<5 ? 2 : 0) + (d===tomorrow && (m.sleepMin!=null && m.sleepMin<390) && (c==="strength"||c==="swim") ? 5 : 0); if(l<bl){ bl=l; b=d; } } return b; };
   const tired = (m.sleepMin != null && m.sleepMin < 390) || (m.energy && m.energy <= 2) || (m.stress != null && m.stress >= 4);
 
   // 1. undone goal items from today → move forward
-  if(!last) for(const it of cw.items.filter(i=>i.day===ti && GOAL_CATS.includes(i.cat) && !(rv.entries[i.id] && rv.entries[i.id].done))){
+  if(!last) for(const it of cw.items.filter(i=>i.day===ti && goalCats().includes(i.cat) && !(rv.entries[i.id] && rv.entries[i.id].done))){
     const d = bestDay(it.cat); if(d < 0) continue;
     props.push({type:"move", key:ck, id:it.id, day:d, cat:it.cat, text:`Перенести «${it.t}» ${DACC[d]}`, why:"Не получилось сегодня, но до конца недели есть место"}); load[d]++;
   }
   // 2. tired → lighten tomorrow
   if(tired){
-    for(const it of w.items.filter(i=>i.day===tomorrow && (i.cat==="strength"||i.cat==="pool") && !i.done)){
+    for(const it of w.items.filter(i=>i.day===tomorrow && (i.cat==="strength"||i.cat==="swim") && !i.done)){
       const d = bestDay(it.cat, tomorrow);
       if(d >= 0 && d !== tomorrow){ props.push({type:"move", key, id:it.id, day:d, cat:it.cat, text:`Сдвинуть «${it.t}» с завтра ${DACC[d]}`, why:"После короткого сна или тяжёлого дня интенсивная нагрузка даётся хуже"}); load[d]++; }
     }
     if(!taken(tomorrow,"walk")){ props.push({type:"add", key, day:tomorrow, cat:"walk", t:"Лёгкая прогулка на свету, 20 мин", time:"", text:`Добавить завтра лёгкую прогулку`, why:"Мягко поднимает энергию без перегрузки"}); load[tomorrow]++; }
-    props.push({type:"add", key, day:tomorrow, cat:"offline", t:"Лечь пораньше, без экрана", time:hmMinus(usualBedtime().hm, 30), text:`Завтра лечь на 30 минут раньше`, why:"Чтобы вернуть недосып"});
+    props.push({type:"add", key, day:tomorrow, cat:"unplug", t:"Лечь пораньше, без экрана", time:hmMinus(usualBedtime().hm, 30), text:`Завтра лечь на 30 минут раньше`, why:"Чтобы вернуть недосып"});
   }
   // 3. low steps → walk tomorrow
   if(m.steps != null && m.steps < settings.stepsGoal*0.5 && !taken(tomorrow,"walk")){
@@ -702,14 +938,14 @@ function proposeChanges(rv, m){
   }
   // 4. late screens → move tomorrow's games earlier
   if(m.screenH != null && m.screenH >= 2){
-    for(const it of w.items.filter(i=>i.day===tomorrow && i.cat==="games" && (!i.time || i.time > "20:00"))){
-      props.push({type:"time", key, id:it.id, time:"19:30", cat:"games", day:tomorrow, text:`Перенести «${it.t}» завтра на 19:30 и ограничить часом`, why:"Чтобы к отбою мозг успел успокоиться"});
+    for(const it of w.items.filter(i=>i.day===tomorrow && isScreen(i.cat) && (!i.time || i.time > "20:00"))){
+      props.push({type:"time", key, id:it.id, time:"19:30", cat:it.cat, day:tomorrow, text:`Перенести «${it.t}» завтра на 19:30 и ограничить часом`, why:"Чтобы к отбою мозг успел успокоиться"});
     }
   }
   // 5. remaining weekly deficits → add varied ideas
   if(!last){
     const gs = goalState(cw, ti+1), recent = recentTitles();
-    for(const c of GOAL_CATS){
+    for(const c of goalCats()){
       let need = gs[c].deficit - props.filter(p=>p.cat===c && (p.type==="add" || p.type==="move")).length;
       // items moved forward from today were counted as missed; moving them makes them future again
       let off = 0;
@@ -738,14 +974,14 @@ function renderReview(){
   const minsCtl = (attr, id, v) => `<span class="mins"><button data-${attr}="${id}" data-dm="-5" aria-label="Меньше">−</button><span class="num">${v} мин</span><button data-${attr}="${id}" data-dm="5" aria-label="Больше">+</button></span>`;
   const rows = its.map(it => { const e = rv.entries[it.id]; return `<div class="rvrow ${e.done?"on":""}"><button class="tick" data-rvtick="${it.id}" aria-label="Сделано"><span></span></button><span class="rt">${esc(it.t)}<small>${(CATS[it.cat]||CATS.other).n}</small></span>${e.done ? minsCtl("rvmin", it.id, e.min) : ""}</div>`; }).join("");
   const extras = rv.extras.map((x,i) => `<div class="rvrow on"><span class="tick"><span></span></span><span class="rt">${esc(x.t)}<small>${CATS[x.cat].n}, вне плана</small></span>${minsCtl("rvxmin", i, x.min)}<button class="x" data-rvxdel="${i}" aria-label="Убрать">×</button></div>`).join("");
-  const addChips = ["walk","strength","pool","social","offline","fun","games"].map(c => `<button type="button" class="chip" data-rvadd="${c}"><i style="background:var(${CATS[c].c})"></i>${CATS[c].n}</button>`).join("");
   const st = stepsFor(ds), sl = sleepFor(ds);
   const seg = (name, opts, cur) => `<div class="seg">${opts.map(([v,l]) => `<button class="${cur===v?"on":""}" data-rvset="${name}" data-v="${v}">${l}</button>`).join("")}</div>`;
   const scale = (key, cur) => `<div class="row">${[1,2,3,4,5].map(n=>`<button class="${cur===n?"on":""}" data-rv${key}="${n}">${n}</button>`).join("")}</div>`;
 
   let html = `<section class="rvsec"><div class="bhead"><h2>Что было сегодня</h2><span class="note">отметьте и поправьте минуты</span></div>
     ${rows || `<p class="note">В плане на сегодня ничего не было. Добавьте, чем занимались, ниже.</p>`}${extras}
-    <span class="label">Было вне плана</span><div class="chips">${addChips}</div></section>
+</section>
+    <section class="card"><h2>Журнал дня</h2><p class="note">Допишите всё, что было вне плана: еду, напитки, экраны, любые занятия.</p>${journalHtml("r")}</section>
     <section class="card"><h2>Шаги и сон</h2>
       ${st != null ? `<div class="status"><span class="rl"><b>${fmtNum(st)} шагов</b><span class="note">с телефона</span></span></div>`
         : `<div class="field"><label class="label" for="rvSteps">Шаги за день, если знаете</label><input id="rvSteps" type="number" inputmode="numeric" min="0" step="100" value="${rv.steps ?? ""}" placeholder="например, 6500"></div>`}
@@ -757,10 +993,8 @@ function renderReview(){
       <div class="scale"><span class="label">Настроение</span>${scale("mood", h.mood)}</div>
       <div class="scale"><span class="label">Стресс</span>${scale("stress", rv.stress)}</div>
     </section>
-    <section class="card"><h2>Вечер</h2>
-      <span class="label">Экраны: игры, Ютуб, соцсети</span>${seg("screen", [[0,"почти не было"],[1,"до часа"],[1.5,"1–2 часа"],[2,"больше 2 часов"]], rv.screen)}
-      <div class="check"><button class="tog ${rv.caffeine?"on":""}" data-rvflag="caffeine"><span class="box"></span>Кофе после 15:00</button><button class="tog ${rv.alcohol?"on":""}" data-rvflag="alcohol"><span class="box"></span>Алкоголь</button></div>
-    </section>
+    ${intakeOf(h.log).screen ? "" : `<section class="card"><h2>Экраны</h2><p class="note">Если не записывали игры, видео и соцсети в журнал, оцените примерно.</p>
+      ${seg("screen", [[0,"почти не было"],[1,"до часа"],[1.5,"1–2 часа"],[2,"больше 2 часов"]], rv.screen)}</section>`}
     <button class="btn primary" id="rvGo" style="padding:14px;font-size:1rem">${rvResult ? "Разобрать заново" : "Разобрать день"}</button>`;
 
   if(rvResult){

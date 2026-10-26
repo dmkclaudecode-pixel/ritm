@@ -99,3 +99,28 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;color:var(--in
 .prop.on .box::after{content:"";width:9px;height:5px;border:2px solid var(--surface);border-top:0;border-right:0;transform:rotate(-45deg) translate(1px,-1px)}
 .prop .pt{display:flex;flex-direction:column;gap:2px;font-size:.92rem}
 .prop .pt small{color:var(--muted);font-size:.78rem}
+
+/* journal */
+.logform{display:flex;flex-direction:column;gap:8px}
+.logform textarea{font:inherit;font-size:16px;line-height:1.4;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);width:100%;resize:vertical;min-height:64px}
+.logform .btn{align-self:flex-start}
+.preview,.loglist{display:flex;flex-direction:column;gap:6px}
+.preview{background:var(--accent-soft);border-radius:12px;padding:10px}
+.lrow{display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--line);min-width:0}
+.lrow:last-child{border-bottom:0}
+.lrow.unknown{background:var(--sun-soft);border-radius:8px;padding:7px 8px}
+.ldot{width:10px;height:10px;border-radius:50%;flex:none}
+.lt{flex:1;min-width:0;font-size:.92rem;overflow-wrap:anywhere}
+.lt small{display:block;color:var(--muted);font-size:.76rem}
+.lrow .chip{flex:none;padding:5px 9px;font-size:.78rem}
+.intake{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.intake .metric{padding:10px}
+.intake .mv{font-size:1rem}
+.intake .mk{font-size:.72rem}
+.qbtn{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.qbtn button{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:4px 7px;font-size:.74rem}
+@media (max-width:420px){.intake{grid-template-columns:1fr 1fr}.intake .metric:first-child{grid-column:1 / -1}}
+.tgroup{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+details.base summary{cursor:pointer;color:var(--accent);font-weight:600;padding:6px 0}
+details.base input{font:inherit;font-size:16px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);width:100%;margin:6px 0}
+#actBase{max-height:420px;overflow-y:auto}

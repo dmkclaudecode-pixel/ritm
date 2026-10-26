@@ -30,6 +30,7 @@
   <main id="tab-today" class="tab">
     <section class="hero" id="todayHero"></section>
     <section class="card cta" id="reviewCta" hidden></section>
+    <section class="card" id="logCard"></section>
     <section class="card" id="bodyCard" hidden></section>
     <section class="block">
       <div class="bhead"><h2>Мои дела на сегодня</h2></div>
@@ -66,10 +67,11 @@
   <!-- MORE -->
   <main id="tab-more" class="tab" hidden>
     <section class="card">
-      <h2>Цели</h2>
-      <p class="note">Сколько раз в неделю вы хотите двигаться, общаться и отдыхать. По этим числам приложение считает, чего не хватает.</p>
+      <h2>Цели и нормы</h2>
+      <p class="note">Сколько раз в неделю вы хотите каждое занятие, плюс дневные нормы воды, белка, кофеина и экранов.</p>
       <div class="tools"><button class="btn primary" id="goalsBtn">Изменить цели</button></div>
     </section>
+    <section class="card" id="actsCard"></section>
     <section class="card" id="healthCard" hidden></section>
     <section class="card" id="nativeRem" hidden>
       <h2>Уведомления</h2>
@@ -122,7 +124,8 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="sheet" id="sheet" hidden role="dialog" aria-modal="true"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast" hidden></div>
-<script src="ideas.js"></script>
+<script src="catalog.js"></script>
+<script src="parser.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
