@@ -217,6 +217,22 @@ class MainActivity : ComponentActivity() {
                 .toString()
         }
 
+        /** HTTP-запрос к LLM-API из приложения (в WebView CORS мешал бы). Ответ приходит в window.__ritmNative.onLlm(id, status, text). */
+        @JavascriptInterface fun llmRequest(id: Int, url: String, key: String, body: String) {
+            Thread {
+                var status = 0; var text = ""
+                try {
+                    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    c.requestMethod = "POST"; c.connectTimeout = 10000; c.readTimeout = 30000; c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Authorization", "Bearer $key")
+                    c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    status = c.responseCode
+                    text = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                } catch (e: Exception) { status = -1; text = e.message ?: "error" }
+                js("window.__ritmNative && window.__ritmNative.onLlm($id, $status, ${JSONObject.quote(text)})")
+            }.start()
+        }
+
         @JavascriptInterface fun setCheckins(json: String) = Checkins.set(this@MainActivity, json)
         @JavascriptInterface fun setWatch(json: String) = Watcher.configure(this@MainActivity, json)
         @JavascriptInterface fun nudges(): String = Watcher.history(this@MainActivity).toString()

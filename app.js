@@ -588,8 +588,57 @@ $("icsWeek").onclick = async () => {
   download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
 };
 
+/* ---------- умный разбор: DeepSeek как судья «дело или разговор» ---------- */
+const LLM_URL = "https://api.deepseek.com/chat/completions";
+const llmCfg = () => LS.get("llm") || {};
+const llmOn = () => { const c = llmCfg(); return !!(c.on && c.key); };
+let llmSeq = 0; const llmWait = {};
+function llmCall(messages, done){
+  const c = llmCfg(); if(!c.key) return done(null, "нет ключа");
+  const body = JSON.stringify({model:"deepseek-chat", messages, temperature:0, max_tokens:120, response_format:{type:"json_object"}});
+  const id = ++llmSeq; const to = setTimeout(() => { if(llmWait[id]){ delete llmWait[id]; done(null, "таймаут"); } }, 25000);
+  llmWait[id] = (status, text) => { clearTimeout(to); if(status < 200 || status >= 300) return done(null, status === 401 ? "ключ не принят" : status === 402 ? "на счёте нет средств" : status === 429 ? "лимит запросов" : "ошибка " + status);
+    try{ done(JSON.parse(JSON.parse(text).choices[0].message.content)); }catch(e){ done(null, "непонятный ответ"); } };
+  if(NATIVE && NATIVE.llmRequest) { try{ NATIVE.llmRequest(id, LLM_URL, c.key, body); }catch(e){ delete llmWait[id]; done(null, "ошибка запроса"); } }
+  else fetch(LLM_URL, {method:"POST", headers:{"Content-Type":"application/json", Authorization:"Bearer " + c.key}, body}).then(async r => llmWait[id] && llmWait[id](r.status, await r.text())).catch(() => { if(llmWait[id]){ delete llmWait[id]; done(null, "нет сети"); } });
+}
+const LLM_SYS = "Ты проверяешь записи в дневнике привычек. Пользователь пишет боту. Реши про ПОСЛЕДНЕЕ сообщение пользователя: " +
+  "activity — он сообщает, что сам сделал занятие, поел, выпил, поспал и т. п.; plan — он сообщает, что собирается сделать; " +
+  "chat — разговор, эмоции, оценка, вопрос, где он находится или куда едет, действия других людей, погода, работа как обстановка («вернулся с работы», «еду на работу»). " +
+  "Учитывай предыдущие реплики. Ответь только JSON: {\"kind\":\"activity|plan|chat\",\"why\":\"коротко по-русски\"}.";
+function llmJudge(text, done){
+  const ctx = getChat().slice(-8, -2).map(m => ({role: m.who === "me" ? "user" : "assistant", content: String(m.text || "").slice(0, 300)})).filter(m => m.content);
+  llmCall([{role:"system", content:LLM_SYS}, ...ctx, {role:"user", content:"Последнее сообщение пользователя: " + text}], done);
+}
+function respond(text){
+  const t0 = Date.now(); respondRules(text);
+  if(!llmOn() || /\d/.test(text)) return;
+  const L = LS.get("lastLog"); if(!L || L.at < t0) return;                       // правила ничего не записали
+  llmJudge(text, (v, err) => {
+    if(!v) return;
+    if(v.kind !== "chat") return;
+    const L2 = LS.get("lastLog"); if(!L2 || L2.at !== L.at) return;
+    let n = 0, words = [];
+    mutateQuiet(L2.key, w => { const day = w.days[L2.day]; if(!day) return; const rm = (day.log||[]).filter(r => L2.ids.includes(r.id)); n = rm.length;
+      for(const r of rm){ if(r.fuzzyWord) words.push(r.fuzzyWord); if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } }
+      day.log = (day.log||[]).filter(r => !rm.includes(r)); });
+    if(!n) return;
+    RITM.forget(text, words[0]);
+    LS.set("lastLog", null); render();
+    bot("Поправка: «" + text + "» — это не занятие" + (v.why ? " (" + String(v.why).slice(0, 80) + ")" : "") + ". Запись убрал и запомнил.");
+  });
+}
+function renderLlm(){
+  const c = llmCfg(); const t = $("llmToggle"); if(!t) return;
+  if(document.activeElement !== $("llmKey")) $("llmKey").value = c.key || "";
+  t.textContent = c.on ? "Включён" : "Выключен"; t.classList.toggle("primary", !!c.on);
+}
+$("llmKey").onchange = () => { const c = llmCfg(); c.key = $("llmKey").value.trim(); LS.set("llm", c); $("llmNote").textContent = c.key ? "Ключ сохранён." : ""; };
+$("llmToggle").onclick = () => { const c = llmCfg(); if(!c.key && !c.on){ $("llmNote").textContent = "Сначала вставьте ключ."; return; } c.on = !c.on; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено. Проверяю только то, что бот записал по тексту без цифр." : "Выключено, бот работает по правилам."; };
+$("llmTest").onclick = () => { const c = llmCfg(); c.key = $("llmKey").value.trim(); LS.set("llm", c); $("llmNote").textContent = "Проверяю…";
+  llmCall([{role:"system", content:LLM_SYS}, {role:"user", content:"Последнее сообщение пользователя: вернулся с работы"}], (v, err) => { $("llmNote").textContent = v ? "Работает. Тестовый ответ: «вернулся с работы» — " + v.kind + "." : "Не вышло: " + err + "."; }); };
 /* ---------- backup ---------- */
-function backupData(){ const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}}; for(const k of LS.keys()) if(k !== "chat" || true) data.entries[k] = LS.get(k); return data; }
+function backupData(){ const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}}; for(const k of LS.keys()) if(k !== "llm") data.entries[k] = LS.get(k); return data; }
 // автокопия: раз в 7 дней, если в приложении есть что сохранять (только в Android-версии, файл попадает в «Загрузки»)
 function maybeAutoBackup(){
   if(!NATIVE || settings.autoBackup === false) return;
@@ -990,7 +1039,7 @@ function addPlanFromChat(e, date){
 
 const pendingIssueDates = [];
 // ---------- understanding a message ----------
-function respond(text){
+function respondRules(text){
   const s = nrm(text);
   lastUserText = text; parserCtx();
   const A = RITM.analyze(text);
@@ -2897,6 +2946,7 @@ function suggestWalks(){
 const fmtHM = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
 
 window.__ritmNative = {
+  onLlm(id, status, text){ const f = llmWait[id]; if(f){ delete llmWait[id]; f(status, text); } },
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
       health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
@@ -2947,7 +2997,7 @@ window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; t
 if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 document.addEventListener("visibilitychange", () => { if(!document.hidden){ dismissed = new Set(); render(); } });
 
-render(); renderBackupNote(); setTimeout(maybeAutoBackup, 3000);
+render(); renderBackupNote(); renderLlm(); setTimeout(maybeAutoBackup, 3000);
 pullNative();
 if(tab === "chat" && getChat().length) { if(!maybeWeeklyReport() && !morningBrief()) askRoutine(); render(); }
 if(!checkOpen()) scrollChat();

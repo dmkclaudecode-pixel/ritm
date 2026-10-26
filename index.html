@@ -130,6 +130,13 @@
     <section class="card" id="healthCard" hidden></section>
     <section class="card" id="missCard" hidden></section>
     <section class="card" id="actsCard"></section>
+    <section class="card" id="llmCard">
+      <h2>Умный разбор (DeepSeek)</h2>
+      <p class="note">Необязательно. Если включить, то когда бот что-то записал, его сообщение вместе с последними репликами чата уходит в DeepSeek, и тот решает: это правда дело или просто разговор. Если разговор, запись убирается. Данные о сне, еде и здоровье не отправляются, только текст сообщений. Ключ хранится только на этом телефоне и не попадает в копии.</p>
+      <div class="field"><label class="label" for="llmKey">API-ключ DeepSeek</label><input id="llmKey" type="password" autocomplete="off" placeholder="sk-…"></div>
+      <div class="tools"><button class="btn" id="llmToggle">Выключен</button><button class="btn" id="llmTest">Проверить ключ</button></div>
+      <p class="note" id="llmNote"></p>
+    </section>
     <section class="card">
       <h2>Резервная копия</h2>
       <p class="note">Данные хранятся только на этом телефоне. Раз в неделю приложение само кладёт копию в папку «Загрузки» (она переживёт переустановку). Можно сохранить и вручную.</p>
