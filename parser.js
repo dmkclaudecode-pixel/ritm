@@ -1,25 +1,29 @@
 // Ритм недели: разбор свободного текста журнала («выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»).
-// Работает без интернета и без ИИ: словарь занятий + правила для чисел, единиц и времени.
+// Работает без интернета и без ИИ: словарь занятий + правила для чисел, единиц, времени, отрицаний и опечаток.
 (function(){
 const R = window.RITM;
-const norm = s => " " + String(s).toLowerCase().replace(/ё/g,"е").replace(/[«»"“”()!?]/g," ").replace(/\s+/g," ").trim() + " ";
+// нижний регистр, ё→е, «кофеееее»→«кофе», без эмодзи и лишних знаков
+const norm = s => " " + String(s).toLowerCase().replace(/ё/g,"е").replace(/([а-яa-z])\1{2,}/g,"$1")
+  .replace(/[^a-zа-я0-9:.,\-\/+ \n]/g," ").replace(/\s+/g," ").trim() + " ";
 
 const NUMW = {"один":1,"одна":1,"одну":1,"одно":1,"два":2,"две":2,"три":3,"четыре":4,"пять":5,"шесть":6,"семь":7,"восемь":8,"девять":9,"десять":10,
-  "пару":2,"пара":2,"пары":2,"полтора":1.5,"полторы":1.5,"пол":0.5,"половину":0.5,"двойной":2,"двойная":2,"двойного":2,"тройной":3,"пятнадцать":15,"двадцать":20,"тридцать":30,"сорок":40,"пятьдесят":50,"сто":100};
+  "пару":2,"пара":2,"пары":2,"полтора":1.5,"полторы":1.5,"пол":0.5,"половину":0.5,"двойной":2,"двойная":2,"двойного":2,"тройной":3,
+  "пятнадцать":15,"двадцать":20,"тридцать":30,"сорок":40,"пятьдесят":50,"шестьдесят":60,"девяносто":90,"сто":100,"несколько":3,"парочку":2,"парочка":2};
 const NUM = "(\\d+(?:[.,]\\d+)?|" + Object.keys(NUMW).sort((a,b)=>b.length-a.length).join("|") + ")";
 const toNum = s => s == null ? null : (NUMW[s] != null ? NUMW[s] : parseFloat(String(s).replace(",", ".")));
+const isNumTok = t => /^\d/.test(t) || NUMW[t] != null;
 
 // единицы: ключ → [тип единицы, множитель]
 const UNITS = [
-  ["минут|минуты|минуту|мин|м(?=\\s|$)", "min", 1],
+  ["минут|минуты|минуту|минутк[а-я]*|мин|м(?=\\s|$)", "min", 1],
   ["часа|часов|час|ч(?=\\s|$)", "min", 60],
-  ["километра|километров|километр|км", "km", 1],
+  ["километра|километров|километр|км|кило(?=\\s|$)", "km", 1],
   ["шагов|шага|шаг", "steps", 1],
   ["миллилитров|мл", "ml", 1],
-  ["литра|литров|литр|л(?=\\s|$)", "ml", 1000],
-  ["стакана|стаканов|стакан", "glass", 250],
-  ["кружки|кружек|кружку|кружка|чашки|чашек|чашку|чашка", "cup", 300],
-  ["бутылки|бутылок|бутылку|бутылка", "bottle", 500],
+  ["литра|литров|литр|литрушк[а-я]*|л(?=\\s|$)", "ml", 1000],
+  ["стакана|стаканов|стакан|стаканчик[а-я]*", "glass", 250],
+  ["кружки|кружек|кружку|кружка|кружечк[а-я]*|чашки|чашек|чашку|чашка|чашечк[а-я]*", "cup", 300],
+  ["бутылки|бутылок|бутылку|бутылка|бутылочк[а-я]*", "bottle", 500],
   ["банки|банок|банку|банка", "can", 1],
   ["скупа|скупов|скупы|скуп|мерные ложки|мерных ложек|мерную ложку|мерная ложка|мерных|мерные|ложки", "scoop", 1],
   ["граммов|грамм|гр|г(?=\\s|$)", "g", 1],
@@ -35,67 +39,143 @@ const UNITS = [
 ];
 const UNIT_RE = new RegExp("(?<![a-zа-я0-9])" + NUM + "\\s*(?:-?х\\s*)?(" + UNITS.map(u=>u[0]).join("|") + ")", "g");
 
-// «полчаса», «час» без числа → минуты
+const pad = n => String(n).padStart(2,"0");
+const hm = (h,m) => pad(((h%24)+24)%24)+":"+pad(m||0);
+const toM = t => +t.slice(0,2)*60 + +t.slice(3,5);
+const fromM = m => hm(Math.floor((((m%1440)+1440)%1440)/60), (((m%1440)+1440)%1440)%60);
+const ctx = () => R.ctx || {};
+const nowStr = () => { if(ctx().now) return ctx().now; const d = new Date(); return hm(d.getHours(), d.getMinutes()); };
+
+// перевод разговорных оборотов в явные числа и время
 function pre(s){
-  s = s.replace(/полчас[а-я]*/g, " 30 минут ").replace(/часик[а-я]*/g, "час");
+  s = s.replace(/полчас[а-я]*/g, " 30 минут ").replace(/часик[а-я]*/g, "час").replace(/(?<![а-я])минутк[а-я]*/g, "минут")
+       .replace(/полтора часа/g, " 90 минут ").replace(/пол литра|поллитра|пол-литра/g, " 500 мл ").replace(/четверть часа/g, " 15 минут ");
+  // относительное время: «через час», «20 минут назад», «только что», «после работы», «в обед», «перед сном»
+  const now = toM(nowStr());
+  const rel = (n, unit) => Math.round(toNum(n) * (/час/.test(unit) ? 60 : 1));
+  s = s.replace(new RegExp("(?<![а-я])через\\s+" + NUM + "?\\s*(минут[а-я]*|мин|часа|часов|час)", "g"), (m, n, u) => ` в ${fromM(now + rel(n || "1", u))} `);
+  s = s.replace(new RegExp("(?<![а-я0-9])" + NUM + "?\\s*(минут[а-я]*|мин|часа|часов|час)\\s+назад", "g"), (m, n, u) => ` в ${fromM(now - rel(n || "1", u))} `);
+  s = s.replace(/(?<![а-я])(только что|прямо сейчас|сейчас вот|вот только)(?![а-я])/g, ` в ${nowStr()} `);
+  const c = ctx();
+  if(c.workEnd) s = s.replace(/(?<![а-я])после работы(?![а-я])/g, ` в ${fromM(toM(c.workEnd) + (c.commute||0) + 30)} `);
+  if(c.lunch) s = s.replace(/(?<![а-я])(в обед|на обед|в обеденный перерыв|за обедом)(?![а-я])/g, m => ` в ${c.lunch} ` + (/за обедом/.test(m) ? " обед " : ""));
+  if(c.bed) s = s.replace(/(?<![а-я])перед сном(?![а-я])/g, ` в ${fromM(toM(c.bed) - 60)} `);
+  if(c.wake) s = s.replace(/(?<![а-я])(сразу после подъема|как проснулся|как проснулась|после пробуждения)(?![а-я])/g, ` в ${fromM(toM(c.wake) + 15)} `);
   const toks = s.split(" ");
   const ONE = /^(литр|стакан|бутылку|бутылка|чашку|чашка|кружку|кружка|банку|банка|скуп|бокал|подход|круг)$/;
-  for(let i=0;i<toks.length;i++) if(ONE.test(toks[i]) && !(i>0 && (/^\d/.test(toks[i-1]) || NUMW[toks[i-1]] != null))) toks[i] = "1 " + toks[i];
-  for(let i=0;i<toks.length;i++) if(toks[i] === "час" && !(i>0 && (/^\d/.test(toks[i-1]) || NUMW[toks[i-1]] != null))) toks[i] = "60 минут";
-  return toks.join(" ");
+  for(let i=0;i<toks.length;i++) if(ONE.test(toks[i]) && !(i>0 && isNumTok(toks[i-1]))) toks[i] = "1 " + toks[i];
+  for(let i=0;i<toks.length;i++) if(toks[i] === "час" && !(i>0 && isNumTok(toks[i-1])) && toks[i-1] !== "в") toks[i] = "60 минут";
+  return toks.join(" ").replace(/\s+/g," ");
 }
 
-const DAYPART = [["рано утром","07:00"],["с утра","08:30"],["утром","08:30"],["днем","13:00"],["в обед","13:00"],["после обеда","14:30"],["вечером","19:30"],["перед сном","22:30"],["ночью","00:30"]];
-const pad = n => String(n).padStart(2,"0");
-const hm = (h,m) => pad(h)+":"+pad(m||0);
+const DAYPART = [["рано утром","07:00"],["с утра","08:30"],["утром","08:30"],["днем","13:00"],["после обеда","14:30"],["вечером","19:30"],["поздно вечером","22:00"],["ночью","00:30"]];
 
 function learned(){ try{ return JSON.parse(localStorage.getItem("ritm:learned")||"{}"); }catch(e){ return {}; } }
 function custom(){ try{ return JSON.parse(localStorage.getItem("ritm:custom")||"[]"); }catch(e){ return []; } }
 
-// ядро фразы для запоминания: без чисел, времени, единиц и служебных глаголов
-const FILLER = /(?<![a-zа-я0-9])(выпил[аи]?|попил[аи]?|сделал[аи]?|съел[аи]?|поел[аи]?|был[аи]?|ходил[аи]?|сходил[аи]?|принял[аи]?|потратил[аи]?|провел[аи]?|занимал(?:ся|ась)|утром|днем|вечером|ночью|около|примерно|еще|ещё|потом|затем|сегодня|завтра|послезавтра|будет|буду|будем|собираюсь|собираемся|планирую|пойду|пойдем|поеду|схожу|сходим|хочу|хотим|займусь|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|немного|чуть|я|мы|что|же|ведь|писал|написал|говорил|сказал|упоминал|кстати|вроде)(?![a-zа-я0-9])/g;
+// ядро фразы для запоминания: без чисел, времени, единиц и служебных слов
+const FILLER = /(?<![a-zа-я0-9])(выпил[аи]?|попил[аи]?|сделал[аи]?|съел[аи]?|поел[аи]?|был[аи]?|ходил[аи]?|сходил[аи]?|принял[аи]?|потратил[аи]?|провел[аи]?|занимал(?:ся|ась)|утром|днем|вечером|ночью|около|примерно|еще|ещё|потом|затем|сегодня|вчера|позавчера|завтра|послезавтра|будет|буду|будем|собираюсь|собираемся|планирую|пойду|пойдем|поеду|схожу|сходим|хочу|хотим|займусь|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|немного|чуть|я|мы|что|же|ведь|писал|написал|говорил|сказал|упоминал|кстати|вроде|ну|короче|блин|типа|просто|только|уже|опять|снова|тоже|также)(?![a-zа-я0-9])/g;
 function core(text){
   let s = norm(text).replace(/(?<![a-zа-я])в\s*\d{1,2}(?:[:.]\d{2})?(?!\d)/g," ").replace(/(?<![a-zа-я])с\s*\d{1,2}(?:[:.]\d{2})?\s*до\s*\d{1,2}(?:[:.]\d{2})?/g," ");
-  s = s.replace(UNIT_RE, " ").replace(new RegExp("(?<![a-zа-я0-9])"+NUM+"(?![a-zа-я0-9])","g")," ").replace(FILLER," ").replace(/(?<![a-zа-я0-9])(в|на|с|и|по|до|за|к|со|о|об)(?![a-zа-я0-9])/g," ");
+  s = s.replace(UNIT_RE, " ").replace(new RegExp("(?<![a-zа-я0-9])"+NUM+"(?![a-zа-я0-9])","g")," ").replace(FILLER," ").replace(/(?<![a-zа-я0-9])(в|на|с|и|по|до|за|к|со|о|об|а|но)(?![a-zа-я0-9])/g," ");
   return s.replace(/[^a-zа-я0-9 \-]/g," ").replace(/\s+/g," ").trim();
 }
 
-// ищем занятие: сначала то, что вы уже объясняли, потом ваши занятия, потом база, потом общие основы типов
-function findActivity(text){
-  const s = norm(text), c = core(text), L = learned();
-  if(c && L[c]) return {entry:L[c].entry || null, type:L[c].type, name:L[c].name, score:99, learned:true};
-  let best = null;
+// расстояние Дамерау–Левенштейна (для опечаток)
+function dist(a, b){
+  const n = a.length, m = b.length; if(Math.abs(n-m) > 2) return 9;
+  const d = Array.from({length:n+1}, (_, i) => [i, ...Array(m).fill(0)]); for(let j=1;j<=m;j++) d[0][j] = j;
+  for(let i=1;i<=n;i++) for(let j=1;j<=m;j++){
+    const c = a[i-1] === b[j-1] ? 0 : 1;
+    d[i][j] = Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+c);
+    if(i>1 && j>1 && a[i-1] === b[j-2] && a[i-2] === b[j-1]) d[i][j] = Math.min(d[i][j], d[i-2][j-2]+1);
+  }
+  return d[n][m];
+}
+const esc = a => a.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+// общие слова, по которым тип не ясен: спросим уточнение
+const GENERIC_TRAIN = /(?:^|\s)(трениров[а-я]*|тренил[а-я]*|потренил[а-я]*|треня|треньк[а-я]*|трен[еи]|позанимал(?:ся|ась) спорт[а-я]*|занимал(?:ся|ась) спорт[а-я]*|спорт|спортом|физкультур[а-я]*|физр[а-я]*|нагрузк[а-я]*)(?=\s|$)/;
+const GENERIC_PLAY = new Set(["поиграл","играл","игра","игру","поиграла","играла","поиграли","играли"]);
+const MEALWORD = /^(завтрак|позавтракал|обед|пообедал|ужин|поужинал|перекус|перекусил|листал|листала|скроллил|скролил|залип|втыкал|сидел в телефоне|сидела в телефоне|в телефоне|посидели|играл|поиграл)$/;
+const PREFIXES = ["пере","раз","рас","по","про","при","на","за","вы","от","до","у","с"];
+
+function exactMatch(s){
+  let best = null, bestAlias = "";
   const consider = (entry, alias, own) => {
     const a = alias.trim(); if(!a) return;
-    const re = new RegExp("(^|[\\s\\-])" + a.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"));
-    if(re.test(s)){ const sc = a.length + (own ? 50 : 0); if(!best || sc > best.score) best = {entry, type:entry.t, name:entry.n, score:sc}; }
+    if(new RegExp("(^|[\\s\\-])" + esc(a)).test(s)){ const sc = a.length + (own ? 50 : 0) - (MEALWORD.test(a) ? 6 : 0); if(!best || sc > best.score){ best = {entry, type:entry.t, name:entry.n, score:sc}; bestAlias = a; } }
   };
   for(const e of custom()) for(const a of [e.n.toLowerCase(), ...(e.a||"").split("|")]) consider(e, a.replace(/ё/g,"е"), true);
   for(const e of R.CATALOG){ consider(e, e.n.toLowerCase().replace(/ё/g,"е"), false); for(const a of (e.a||"").split("|")) consider(e, a, false); }
-  let tbest = null;
+  let tbest = null, tAlias = "";
   for(const [id, t] of Object.entries(R.TYPES)) for(const st of (t.stems||"").split("|")){
     const a = st.trim(); if(!a) continue;
-    if(new RegExp("(^|[\\s\\-])" + a.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).test(s) && (!tbest || a.length > tbest.score)) tbest = {entry:null, type:id, name:null, score:a.length};
+    if(new RegExp("(^|[\\s\\-])" + esc(a)).test(s) && (!tbest || a.length > tbest.score)){ tbest = {entry:null, type:id, name:null, score:a.length}; tAlias = a; }
   }
-  if(best && tbest && tbest.score > best.score + 3 && best.entry && best.entry.t !== tbest.type) return tbest;
-  return best || tbest;
+  let res = best, alias = bestAlias;
+  if(best && tbest && tbest.score > best.score + 3 && best.entry && best.entry.t !== tbest.type){ res = tbest; alias = tAlias; }
+  if(!res){ res = tbest; alias = tAlias; }
+  if(res) res.alias = alias;
+  return res;
+}
+// слова для нечёткого поиска (однословные синонимы и основы)
+let FUZZY = null;
+function fuzzyIndex(){
+  if(FUZZY) return FUZZY;
+  FUZZY = [];
+  for(const e of R.CATALOG) for(const a of [e.n.toLowerCase().replace(/ё/g,"е"), ...(e.a||"").split("|")]) if(a && !a.includes(" ") && a.length >= 4) FUZZY.push({a, entry:e, type:e.t});
+  for(const [id, t] of Object.entries(R.TYPES)) for(const a of (t.stems||"").split("|")) if(a && !a.includes(" ") && a.length >= 5) FUZZY.push({a, entry:null, type:id});
+  return FUZZY;
+}
+const UNIT_WORD = new RegExp("^(?:" + UNITS.map(u=>u[0]).join("|") + ")$");
+function fuzzyMatch(s){
+  const toks = s.trim().split(" ").filter(t => t.length >= 4 && /^[а-яa-z\-]+$/.test(t) && !UNIT_WORD.test(t) && !new RegExp("^(?:" + FILLER.source.replace(/^\(\?<!\[a-zа-я0-9\]\)\(|\)\(\?!\[a-zа-я0-9\]\)$/g,"") + ")$").test(t));
+  let best = null;
+  for(const tok of toks) for(const f of fuzzyIndex()){
+    const a = f.a, lim = a.length >= 6 ? 2 : 1;
+    if(a.length < 4) continue;
+    const dFull = dist(tok, a), dPref = a.length >= 5 ? Math.min(dist(tok.slice(0, a.length), a), dist(tok.slice(0, a.length + 1), a)) : 9;
+    const d = Math.min(dPref, dFull);
+    const rel = d / a.length;
+    if(d <= lim && d > 0 && (!best || rel < best.rel || (rel === best.rel && a.length > best.a.length))) best = {d, rel, a, entry:f.entry, type:f.type};
+  }
+  if(!best) return null;
+  return {entry:best.entry, type:best.type, name:best.entry ? best.entry.n : null, score:best.a.length - 2, fuzzy:true, alias:best.a};
+}
+
+// ищем занятие: сначала то, что вы уже объясняли, потом ваши занятия, потом база, потом общие основы, потом без приставок и с опечатками
+function findActivity(text){
+  const s = norm(text), c = core(text), L = learned();
+  if(c && L[c]) return {entry:L[c].entry || null, type:L[c].type, name:L[c].name, score:99, learned:true};
+  let res = exactMatch(s);
+  if(!res){
+    // «поотжимался», «покачался», «пробежался»: пробуем без глагольных приставок
+    const stripped = " " + s.trim().split(" ").map(t => { for(const p of PREFIXES) if(t.startsWith(p) && t.length - p.length >= 4) return t.slice(p.length); return t; }).join(" ") + " ";
+    if(stripped !== s) res = exactMatch(stripped);
+  }
+  const fz = (!res || (!res.entry && res.score <= 6)) ? fuzzyMatch(s) : null;
+  if(fz && (!res || (fz.entry && fz.alias.length >= 5 && fz.score >= res.score))) res = fz;
+  // общие слова без конкретики: «тренировка», «поиграл»
+  if(GENERIC_TRAIN.test(s) && (!res || (res.type === "strength" && !res.entry && /трениров|тренил|трен/.test(res.alias||"")))) return {ambiguous:"train", type:null, score:0};
+  if(res && res.type === "gaming" && GENERIC_PLAY.has(res.alias) && !/(комп|консол|приставк|плойк|телефон|игру в|steam|стим|доту|онлайн|катк)/.test(s)) return {ambiguous:"play", type:null, score:0};
+  return res;
 }
 
 function parseTimes(s){
   // «с 21 до 23», «с 21:00 до 23:30»
-  const range = /(?:^|\s)с\s*(\d{1,2})(?:[:.](\d{2}))?\s*до\s*(\d{1,2})(?:[:.](\d{2}))?/.exec(s);
-  if(range){
+  const range = /(?:^|\s)(?:с|c|от)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(?:до|-|–)\s*(\d{1,2})(?:[:.](\d{2}))?/.exec(s);
+  if(range && +range[1] <= 23 && +range[3] <= 24){
     const a = +range[1]*60 + +(range[2]||0); let b = +range[3]*60 + +(range[4]||0); if(b <= a) b += 1440;
     return {time:hm(+range[1], +(range[2]||0)), dur:b-a, rest:s.replace(range[0]," ")};
   }
-  const t = /(?:^|\s)(?:в|к|около|примерно в)\s*(\d{1,2})(?:[:.](\d{2})|\s*(?:часов|часа|час)(?:\s*(утра|дня|вечера|ночи))?)?(?=[\s,.;]|$)/.exec(s);
-  if(t && +t[1] <= 23 && (t[2] || /час/.test(t[0]) || /в\s*\d{1,2}$/.test(t[0].trim()) || /^\s*(в|к|около)/.test(t[0]))){
+  const t = /(?:^|\s)(?:в|к|около|примерно в|где-то в|часов в)\s*(\d{1,2})(?:[:.](\d{2})|\s*(?:часов|часа|час))?(?:\s*(утра|дня|вечера|ночи))?(?=[\s,.;]|$)/.exec(s);
+  if(t && +t[1] <= 23){
     let h = +t[1]; const m = +(t[2]||0);
-    if(t[3] === "дня" || t[3] === "вечера"){ if(h < 12) h += 12; }
+    if(t[3] === "дня" || t[3] === "вечера"){ if(h < 12) h += 12; } else if(t[3] === "ночи" && h === 12) h = 0;
     const unitAfter = new RegExp("^\\s*(" + UNITS.slice(0,1).concat(UNITS.slice(2)).map(u=>u[0]).join("|") + ")").test(s.slice(t.index + t[0].length));
     if(!unitAfter) return {time:hm(h,m), dur:null, rest:s.replace(t[0]," ")};
   }
-  for(const [w, v] of DAYPART) if(s.includes(" "+w+" ")) return {time:v, dur:null, rest:s, approx:true};
+  for(const [w, v] of DAYPART.slice().sort((a,b)=>b[0].length-a[0].length)) if(s.includes(" "+w+" ")) return {time:v, dur:null, rest:s, approx:true};
   return {time:"", dur:null, rest:s};
 }
 
@@ -117,6 +197,8 @@ function buildEntry(act, clause, times, qty){
   if(!name){ const c = core(clause), w0 = (c.split(" ")[0]||""); name = c && c.length > 2 && c.includes(" ") && !/(л|ла|ли|лся|лась|ть|ться)$/.test(w0) ? cap(c).slice(0,40) : (t.short || t.n); }
   if(act.type === "water" && (e.n === "Стакан воды" || e.n === "Бутылка воды" || !e.n)) name = "Вода";
   const out = {type:act.type, name, time:times.time || "", text:clause.trim()};
+  if(times.approx) out.approx = true;
+  if(act.fuzzy) out.fuzzy = true;
   const q = k => qty.find(x=>x.unit===k);
   if(t.unit === "event"){
     out.event = /просну|встал|подъем/.test(clause.toLowerCase().replace(/ё/g,"е")) ? "wake" : "bed";
@@ -125,11 +207,12 @@ function buildEntry(act, clause, times, qty){
   }
   if(t.unit === "min"){
     let min = times.dur;
-    const qm = q("min"), qk = q("km"), qs = q("steps"), qset = q("sets"), qp = q("pages"), qe = q("episodes");
+    const qm = q("min"), qk = q("km"), qs = q("steps"), qset = q("sets"), qp = q("pages"), qe = q("episodes"), qt = q("times");
     if(qm) min = qm.n * qm.mul;
     if(qk){ out.km = qk.n; if(min == null) min = Math.round(qk.n * (t.kmMin || 12)); }
     if(qs){ out.steps = Math.round(qs.n); if(min == null && !qk){ out.stepsOnly = true; out.name = "Шаги"; out.min = 0; return out; } }
-    if(qset && min == null) min = qset.n * 3;
+    if(qset && min == null){ min = qset.n * 3; out.sets = qset.n; }
+    if(qt && act.type === "strength" && min == null){ out.reps = qt.n; }
     if(qp && min == null) min = Math.round(qp.n * 1.5);
     if(qe && min == null) min = Math.round(qe.n * 45);
     out.min = min != null ? Math.round(min) : (e.m || t.def);
@@ -156,49 +239,74 @@ function buildEntry(act, clause, times, qty){
 }
 const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
+// отрицание внутри фразы: «не пошёл в зал», «пропустил пробежку», «без кофе»
+const NEG = /(?:^|[\s\-])(?:не|ни разу не|вообще не|совсем не)\s+(?!только|очень|много|мало|долго|сильно|больше|меньше|раньше|позже|забыть|забудь|плохо|хорошо|так)[а-я]+/;
+const SKIP = /(?:^|\s)(пропустил[а-я]*|пропущен[а-я]*|отменил[а-я]*|забил[а-я]* на|слил(?:ся|ась)|прогулял[а-я]*|скипнул[а-я]*|отказал(?:ся|ась) от)(?=\s)/;
+const WITHOUT = /(?:^|\s)без\s+([а-я]+)/;
+const FUT_NEG = /(?:^|\s)не\s+(пойду|буду|будет|успею|смогу|получится|поеду|пойдем|поедем|хочу|собираюсь|планирую)/;
+
 // главный разбор: текст → список записей
 function parse(text){
   const out = [];
-  const parts = String(text).split(/\n|;|\.(?=\s|$)|,(?!\d)|\s+(?:а\s+)?(?:потом|затем|еще|ещё)\s+|\s+и\s+/i).map(x=>x.trim()).filter(Boolean);
+  let src = String(text);
+  // «кофе с молоком и сахаром» — это кофе, а не сахар отдельно
+  src = src.replace(/(?<![а-яё])(с|со|без)\s+(молоком|сахаром|сливками|корицей|сиропом|медом|мёдом|сахарозаменителем|льдом)(\s+и\s+(молоком|сахаром|сливками|корицей|сиропом|медом|мёдом|льдом))?/gi, " ");
+  src = src.replace(/так и не/gi, "так-и-не").replace(/(?<![а-яё])и (так|сам|не)(?![а-яё])/gi, m => m);
+  const whole = norm(src);
+  const msgOffset = /(?:^|\s)позавчера(?=\s)/.test(whole) ? -2 : /(?:^|\s)вчера(?=\s)/.test(whole) ? -1 : 0;
+  const parts = src.split(/\n|;|\.(?=\s|$)|,(?!\d)|\s+(?:а\s+)?(?:потом|затем|после этого|еще|ещё|плюс|а также|также)\s+|\s+и\s+|\s+а\s+(?=(?:в|потом|еще|ещё)\s)/i).map(x=>x.trim()).filter(Boolean);
   let prev = null;
   for(const raw of parts){
     const s = pre(norm(raw));
     const times = parseTimes(s);
     const qty = parseQty(times.rest);
+    const negated = NEG.test(s) || SKIP.test(s) || WITHOUT.test(s);
     let act = findActivity(times.rest);
     // «в 11:30» без занятия — повтор предыдущего («кофе в 9:30 и в 11:30»)
     if(!act && prev && (times.time || qty.length) && !core(raw)){
       const rep = {...prev.act};
       const e = buildEntry(rep, prev.clause, times, qty.length ? qty : prev.qty);
-      e.text = raw; out.push(e); continue;
+      e.text = raw; if(prev.offset) e.dayOffset = prev.offset; out.push(e); continue;
+    }
+    const offset = /(?:^|\s)позавчера(?=\s)/.test(s) ? -2 : /(?:^|\s)вчера(?=\s)/.test(s) ? -1 : msgOffset;
+    if(act && act.ambiguous){
+      const e = {type:null, name:cap(core(raw)).slice(0,50) || (act.ambiguous === "train" ? "Тренировка" : "Игра"), time:times.time, text:raw, unknown:true, ask:act.ambiguous, qty};
+      const qm = qty.find(x=>x.unit==="min"); if(qm) e.min = qm.n * qm.mul; else if(times.dur) e.min = times.dur;
+      if(offset) e.dayOffset = offset; if(negated) e.neg = true;
+      out.push(e); continue;
     }
     if(!act){
-      if(core(raw)){ const nm = times.rest.replace(UNIT_RE, " ").replace(/(?<![a-zа-я])(выпил[аи]?|сделал[аи]?|съел[аи]?|утром|днем|вечером|ночью)(?![a-zа-я])/g, " ").replace(/\s+/g, " ").trim();
-        out.push({type:null, name:cap(nm || core(raw)).slice(0,50), time:times.time, text:raw, unknown:true, qty}); }
+      if(core(raw)){ const nm = times.rest.replace(UNIT_RE, " ").replace(/(?<![a-zа-я])(выпил[аи]?|сделал[аи]?|съел[аи]?|утром|днем|вечером|ночью|вчера|сегодня)(?![a-zа-я])/g, " ").replace(/\s+/g, " ").trim();
+        const e = {type:null, name:cap(nm || core(raw)).slice(0,50), time:times.time, text:raw, unknown:true, qty};
+        const qm = qty.find(x=>x.unit==="min"); if(qm) e.min = qm.n * qm.mul;
+        if(offset) e.dayOffset = offset; if(negated) e.neg = true;
+        out.push(e); }
       continue;
     }
     const e = buildEntry(act, raw, times, qty);
     if(act.learned) e.learned = true;
+    if(offset) e.dayOffset = offset;
+    if(negated){ e.neg = true; if(FUT_NEG.test(s)) e.negFuture = true; if(SKIP.test(s)) e.skip = true; }
     if(e.type === "sleep" && !e.time){ prev = null; continue; }
     out.push(e);
     // «протеин с водой», «таблетку запил водой» — плюс вода
-    if(act.type !== "water" && /(?:^|\s)(с|со|на|запил[а-я]*)\s+вод/.test(s)){
+    if(!negated && act.type !== "water" && /(?:^|\s)(с|со|на|запил[а-я]*)\s+вод/.test(s)){
       const shakes = act.type === "protein" ? 1 : 0;
       const extra = act.type === "protein" ? 300 + Math.max(0, (e.srv||1) - 1) * 100 : 200;
-      out.push({type:"water", name:"Вода", time:e.time, ml:shakes ? extra : 200, text:raw, derived:true});
+      out.push({type:"water", name:"Вода", time:e.time, ml:shakes ? extra : 200, text:raw, derived:true, ...(offset ? {dayOffset:offset} : {})});
     }
-    prev = {act, clause:raw, qty};
+    prev = {act, clause:raw, qty, offset};
   }
   return out;
 }
 
 // угадать тип по названию (для своих занятий и новых дел в плане)
-function guessType(name){ const a = findActivity(name); return a ? a.type : null; }
+function guessType(name){ const a = findActivity(name); return a && a.type ? a.type : null; }
 
 function remember(text, type, name){
   const c = core(text); if(!c) return;
   const L = learned(); L[c] = {type, name}; try{ localStorage.setItem("ritm:learned", JSON.stringify(L)); }catch(e){}
 }
 
-R.parse = parse; R.guessType = guessType; R.remember = remember; R.core = core; R.findActivity = findActivity;
+R.parse = parse; R.guessType = guessType; R.remember = remember; R.core = core; R.findActivity = findActivity; R.norm = norm; R.pre = pre; R.dist = dist;
 })();
