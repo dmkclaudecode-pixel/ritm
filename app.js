@@ -736,6 +736,10 @@ function runAction(msgId, i){
   else if(a.op === "time"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.time = a.time; }); reply = `Поставил «${a.t}» на ${a.time}.`; }
   else if(a.op === "remove"){ mutateQuiet(a.key, w => { w.items = w.items.filter(x=>x.id!==a.id); }); reply = `Убрал «${a.t}» из плана.`; }
   else if(a.op === "rskip"){ const r = getRoutine(); r.asked[a.k] = true; r.pending = null; saveRoutine(r); reply = "Хорошо, пропустим. Расскажешь потом, если захочешь."; }
+  else if(a.op === "addOn"){ mutateQuiet(a.key, w => w.items.push({id:uid(), day:a.day, cat:a.cat, t:a.name, time:"", done:false})); reply = `Поставил «${a.name}» ${DACC[a.day]}.`; }
+  else if(a.op === "unlog"){ let n = 0; mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const rm = (day.log||[]).filter(r => r.type === a.type && r.src === "chat"); n = rm.length;
+      day.log = (day.log||[]).filter(r => !rm.includes(r)); for(const r of rm) if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } });
+    reply = n ? "Убрал ошибочную запись, отметку в плане тоже снял. Прости, неправильно понял." : "Записей уже нет."; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
     const pend = (m.pending||[])[a.idx]; if(pend){ pend.type = a.type; pend.changed = true; pend.wasUnknown = true; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend);
@@ -779,13 +783,22 @@ function logFromChat(entries){
   if(rvState) rvState = getReview(getWeek(curKey()), todayI());
   return linked;
 }
-function handleNegations(negs, text, msgDay){
+function handleNegations(negs, text, msgDay, positive){
+  const pos = new Set((positive||[]).map(x => x.type));
   for(const e of negs){
     const t = TYPES[e.type];
     if(t.g === "intake"){ bot({caffeine:"Отлично, день без кофеина — сон скажет спасибо.", alcohol:"Без алкоголя — отличный выбор.", sweets:"Без сладкого — молодец!"}[e.type] || "Понял, не записываю."); continue; }
     const date = e.negFuture ? (dayFromText(e.text) || msgDay || new Date()) : (e.dayOffset ? addDays(new Date(), e.dayOffset) : new Date());
     const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key);
-    const it = w.items.find(i => i.day===d && i.cat===e.type && !i.done) || (MAJOR.has(e.type) ? w.items.find(i => i.day===d && MAJOR.has(i.cat) && !i.done) : null);
+    const sameAny = w.items.some(i => i.day===d && i.cat===e.type);
+    const own = w.items.find(i => i.day===d && i.cat===e.type && !i.done);
+    const wrong = !own && e.negFuture && key === curKey() && d === todayI() ? (w.days[d] && (w.days[d].log||[]).filter(r => r.type === e.type && r.src === "chat")) : null;
+    const it = own || (MAJOR.has(e.type) && !pos.size && !sameAny && !(wrong && wrong.length) ? w.items.find(i => i.day===d && MAJOR.has(i.cat) && !i.done && !pos.has(i.cat)) : null);
+    if(wrong && wrong.length){
+      bot(`Понял. Но у меня на сегодня записано «${wrong[wrong.length-1].name}» — это я ошибся? Убрать запись?`,
+        [act("Да, убрать запись", {op:"unlog", key, d, type:e.type}), act("Нет, оставить", {op:"keep"})]);
+      continue;
+    }
     if(it){
       mutateQuiet(key, ww => { const x = ww.items.find(i=>i.id===it.id); if(x) x.skipped = (x.skipped||0) + 1; });
       const from = key === curKey() ? Math.min(6, Math.max(todayI(), d) + (e.negFuture ? 0 : 1)) : 0;
@@ -820,6 +833,13 @@ function respond(text){
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
+  const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
+  if(A.meta === "tooEarly" && !hasSureAct){
+    settings.statsHold = Math.max(settings.statsHold || 0, startedAt() + 14*86400000); persistSettings();
+    const left = Math.max(1, 14 - dataDays());
+    return bot(`Согласен, ты прав: данных пока слишком мало, и выводы по ним были бы гаданием. Ничего не меняю. Статистику буду только копить, а правки целей и расписания предложу не раньше чем через ${left} ${plural(left,"день","дня","дней")}, когда наберётся хотя бы две полные недели. Пока план строю по твоим целям и распорядку.`); }
+  if(A.meta === "dontChange" && !hasSureAct){ settings.statsHold = Math.max(settings.statsHold || 0, Date.now() + 14*86400000); persistSettings();
+    return bot("Хорошо, ничего не меняю. Сам с правками плана по статистике не полезу ещё минимум две недели. Если захочешь что-то поменять — просто напиши."); }
   if(A.small.length && !hasAct && A.words <= 7 && !A.states.length && handleSmall(A.small)) return;
   if(/ (разбор|подведи итог|подвести итог|итоги дня) /.test(s)) return bot("Давай подведём итоги дня.", [act("Открыть разбор", {op:"review"})]);
   const mentionsActivity = RITM.parse(text).some(e => e.type && TYPES[e.type].unit !== "event");
@@ -867,7 +887,25 @@ function respond(text){
     if(fut){ e.future = true; e.date = (cd || new Date()).getTime(); future.push(e); } else past.push(e);
   }
   if(!past.length && !future.length && !negs.length && !clar.length && unknown.length && ctxKind !== "lunch") ruleMiss = true;
-  if(negs.length) handleNegations(negs, text, msgDay);
+  // «сегодня будет бассейн, силовой не будет» — это замена одного на другое
+  for(const n of negs.slice()){
+    if(!n.negFuture || !MAJOR.has(n.type)) continue;
+    const nd = dayFromText(n.text) || msgDay || new Date();
+    const f = future.find(x => MAJOR.has(x.type) && x.type !== n.type && dateKeyOf(new Date(x.date)) + dayIdxOf(new Date(x.date)) === dateKeyOf(nd) + dayIdxOf(nd));
+    if(!f) continue;
+    const key = dateKeyOf(nd), d = dayIdxOf(nd), w = getWeek(key);
+    const it = w.items.find(i => i.day===d && i.cat===n.type && !i.done); if(!it) continue;
+    const old = it.t;
+    mutateQuiet(key, ww => { const x = ww.items.find(i=>i.id===it.id); if(x){ x.skipped = (x.skipped||0) + 1; x.cat = f.type; x.t = f.name; if(f.time) x.time = f.time; } });
+    negs.splice(negs.indexOf(n), 1); future.splice(future.indexOf(f), 1);
+    const from = key === curKey() ? Math.min(6, Math.max(todayI(), d) + 1) : 0;
+    const bd = bestDayInWeek(key, n.type, from, d), acts = [];
+    if(bd >= 0) acts.push(act(`Да, ${DACC[bd]}`, {op:"addOn", key, day:bd, cat:n.type, name:old}));
+    acts.push(act("Нет, на этой неделе без неё", {op:"keep"}));
+    bot(`Понял: ${whenWord(nd)} ${lc(f.name)}${f.time ? " в " + f.time : ""} вместо «${old}». Заменил в плане.` + (bd >= 0 ? ` «${old}» поставить на другой день?` : ""), bd >= 0 ? acts : null);
+    pendingIssueDates.push(nd);
+  }
+  if(negs.length) handleNegations(negs, text, msgDay, past.concat(future));
   for(const c of clar){
     const opts = c.ask === "train" ? ["strength","run","swim","cardio","mobility","sport"] : ["gaming","hobby","sport","social"];
     const label = {gaming:"Видеоигры", hobby:"Настольные игры", sport:"Спорт", social:"С детьми / с друзьями"};
@@ -929,6 +967,10 @@ function respond(text){
   }
   if(out.length) bot(out.join("\n"));
   if(pendingIssueDates.length){ postIssues(pendingIssueDates.splice(0), 2); }
+  // разговорная фраза («ну я пока не знаю», «мы только начали») — не занятие, не спрашиваем тип
+  const chatty = unknown.filter(u => isChatty(u, A));
+  if(chatty.length){ for(const u of chatty) unknown.splice(unknown.indexOf(u), 1);
+    if(!past.length && !future.length && !negs.length && !clar.length && !unknown.length) bot(chattyReply(ctxKind)); }
   unknown.forEach((u, idx) => {
     const guesses = ["walk","strength","sport","hobby","relax","meal","work","other"].filter(t => TYPES[t]);
     const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
@@ -936,6 +978,17 @@ function respond(text){
       {pending:[{...u, future: isFutureClause(u.text, text, u), date: (dayFromText(u.text) || msgDay || new Date()).getTime()}]});
     void m;
   });
+}
+function isChatty(u, A){
+  if(u.time || (u.qty && u.qty.length) || u.min) return false;
+  const w = nrm(u.name).trim().split(" ").filter(Boolean);
+  if(w.length >= 4) return true;
+  if(/ (я|мы|ты|он|она|они|это|не|нет|пока|еще|ещё|уже|никаких|ничего|знаю|понял|думаю|кажется|наверное|может|надо|нужно|хочу|рано|поздно|просто|вообще|короче|типа|вроде) /.test(nrm(u.name))) return true;
+  return !!A.conversational && w.length >= 2;
+}
+function chattyReply(kind){
+  if(kind === "report" || kind === "insight") return "Понял тебя. Ничего не меняю, просто продолжаю наблюдать.";
+  return pick(["Понял тебя.","Принято.","Окей, понял."]) + " Если что-то делал или собираешься — напиши, я запишу.";
 }
 function setBedtime(hm){
   settings.bedtime = hm;
@@ -1372,6 +1425,22 @@ function dayRecord(date){
     planned: its.length, done: doneIts.length, reviewed: !!rv.done, hasData: !!(sl || log.length || day.energy || doneIts.length)
   };
 }
+// сколько у нас реальных данных: выводы и правки плана по статистике — только когда их достаточно
+function startedAt(){
+  if(settings.startedAt) return settings.startedAt;
+  let first = null;
+  for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(!k || !k.startsWith("ritm:w:")) continue;
+    try { const w = JSON.parse(localStorage.getItem(k)); const base = new Date(k.slice(7)+"T00:00:00");
+      const ds = Object.entries(w.days||{}).filter(([d, x]) => x && ((x.log||[]).length || x.energy || x.mood || x.review)).map(([d]) => +d);
+      if(w.items && w.items.some(i => i.done)) ds.push(...w.items.filter(i=>i.done).map(i=>i.day));
+      if(ds.length){ const dt = addDays(base, Math.min(...ds)); if(!first || dt < first) first = dt; } } catch(e){}
+  }
+  const t = first || new Date(); t.setHours(0,0,0,0);
+  settings.startedAt = t.getTime(); persistSettings(); return settings.startedAt;
+}
+const dataDays = () => Math.floor((Date.now() - startedAt()) / 86400000);
+const statsReady = (min) => dataDays() >= (min || 14) && Date.now() >= (settings.statsHold || 0);
+const afterStart = (key, dow) => addDays(new Date(key+"T00:00:00"), dow).getTime() >= startedAt();
 function history(n){ const out = [], t = new Date(); t.setHours(0,0,0,0); for(let i = n; i >= 0; i--) out.push(dayRecord(addDays(t, -i))); return out; }
 const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
 // сравнение «в дни, когда X» против «остальные дни» с поправкой на малую выборку
@@ -1449,6 +1518,7 @@ function itemHistory(weeks){
   return out;
 }
 function skipPatterns(){
+  if(!statsReady()) return [];
   const h = itemHistory(6).filter(x => goalCats().includes(x.cat) || MAJOR.has(x.cat));
   const groups = {};
   for(const x of h){ const k = x.cat + "|" + x.dow + "|" + partOf(x.time); (groups[k] = groups[k] || {cat:x.cat, dow:x.dow, part:partOf(x.time), n:0, miss:0}); groups[k].n++; if(!x.done) groups[k].miss++; }
@@ -1457,6 +1527,7 @@ function skipPatterns(){
 }
 // когда ты реально это делаешь: лучший день недели и типичный час
 function bestSlotFor(cat){
+  if(!statsReady()) return null;
   const h = itemHistory(8).filter(x => x.cat === cat);
   const logs = []; const base = mondayOf(new Date());
   for(let k = 0; k <= 8; k++){ const key = iso(addDays(base, -7*k)), w = getWeek(key);
@@ -1513,6 +1584,8 @@ function learnedTime(cat, d, fallback){ const bs = bestSlotFor(cat); if(bs && bs
 // подстройка целей по последним двум неделям
 function goalSuggestions(){
   const out = [], base = mondayOf(new Date());
+  // обе прошлые недели должны быть целиком «после старта», иначе нули — это не данные, а их отсутствие
+  if(!statsReady(14) || addDays(base, -14).getTime() < startedAt()) return out;
   const wk = k => goalState(getWeek(iso(addDays(base, -7*k))), 7);
   const w1 = wk(1), w2 = wk(2);
   for(const c of goalCats()){

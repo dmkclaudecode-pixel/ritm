@@ -265,7 +265,15 @@ const PARSE = [
   ["сегодня без сладкого", [{type:"sweets", neg:true}]],
   ["выпил кофе, а потом протеин с водой", [{type:"caffeine"}, {type:"protein"}, {type:"water"}]],
   ["пробежка 3 км и растяжка 10 минут", [{type:"run", km:3}, {type:"mobility", min:10}]],
-  ["кофе в 8, обед в 13, прогулка в 18", [{type:"caffeine", time:"08:00"}, {type:"meal", time:"13:00"}, {type:"walk", time:"18:00"}]]
+  ["кофе в 8, обед в 13, прогулка в 18", [{type:"caffeine", time:"08:00"}, {type:"meal", time:"13:00"}, {type:"walk", time:"18:00"}]],
+  // разговорное: не должно превращаться в занятия
+  ["Да пока рано мы только начали", [{unknown:true}]],
+  ["мы только начали ещё никаких историй нет", [{unknown:true}]],
+  ["рано делать выводы", [{unknown:true}]],
+  ["ну я пока не знаю", [{unknown:true}]],
+  ["Нет, сегодня будет бассейн силовой не будет", [{type:"swim", neg:null}, {type:"strength", neg:true, negFuture:true}]],
+  ["сегодня будет бассейн а силовой не будет", [{type:"swim", neg:null}, {type:"strength", neg:true}]],
+  ["не меняй план", []]
 ];
 
 const NLU = [
@@ -381,7 +389,11 @@ const NLU = [
   ["что на неделе", {topics:["week"]}],
   ["посоветуй как лучше спать", {topics:["advice"]}],
   ["самоповреждение", {crisis:true}],
-  ["жить незачем", {crisis:true}]
+  ["жить незачем", {crisis:true}],
+  ["Да пока рано мы только начали ещё никаких историй нет", {meta:"tooEarly"}],
+  ["слишком мало данных для выводов", {meta:"tooEarly"}],
+  ["не меняй план", {meta:"dontChange"}],
+  ["пока рано", {meta:"tooEarly"}]
 ];
 
 module.exports = {PARSE, NLU};

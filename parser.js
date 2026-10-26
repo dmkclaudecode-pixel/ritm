@@ -127,9 +127,11 @@ function fuzzyIndex(){
   for(const [id, t] of Object.entries(R.TYPES)) for(const a of (t.stems||"").split("|")) if(a && !a.includes(" ") && a.length >= 5) FUZZY.push({a, entry:null, type:id});
   return FUZZY;
 }
+// частые слова, в которых нельзя искать опечатки занятий
+const COMMON = new Set("начали начал начала начать начнем начинаем рано рановато пока только никаких никакой никакие ничего нету историй история истории данных данные данными статистика статистики статистику расписание расписании расписания правки правку вносить вносил менять меняй делать сделать сделали время времени дело дела делаю делаем делали работе работы работу работаю сейчас сегодня завтра вчера потом теперь просто очень много мало немного хорошо плохо нормально может можно нужно надо хочу хочется буду будешь было была были есть быть сказал сказала говорю говорил думаю думал кажется понял поняла понятно ясно давай давайте ладно согласен согласна конечно вообще вроде также тоже такой такая такое какой какая какие когда почему зачем потому поэтому если чтобы спасибо привет пожалуйста неделя недели неделю неделе месяц месяца день дней дня часов минут вопрос вопросы ответ ответил ответила смысл смысла пробовал пробую попробую стараюсь получилось получается вышло слишком совсем вместе всегда никогда иногда часто редко сильно правда точно наверное видимо значит короче кстати блин вообщем вобщем вывод выводы выводов выводу судить данные план плана плане планы планом планов планах планирую планировал меняй поменяй измени".split(" "));
 const UNIT_WORD = new RegExp("^(?:" + UNITS.map(u=>u[0]).join("|") + ")$");
 function fuzzyMatch(s){
-  const toks = s.trim().split(" ").filter(t => t.length >= 4 && /^[а-яa-z\-]+$/.test(t) && !UNIT_WORD.test(t) && !new RegExp("^(?:" + FILLER.source.replace(/^\(\?<!\[a-zа-я0-9\]\)\(|\)\(\?!\[a-zа-я0-9\]\)$/g,"") + ")$").test(t));
+  const toks = s.trim().split(" ").filter(t => t.length >= 4 && /^[а-яa-z\-]+$/.test(t) && !COMMON.has(t) && !UNIT_WORD.test(t) && !new RegExp("^(?:" + FILLER.source.replace(/^\(\?<!\[a-zа-я0-9\]\)\(|\)\(\?!\[a-zа-я0-9\]\)$/g,"") + ")$").test(t));
   let best = null;
   for(const tok of toks) for(const f of fuzzyIndex()){
     const a = f.a, lim = a.length >= 6 ? 2 : 1;
@@ -150,7 +152,7 @@ function findActivity(text){
   let res = exactMatch(s);
   if(!res){
     // «поотжимался», «покачался», «пробежался»: пробуем без глагольных приставок
-    const stripped = " " + s.trim().split(" ").map(t => { for(const p of PREFIXES) if(t.startsWith(p) && t.length - p.length >= 4) return t.slice(p.length); return t; }).join(" ") + " ";
+    const stripped = " " + s.trim().split(" ").map(t => { if(COMMON.has(t)) return t; for(const p of PREFIXES) if(t.startsWith(p) && t.length - p.length >= 4) return t.slice(p.length); return t; }).join(" ") + " ";
     if(stripped !== s) res = exactMatch(stripped);
   }
   const fz = (!res || (!res.entry && res.score <= 6)) ? fuzzyMatch(s) : null;
@@ -255,8 +257,16 @@ function parse(text){
   const whole = norm(src);
   const msgOffset = /(?:^|\s)позавчера(?=\s)/.test(whole) ? -2 : /(?:^|\s)вчера(?=\s)/.test(whole) ? -1 : 0;
   const parts = src.split(/\n|;|\.(?=\s|$)|,(?!\d)|\s+(?:а\s+)?(?:потом|затем|после этого|еще|ещё|плюс|а также|также)\s+|\s+и\s+|\s+а\s+(?=(?:в|потом|еще|ещё)\s)/i).map(x=>x.trim()).filter(Boolean);
+  // «бассейн силовой не будет», «бассейн а силовой не будет» — два занятия в одной фразе
+  for(let i = 0; i < parts.length; i++){
+    const m = parts[i].match(/^(.*\S)\s+(?:а\s+|но\s+)?([а-яёa-z]+\s+(?:не|ни разу не|вообще не)\s+(?:будет|будут|буду|будем|пойду|пойдем|поеду|поедем|получится|успею|смогу|сделаю|было|был|была)(?:\s.*)?)$/i);
+    if(m){ const L = findActivity(pre(norm(m[1]))), Rr = findActivity(pre(norm(m[2]))); if(L && Rr && !L.ambiguous && !Rr.ambiguous && L.type !== Rr.type) parts.splice(i, 1, m[1].replace(/\s+(а|но)$/i, ""), m[2]); }
+  }
   let prev = null;
-  for(const raw of parts){
+  for(const raw0 of parts){
+    // «нет», «да», «ну», «ок» в начале — ответ на вопрос, а не занятие
+    const raw = raw0.replace(/^(?:нет|неа|не-а|да|ага|угу|ну|ок|окей|ладно|хорошо|так|слушай|короче|вообще-то|кстати)(?:[\s,!.—-]+|$)/i, "").trim();
+    if(!raw) continue;
     const s = pre(norm(raw));
     const times = parseTimes(s);
     const qty = parseQty(times.rest);

@@ -32,7 +32,7 @@ const SMALL = [
   ["howareyou",/ (как (ты|дела|жизнь|сам|поживаешь|настроение у тебя)|что нового|как оно) /],
   ["who",      / (кто ты|ты кто|что ты такое|ты бот|ты робот|ты человек|ты живой|как тебя зовут) /],
   ["thanks",   / (спасибо|спс|благодарю|пасиб|сенкс|сяп|мерси) /],
-  ["bye",      / (пока|до завтра|спокойной ночи|споки|бай|до встречи|я спать|ушел спать|ушла спать) /],
+  ["bye",      / (пока-пока|до завтра|спокойной ночи|споки|бай|до встречи|я спать|ушел спать|ушла спать|всем пока|ну пока) |^ пока $/],
   ["praise",   / (молодец|умница|красавчик|лучший|ты крут|клево работаешь|хорошо работаешь|полезный) /],
   ["insult",   / (дурак|тупой|тупая|бесполезн|туп(ая|ой) (прога|программа)|не понимаешь|бестолк|глупый|отстой) /],
   ["help",     / (помощь|помоги|что ты умеешь|как пользоваться|команды|help|что можно писать|как с тобой) /],
@@ -84,6 +84,11 @@ for(const st of STATES) st.re = new RegExp(st.re.source.replace(/ \/?$/, "").rep
 for(const x of SMALL) if(!/^\^/.test(x[1].source)) x[1] = new RegExp(x[1].source.replace(/ $/, ""));
 for(const x of ASK_TOPICS) x[1] = new RegExp(x[1].source.replace(/ $/, ""));
 
+// мета-ответы о работе самого Ритма
+const META_TOO_EARLY = / (пока рано|рано еще|рано ещё|рановато|рано делать|рано судить|мало данных|недостаточно данных|данных мало|данных нет|данных пока нет|нет данных|только начали|только начал|только начала|только начинаем|только начинаю|никаких историй|нет истории|истории нет|нет статистики|статистики нет|мало статистики|подожди с выводами|не делай выводов|не спеши с выводами)/;
+const META_DONT_CHANGE = / (не меняй (план|расписание|цели|цель)|не надо менять|не трогай (план|расписание|цели)|оставь (план|цели|как есть)|не снижай|не повышай)/;
+const CONVERSATIONAL = / (да|нет|ну|мы|ты|я|он|она|они|это|пока|еще|ещё|уже|просто|никаких|ничего|вообще|рано|поздно|понял|ясно|согласен|согласна|кажется|думаю|наверное|короче|типа|вроде|ладно|хорошо|конечно|ведь|же|вот) /;
+
 function analyze(text){
   const s = N(text);
   const out = {s, words: words(s), crisis:false, states:[], small:[], correction:null, question:false, topics:[]};
@@ -98,6 +103,8 @@ function analyze(text){
   if(out.states.some(x=>x.k==="good") && out.states.length > 1) out.states = out.states.filter(x=>x.k!=="good");
   for(const [k, re] of SMALL) if(re.test(s)) out.small.push(k);
   out.correction = correction(s);
+  if(META_TOO_EARLY.test(s)) out.meta = "tooEarly"; else if(META_DONT_CHANGE.test(s)) out.meta = "dontChange";
+  out.conversational = CONVERSATIONAL.test(s) && !/\d/.test(s) && words(s) >= 4;
   out.question = QUESTION.test(s);
   for(const [k, re] of ASK_TOPICS) if(re.test(s)) out.topics.push(k);
   return out;
