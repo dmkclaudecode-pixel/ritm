@@ -153,6 +153,4 @@ body.inchat .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 .macts .chosen{font-size:.8rem;color:var(--accent);font-weight:600}
 .mt{font-size:.68rem;color:var(--muted);padding:0 4px}
 
-.msg .by{font-size:.68rem;font-weight:600;color:var(--accent);padding:0 4px;letter-spacing:.04em}
-.msg.typing .bub{color:var(--muted);letter-spacing:.2em}
 label.tog{display:flex}
