@@ -10,6 +10,7 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.request.AggregateGroupByDurationRequest
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -38,6 +39,7 @@ object HealthReader {
         val steps = JSONObject()
         val sleep = JSONObject()
         val sessions = JSONArray()
+        val buckets = JSONArray()
         var granted: Set<String> = emptySet()
 
         if (HealthConnectClient.getSdkStatus(ctx) == HealthConnectClient.SDK_AVAILABLE) {
@@ -56,6 +58,25 @@ object HealthReader {
                     val c = r.result[StepsRecord.COUNT_TOTAL] ?: continue
                     steps.put(r.startTime.toLocalDate().toString(), c)
                 }
+            }
+
+            if (STEPS in granted) {
+                // шаги по 10 минут за последние 36 часов: по ним приложение замечает прогулки
+                try {
+                    val end = ZonedDateTime.now(zone).withSecond(0).withNano(0)
+                    val start = end.minusHours(36)
+                    val res = client.aggregateGroupByDuration(
+                        AggregateGroupByDurationRequest(
+                            metrics = setOf(StepsRecord.COUNT_TOTAL),
+                            timeRangeFilter = TimeRangeFilter.between(start.toLocalDateTime(), end.toLocalDateTime()),
+                            timeRangeSlicer = Duration.ofMinutes(10)
+                        )
+                    )
+                    for (r in res) {
+                        val c = r.result[StepsRecord.COUNT_TOTAL] ?: continue
+                        if (c > 0) buckets.put(JSONObject().put("t", r.startTime.atZone(zone).format(DT)).put("n", c))
+                    }
+                } catch (e: Exception) { }
             }
 
             if (SLEEP in granted) {
@@ -93,6 +114,7 @@ object HealthReader {
             .put("steps", steps)
             .put("sleep", sleep)
             .put("sessions", sessions)
+            .put("stepBuckets", buckets)
             .put("stepsGranted", STEPS in granted)
             .put("sleepGranted", SLEEP in granted)
             .put("usage", usage)

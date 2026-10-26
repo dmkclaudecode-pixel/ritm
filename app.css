@@ -171,3 +171,4 @@ label.tog{display:flex}
 .weektools{margin-top:18px}
 .weektools summary{cursor:pointer;font-weight:600;padding:2px 0}
 .weektools .sep{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.metric.kbju{margin-top:10px}

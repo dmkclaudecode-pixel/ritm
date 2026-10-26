@@ -179,12 +179,15 @@ const viewKey = () => iso(weekStart);
 function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key < ck ? 7 : -1); } // index of "today" inside a week
 
 /* ---------- analysis ---------- */
+// минимальная длительность, с которой занятие засчитывается в цель недели (короче — пишется в журнал, но цель не закрывает)
+const MIN_COUNT = {strength:15, walk:10, run:10, bike:10, swim:15, cardio:10, mobility:10, sport:20, social:10, outing:30, nature:30, unplug:30};
+const minCount = c => MIN_COUNT[c] || 5;
 function goalState(w, ti){
   const out = {};
   for(const c of goalCats()){
     const goal = settings.goals[c]||0; let done=0, future=0, missed=0, plan=0;
     for(const it of w.items){ if(it.cat!==c) continue; plan++; if(it.done) done++; else if(it.day >= ti) future++; else missed++; }
-    for(const [d, day] of Object.entries(w.days||{})) for(const e of (day.log||[])) if(e.type===c && !e.plan && (e.min||0) >= 5){ done++; plan++; }
+    for(const [d, day] of Object.entries(w.days||{})) for(const e of (day.log||[])) if(e.type===c && !e.plan && (e.min||0) >= minCount(c)){ done++; plan++; }
     out[c] = {goal, done, future, missed, plan, deficit: Math.max(0, goal - done - future)};
   }
   return out;
@@ -426,6 +429,8 @@ function syncNative(){
   const rt = (settings.notify && settings.reviewOn ? "on " : "off ") + reviewTime();
   if(rt !== lastReviewSync){ lastReviewSync = rt; try{ NATIVE.setReview(reviewTime(), !!(settings.notify && settings.reviewOn)); }catch(e){} }
 }
+// при возврате в приложение переотправляем время разбора (на случай, если будильник сбился)
+document.addEventListener("visibilitychange", () => { if(!document.hidden){ lastReviewSync = ""; try{ syncNative(); }catch(e){} } });
 
 function renderWeek(){
   const key = viewKey(), w = getWeek(key), ws = weekStart, we = addDays(ws,6), ti = relIdx(key);
@@ -709,6 +714,7 @@ function openGoals(){
   openSheet(`<h2>Цели</h2><p class="note">Сколько раз в неделю вы хотите каждое занятие и дневные нормы. По ним приложение считает, чего не хватает, и подбирает советы. Ноль — без цели.</p>
     <div id="gRows">${rows()}</div>
     <div class="field"><label class="label" for="gWeight">Вес, кг <span class="note">— для нормы белка (1,4 г на кг при силовых)</span></label><input id="gWeight" type="number" min="30" max="250" inputmode="numeric" value="${settings.weight || ""}" placeholder="не указан"></div>
+    <div class="field"><label class="label" for="gHeight">Рост, см · возраст · пол <span class="note">— для нормы калорий</span></label><div class="tools"><input id="gHeight" type="number" min="120" max="230" inputmode="numeric" value="${settings.height || ""}" placeholder="рост" style="width:5.5em"><input id="gAge" type="number" min="12" max="100" inputmode="numeric" value="${settings.age || ""}" placeholder="лет" style="width:5em"><select id="gSex"><option value="">пол</option><option value="m"${settings.sex==="m"?" selected":""}>мужской</option><option value="f"${settings.sex==="f"?" selected":""}>женский</option></select></div></div>
     <div class="field"><label class="label" for="gSleep">Сколько сна тебе нужно, ч <span class="note">— пусто: определю по самочувствию</span></label><input id="gSleep" type="number" min="3" max="12" step="0.5" inputmode="decimal" value="${settings.sleepNeed ? settings.sleepNeed/60 : ""}" placeholder="определю сам"></div>
     <div class="field"><label class="label" for="gCaf">Последний кофе до <span class="note">— сам считаю по отбою: за 9 часов до сна</span></label><input id="gCaf" type="time" value="${settings.caffeineCutoff}"></div>
     <div class="field"><label class="label" for="gOff">Экраны выключаю в</label><input id="gOff" type="time" value="${settings.screensOff}"></div>
@@ -724,6 +730,7 @@ function openGoals(){
     const cafNew = $("gCaf").value || settings.caffeineCutoff, wt = Math.round(+$("gWeight").value || 0), protChanged = lim.proteinGoal !== settings.proteinGoal;
     settings = {...settings, ...lim, goals:draft, goalsEdited:true, screensOff:$("gOff").value || "22:30", caffeineCutoff:cafNew, cafManual: settings.cafManual || cafNew !== settings.caffeineCutoff};
     if(wt >= 30 && wt <= 250){ if(wt !== settings.weight && !protChanged) settings.proteinGoal = proteinFor(wt); settings.weight = wt; }
+    { const hh = Math.round(+$("gHeight").value || 0), aa = Math.round(+$("gAge").value || 0); if(hh >= 120 && hh <= 230) settings.height = hh; if(aa >= 12 && aa <= 100) settings.age = aa; settings.sex = $("gSex").value || settings.sex || null; }
     const sv = parseFloat(($("gSleep").value || "").replace(",", ".")); settings.sleepNeed = sv >= 3 && sv <= 12 ? Math.round(sv*60/15)*15 : null; needCache = {t:0, v:null};
     persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
 }
@@ -878,6 +885,9 @@ function runAction(msgId, i){
   else if(a.op === "unlog"){ let n = 0; mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const rm = (day.log||[]).filter(r => r.type === a.type && r.src === "chat"); n = rm.length;
       day.log = (day.log||[]).filter(r => !rm.includes(r)); for(const r of rm) if(r.fuzzyWord) RITM.forget(r.text, r.fuzzyWord); for(const r of rm) if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } });
     reply = n ? "Убрал ошибочную запись, отметку в плане тоже снял. Прости, неправильно понял." : "Записей уже нет."; }
+  else if(a.op === "unlogIds"){ let n = 0; mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const before = (day.log||[]).length; day.log = (day.log||[]).filter(r => !a.ids.includes(r.id)); n = before - day.log.length; }); reply = n ? "Убрал запись о еде." : "Записей уже нет."; }
+  else if(a.op === "walkAdd"){ mutateQuiet(a.key, w => { const day = w.days[a.d] = {...(w.days[a.d]||{})}; day.log = (day.log||[]).slice(); const it = w.items.find(i => i.day===a.d && i.cat==="walk" && !i.done); const rec = {id:uid(), type:"walk", name:"Прогулка", time:a.time, min:a.min, text:"прогулка по шагам", src:"steps"}; if(it){ it.done = true; rec.plan = it.id; } day.log.push(rec); }); reply = `Записал прогулку: ${a.min} мин с ${a.time}.`; }
+  else if(a.op === "walkNo"){ const b = LS.get("walkNo") || {}; b[a.hour] = (b[a.hour]||0) + 1; LS.set("walkNo", b); reply = (b[a.hour] >= 2 ? "Понял, в это время больше не буду спрашивать." : "Понял, не записываю. Если такое повторится в это время ещё раз, перестану спрашивать."); }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
     const pend = (m.pending||[])[a.idx]; if(pend){ const wasFz = pend.fuzzy; pend.type = a.type; pend.changed = true; pend.wasUnknown = true; pend.fuzzy = false; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend); dropMiss(pend.text);
@@ -893,6 +903,7 @@ function runAction(msgId, i){
     m.chosen = null; saveChat(arr); return;
   }
   else if(a.op === "review"){ openReview(); return; }
+  else if(a.op === "showPlan"){ m.chosen = i; saveChat(arr); showPlan(new Date()); render(); scrollChat(); return; }
   else if(a.op === "tab"){ tab = a.tab; render(); return; }
   else if(a.op === "water"){ quickWater(a.ml); reply = commentFor({type:"water"}); }
   if(reply) bot(reply.trim());
@@ -910,7 +921,7 @@ function logFromChat(entries){
       for(const e of list){
         if((e.changed || e.wasUnknown) && !e.noLearn) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
         const rec = {id:uid(), type:e.type, name:e.name, time:e.time || (TYPES[e.type].unit === "min" || +off ? "" : nowHM()), text:e.text, src:"chat"};
-        for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived","sets","reps","fuzzyWord"]) if(e[f] != null) rec[f] = e[f];
+        for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived","sets","reps","fuzzyWord","kcal","p","f","c"]) if(e[f] != null) rec[f] = e[f];
         if(rec.stepsOnly) day.stepsManual = rec.steps;
         if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
           const it = w.items.find(i => i.day===d && i.cat===rec.type && !i.done);
@@ -976,6 +987,15 @@ function respond(text){
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
+  // «вернулся с работы», «пришёл домой», «я дома» — это не занятие, а смена обстановки: не записываем «работа 1ч»
+  if(!/\d/.test(s) && / (вернул(ся|ась)|пришел|пришла|приехал|приехала|добрал(ся|ась)|доехал|доехала|я дома|уже дома|дома|еду домой|иду домой|закончил(а)? (работу|работать|рабочий день)|освободил(ся|ась)|ушел с работы|ушла с работы) /.test(s)
+     && / (с работы|из офиса|с офиса|домой|дома|работу|работать|рабочий день|освободил(ся|ась)) /.test(s)
+     && pre.every(e => !e.type || e.type === "work" || e.fuzzy)){
+    const h = new Date().getHours();
+    bot(pick(["С возвращением! Рабочий день позади.","Отлично, ты дома. Работу не записываю, это не занятие.","Принято, рабочий день закончился."]) + (h >= 17 ? " Хочешь, посмотрим, что осталось на вечер?" : ""),
+      [act("Что сегодня в плане?", {op:"showPlan"}), act("Ничего, спасибо", {op:"keep"})]);
+    return;
+  }
   if(contextReply(text, s, A, pre)) return;
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
   if(A.meta === "tooEarly" && !hasSureAct){
@@ -1009,6 +1029,8 @@ function respond(text){
   if(/ (серии|стрик|сколько дней подряд)/.test(s)){ const st = streaks(); return bot(st.length ? "Твои серии: " + st.join("; ") + ". Не прерывай!" : "Пока серий нет — начни сегодня, и я буду считать."); }
   if(/ (что я пропускаю|что срывается|что не получается)/.test(s)){ const sk = skipPatterns(); return bot(sk.length ? "Чаще всего срывается:\n" + sk.slice(0,4).map(x => "• " + x.text).join("\n") + "\nМогу ставить эти занятия на дни, когда у тебя получается лучше: напиши «составь план»." : "Явных провалов пока не вижу. Так держать!"); }
   if(/ (составь план|спланируй неделю|план на неделю|распланируй)/.test(s)){ const nk = iso(addDays(new Date(curKey()+"T00:00:00"), todayI() >= 5 ? 7 : 0)); applyRecurring(nk); const n = autoFill(nk); return bot(n ? `Добавил ${n} ${plural(n,"занятие","занятия","занятий")} — в дни и часы, когда у тебя обычно получается. Посмотри вкладку «Неделя».` : "Все цели уже в плане."); }
+  if(profileStatement(s, text)) return;
+  if(foodStatement(text, s, pre)) return;
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
   if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; }
@@ -1322,6 +1344,35 @@ function noteMiss(text, why){
 function dropMiss(text){ const t = String(text||"").trim(); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== t && !t.includes(x.text) && !x.text.includes(t))); }
 
 const proteinFor = kg => Math.max(60, Math.min(250, Math.round(kg * 1.4 / 10) * 10));
+function profileStatement(s, text){
+  let said = [];
+  const h = /(?:^| )рост (?:у меня )?(\d{3})(?: см)?(?: |$)|(?:^| )мой рост (\d{3})/.exec(s); if(h){ const v = +(h[1]||h[2]); if(v >= 120 && v <= 230){ settings.height = v; said.push(`рост ${v} см`); } }
+  const a = /(?:^| )мне (\d{2}) (?:лет|год|года) /.exec(s); if(a){ const v = +a[1]; if(v >= 12 && v <= 100){ settings.age = v; said.push(`возраст ${v}`); } }
+  if(/ я (мужчина|парень|мужик) /.test(s)){ settings.sex = "m"; said.push("пол мужской"); }
+  else if(/ я (женщина|девушка) /.test(s)){ settings.sex = "f"; said.push("пол женский"); }
+  const w = /(?:^| )(?:я )?вешу (\d{2,3})/.exec(s); if(w){ const m = setWeight(+w[1]); said.push(`вес ${w[1]} кг`); }
+  if(!said.length) return false;
+  persistSettings(); render();
+  const tg = kbjuTarget();
+  bot("Запомнил: " + said.join(", ") + "." + (tg ? ` Ориентир по калориям на поддержание веса: около ${fmtNum(tg.kcal)} ккал в день (Б ${tg.protein} · Ж ${tg.fat} · У ${tg.carbs} г). Это оценка по формуле Миффлина — Сан Жеора, не диета.` : " Для нормы калорий нужны ещё вес, рост, возраст и пол."));
+  return true;
+}
+function foodStatement(text, s, pre){
+  if(!RITM.looksLikeFood(text)) return false;
+  const items = RITM.parseFood(text); if(!items.length) return false;
+  const off = /вчера/.test(s) ? -1 : 0, date = addDays(new Date(), off), k = dateKeyOf(date), d = dayIdxOf(date);
+  const tm = (/(?:в|около) (\d{1,2})[:.](\d{2})/.exec(s) || []); const time = tm[1] ? pad(+tm[1]) + ":" + tm[2] : (off ? "" : nowHM());
+  const ids = [];
+  mutateQuiet(k, w => { const day = w.days[d] = {...(w.days[d]||{})}; day.log = (day.log||[]).slice();
+    for(const it of items){ const rec = {id:uid(), type: it.cat || "meal", name: it.food, time, text: it.label, src:"chat", srv:1, kcal: it.kcal, p: it.p, f: it.f, c: it.c, grams: it.grams}; day.log.push(rec); ids.push(rec.id); } });
+  rememberLastLog(k, d, ids);
+  const tot = items.reduce((a, x) => ({k:a.k+x.kcal, p:a.p+x.p, f:a.f+x.f, c:a.c+x.c}), {k:0,p:0,f:0,c:0});
+  const day = intakeOf(((getWeek(k).days[d]||{}).log)||[]), tg = kbjuTarget();
+  render();
+  bot(`Записал: ${items.map(x => x.label).join(", ")}. Это примерно ${tot.k} ккал (Б ${Math.round(tot.p)} · Ж ${Math.round(tot.f)} · У ${Math.round(tot.c)} г).` + (off ? "" : ` За день уже ${fmtNum(day.kcal)} ккал${tg ? " из ~"+fmtNum(tg.kcal) : ""}.`) + " Порции и значения приблизительные: если съели другое количество, напишите граммы (например «150 г гречки»).",
+    [act("Убрать запись", {op:"unlogIds", key:k, d, ids})]);
+  return true;
+}
 function setWeight(kg){ settings.weight = kg; settings.proteinGoal = proteinFor(kg); persistSettings(); const r = getRoutine(); r.asked.weight = true; saveRoutine(r); return `Вес ${kg} кг. Норму белка поставил ${settings.proteinGoal} г в день: 1,4 г на килограмм, как рекомендуют при силовых тренировках (диапазон 1,4–2,0).`; }
 function setBedtime(hm){
   settings.bedtime = hm;
@@ -1330,6 +1381,7 @@ function setBedtime(hm){
   if(oo > bb - 60) settings.screensOff = fromMin(bb - 60);
   persistSettings();
   const r = getRoutine(); r.bedSet = true; r.asked.bed = true; saveRoutine(r);
+  lastReviewSync = ""; try{ syncNative(); }catch(e){}
 }
 function planIssues(date){
   const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key), out = [];
@@ -2340,11 +2392,12 @@ function describe(e){
   return p.join(" · ");
 }
 function intakeOf(log){
-  const s = {water:0, mg:0, protein:0, alcohol:0, sweets:0, lastCaf:"", screen:0, lateScreen:0, move:0, groups:new Set()};
+  const s = {kcal:0, fat:0, carb:0, water:0, mg:0, protein:0, alcohol:0, sweets:0, lastCaf:"", screen:0, lateScreen:0, move:0, groups:new Set()};
   for(const e of log||[]){
     if(e.type === "water") s.water += e.ml||0;
     if(e.type === "caffeine"){ s.mg += e.mg||0; if(e.time && e.time > s.lastCaf) s.lastCaf = e.time; }
     if(e.type === "protein") s.protein += e.g||0;
+    if(e.kcal != null){ s.kcal += e.kcal; s.fat += e.f||0; s.carb += e.c||0; if(e.type !== "protein") s.protein += Math.round(e.p||0); }
     if(e.type === "alcohol") s.alcohol += e.srv||1;
     if(e.type === "sweets") s.sweets += e.srv||1;
     if(isScreen(e.type)){
@@ -2358,6 +2411,15 @@ function intakeOf(log){
   return s;
 }
 
+function kbjuTarget(){ return RITM.calorieTarget(settings, stepsFor(dateOf(curKey(), todayI())) || 0); }
+function kbjuHtml(s, bar){
+  const tg = kbjuTarget();
+  if(!s.kcal && !tg) return "";
+  const head = s.kcal ? `${fmtNum(s.kcal)} ккал` : "—";
+  const of = tg ? ` из ~${fmtNum(tg.kcal)}` : "";
+  const mac = s.kcal ? `Б ${s.protein}${tg ? "/"+tg.protein : ""} · Ж ${Math.round(s.fat)}${tg ? "/"+tg.fat : ""} · У ${Math.round(s.carb)}${tg ? "/"+tg.carbs : ""} г` : (tg ? `Ориентир: Б ${tg.protein} · Ж ${tg.fat} · У ${tg.carbs} г` : "");
+  return `<div class="metric kbju"><span class="mv">${head}</span><span class="mk">калорий${of}</span>${tg ? bar(s.kcal, tg.kcal, "--c-walk") : ""}<span class="note">${mac}${s.kcal ? " · оценка по таблицам" : ""}</span>${tg ? "" : `<span class="note">Укажите рост, возраст и пол в «Цели», чтобы посчитать норму.</span>`}</div>`;
+}
 let logDraft = null, logShowAll = false;
 function journalHtml(ctx){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), log = ((w.days[ti]||{}).log||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
@@ -2381,7 +2443,7 @@ function journalHtml(ctx){
       <div class="qbtn"><button data-qw="250">+ стакан</button><button data-qw="500">+ бутылка</button></div></div>
     <div class="metric"><span class="mv">${s.mg} мг</span><span class="mk">кофеина${s.lastCaf ? ", последний в "+s.lastCaf : ""}</span>${bar(s.mg, cm, s.mg > cm ? "--warn" : "--c-fun")}</div>
     <div class="metric"><span class="mv">${s.protein} г</span><span class="mk">белка из ${pg} г</span>${bar(s.protein, pg, "--c-strength")}</div>
-  </div>`;
+  </div>` + kbjuHtml(s, bar);
   if(log.length){
     const shown = logShowAll || log.length <= 6 ? log : log.slice(-6);
     h += `<div class="loglist"><span class="label">Записано сегодня</span>` + shown.map(e => `<div class="lrow">
@@ -2779,11 +2841,50 @@ function reviewClick(ds){
 
 /* ---------- android app bridge ---------- */
 function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } if(o === "chat"){ closeSheet(); tab = "chat"; render(); scrollChat(); return true; } return false; }
+/* ---------- прогулки по шагам: замечаем ходьбу и предлагаем записать ---------- */
+// сегмент: подряд идущие 10-минутные отрезки, где ≥60 шагов в минуту; ≥15 минут и ≥1200 шагов
+function walkSegments(buckets, nowMs){
+  const B = (buckets||[]).map(b => ({t: new Date(b.t).getTime(), n: b.n})).filter(b => !isNaN(b.t)).sort((a,b) => a.t - b.t);
+  const segs = []; let cur = null;
+  for(const b of B){
+    const hot = b.n >= 600, warm = b.n >= 200;
+    if(cur && b.t - cur.end <= 10*60000 && (hot || warm && cur.lastHot)){ cur.end = b.t + 10*60000; cur.steps += b.n; cur.lastHot = hot; if(hot) cur.hotEnd = b.t + 10*60000; continue; }
+    if(cur) segs.push(cur); cur = null;
+    if(hot) cur = {start: b.t, end: b.t + 10*60000, hotEnd: b.t + 10*60000, steps: b.n, lastHot: true};
+  }
+  if(cur) segs.push(cur);
+  return segs.map(g => ({start:g.start, end:g.hotEnd, steps:g.steps, min:Math.round((g.hotEnd - g.start)/60000)}))
+             .filter(g => g.min >= 20 && g.steps >= 1200 && g.end <= nowMs - 10*60000);
+}
+function suggestWalks(){
+  if(!health || !health.stepBuckets || !health.stepBuckets.length) return;
+  const seen = LS.get("walkSeen") || {}, bad = LS.get("walkNo") || {}, nowMs = Date.now();
+  let posted = 0;
+  for(const g of walkSegments(health.stepBuckets, nowMs)){
+    if(posted >= 2) break;
+    const id = String(g.start); if(seen[id]) continue;
+    const st = new Date(g.start), en = new Date(g.end), hh = st.getHours();
+    if((bad[hh] || 0) >= 2){ seen[id] = 1; continue; }                                 // в это время вы уже дважды говорили «это не прогулка»
+    const k = dateKeyOf(st), d = dayIdxOf(st), w = getWeek(k), day = (w.days && w.days[d]) || {};
+    const a0 = g.start, a1 = g.end, hmOf = x => x.time ? +x.time.slice(0,2)*60 + +x.time.slice(3,5) : null, m0 = st.getHours()*60 + st.getMinutes(), m1 = m0 + g.min;
+    const busy = (day.log||[]).some(e => e.type !== "water" && e.type !== "caffeine" && hmOf(e) != null && (CATS[e.type] && CATS[e.type].move) && e.min && hmOf(e) < m1 && hmOf(e) + e.min > m0)
+      || (day.log||[]).some(e => e.src === "steps" && hmOf(e) != null && Math.abs(hmOf(e) - m0) < 20);
+    if(busy){ seen[id] = 1; continue; }
+    // дорога на работу и с работы обычно не прогулка: если сегмент вплотную к рабочим границам — всё равно спрашиваем, но нейтрально
+    const t0 = fmtHM(st), t1 = fmtHM(en);
+    seen[id] = 1; posted++;
+    bot(`Заметил по шагам: с ${t0} до ${t1} вы шли около ${g.min} минут, ${fmtNum(g.steps)} шагов. Записать как прогулку?`,
+      [act("Да, записать прогулку", {op:"walkAdd", key:k, d, time:t0, min:g.min, steps:g.steps}), act("Это не прогулка (дорога, дела)", {op:"walkNo", hour:hh})]);
+  }
+  LS.set("walkSeen", seen);
+}
+const fmtHM = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+
 window.__ritmNative = {
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
-      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
-      LS.set("health", health); render();
+      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
+      LS.set("health", health); try{ suggestWalks(); }catch(e){} render();
     }catch(e){}
   },
   onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(tab === "chat" && !maybeWeeklyReport() && !morningBrief()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },
