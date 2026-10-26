@@ -103,7 +103,7 @@ if(!LS.get("started")){
 }
 
 /* ---------- view state ---------- */
-let tab = "today";
+let tab = "chat";
 let weekStart = mondayOf(new Date());
 const viewKey = () => iso(weekStart);
 function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key < ck ? 7 : -1); } // index of "today" inside a week
@@ -416,17 +416,20 @@ function renderMore(){
   $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
   if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; $("nTestReview").hidden = !settings.notify;
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
+    $("nWake").value = settings.wake || "08:00"; $("nLunch").value = settings.lunch || "13:00";
+    $("nFreq").innerHTML = [[0,"Не писать"],[1,"Только утром"],[2,"Обычно"],[3,"Часто"],[4,"Очень часто"]].map(([v,l]) => `<button class="${(settings.checkins ?? 2)===v?"on":""}" data-freq="${v}">${l}</button>`).join("");
     $("nReviewToggle").textContent = settings.reviewOn ? "Включён" : "Выключен"; $("nReviewToggle").classList.toggle("primary", !!settings.reviewOn);
     $("nReviewNote").textContent = `В ${reviewTime()}, за 30 минут до ${ub.auto ? "вашего обычного отбоя по данным сна ("+ub.hm+")" : "отбоя в "+ub.hm}`; }
 }
 
-const TITLES = {today:"Сегодня", review:"Разбор дня", week:"Неделя", stats:"Итоги", more:"Ещё"};
+const TITLES = {chat:"Ритм", today:"Сегодня", review:"Разбор дня", week:"Неделя", stats:"Итоги", more:"Ещё"};
 function render(){
   for(const t of Object.keys(TITLES)) $("tab-"+t).hidden = t !== tab;
   document.querySelectorAll("#tabbar button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   $("title").textContent = TITLES[tab];
-  if(tab==="today") renderToday(); else if(tab==="review") renderReview(); else if(tab==="week") renderWeek(); else if(tab==="stats") renderStats(); else renderMore();
-  syncNative();
+  if(tab==="chat") renderChat(); else if(tab==="today") renderToday(); else if(tab==="review") renderReview(); else if(tab==="week") renderWeek(); else if(tab==="stats") renderStats(); else renderMore();
+  syncNative(); syncCheckins();
+  document.body.classList.toggle("inchat", tab === "chat");
 }
 
 /* ---------- calendar ---------- */
@@ -505,6 +508,7 @@ function bestDayFor(cat, key){
 document.addEventListener("click", e => {
   const t = e.target.closest("button"); if(!t) return;
   const ds = t.dataset;
+  if(chatClick(ds)) return;
   if(journalClick(ds, t)) return;
   if(appsClick(ds)) return;
   if(actsClick(ds)) return;
@@ -629,6 +633,357 @@ function openIntro(){
 
 let toastT = null;
 function toast(msg){ const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
+
+/* ---------- chat: talk to Ritm ---------- */
+const CHAT_MAX = 400;
+const MAJOR = new Set(["strength","run","bike","swim","cardio","sport"]);
+const getChat = () => LS.get("chat") || [];
+function saveChat(arr){ LS.set("chat", arr.slice(-CHAT_MAX)); }
+function pushMsg(m){ const arr = getChat(); const msg = {id:uid(), at:Date.now(), ...m}; arr.push(msg); saveChat(arr); return msg; }
+const bot = (text, acts, extra) => pushMsg({who:"bot", text, acts:acts||null, ...(extra||{})});
+const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+const nrm = s => " " + String(s).toLowerCase().replace(/ё/g,"е").replace(/[!?.,;:()«»"]/g," ").replace(/\s+/g," ").trim() + " ";
+
+const WD = [["понедельник"],["вторник"],["сред"],["четверг"],["пятниц"],["суббот"],["воскресень"]];
+function dayFromText(s){
+  s = nrm(s);
+  const base = new Date(); base.setHours(0,0,0,0);
+  if(/ послезавтра /.test(s)) return addDays(base, 2);
+  if(/ завтра /.test(s)) return addDays(base, 1);
+  if(/ сегодня /.test(s)) return base;
+  for(let i=0;i<7;i++) if(WD[i].some(w => new RegExp(" (в|во|на|к|до) " + w).test(s) || s.includes(" " + w))){
+    const cur = (base.getDay()+6)%7; let diff = i - cur; if(diff < 0) diff += 7; if(/ следующ/.test(s) && diff < 7) diff = diff || 7;
+    return addDays(base, diff);
+  }
+  return null;
+}
+const FUTURE = / (будет|буду|будем|собираюсь|собираемся|планирую|планируем|пойду|пойдем|поеду|поедем|схожу|сходим|хочу|хотим|запланир|займусь|позанимаюсь|сделаю|поплаваю|побегу|потренируюсь|завтра|послезавтра|вечером пойду|потом пойду)/;
+const PAST_VERB = /(^|\s)[а-я]{2,}(ал|ял|ил|ыл|ел|ол|ул|ла|ли|лся|лась|лись)(?=\s)/;
+const isFutureClause = (clause, whole, e) => {
+  const c = nrm(clause), w = nrm(whole);
+  if(FUTURE.test(c)) return true;
+  if(PAST_VERB.test(c)) return false;
+  if(FUTURE.test(w) && !PAST_VERB.test(c)) return true;
+  if(e.time && e.time > nowHM() && !/ (утром|днем) /.test(c)) return true;
+  return false;
+};
+const dateKeyOf = d => iso(mondayOf(d));
+const dayIdxOf = d => (d.getDay()+6)%7;
+const whenWord = d => { d = new Date(d); d.setHours(0,0,0,0); const t = new Date(); t.setHours(0,0,0,0); const diff = Math.round((d - t)/86400000); return diff === 0 ? "сегодня" : diff === 1 ? "завтра" : diff === 2 ? "послезавтра" : DACC[dayIdxOf(d)]; };
+const lc = s => s ? s.charAt(0).toLowerCase() + s.slice(1) : s;
+
+function bestDayInWeek(key, cat, fromDay, avoid){
+  const w = getWeek(key), load = Array(7).fill(0); w.items.forEach(i=>load[i.day]++);
+  let b = -1, bl = 99;
+  for(let d = fromDay; d < 7; d++){ if(d === avoid || w.items.some(i=>i.day===d && i.cat===cat)) continue; const l = load[d] + (w.items.some(i=>i.cat===cat && Math.abs(i.day-d)===1) ? 2 : 0); if(l < bl){ bl = l; b = d; } }
+  return b;
+}
+
+// ---------- replies ----------
+function planText(date){
+  const w = getWeek(dateKeyOf(date)), d = dayIdxOf(date);
+  const its = w.items.filter(i=>i.day===d).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+  if(!its.length) return `На ${whenWord(date)} в плане ничего нет. Хочешь, подберу что-нибудь? Напиши, например, «завтра бассейн в 18».`;
+  return `${cap1(whenWord(date))} в плане:\n` + its.map(i => `${i.done ? "✓" : "•"} ${i.time ? i.time+" " : ""}${i.t}`).join("\n");
+}
+const cap1 = s => s.charAt(0).toUpperCase() + s.slice(1);
+function todayStatsText(){
+  const ck = curKey(), ti = todayI(), w = getWeek(ck), L = intakeOf((w.days[ti]||{}).log), st = stepsFor(dateOf(ck,ti)), pd = typeof phoneDay === "function" ? phoneDay(dateOf(ck,ti)) : null;
+  const parts = [`Вода: ${L.water} из ${settings.waterGoal} мл`, `кофеин: ${L.mg} мг`, `белок: ${L.protein} из ${settings.proteinGoal} г`];
+  if(st != null) parts.push(`шаги: ${fmtNum(st)}`);
+  if(pd) parts.push(`телефон: ${fmtDur(pd.total)}, из них развлечения ${fmtDur(pd.ent)}`);
+  const done = w.items.filter(i=>i.day===ti && i.done).length, all = w.items.filter(i=>i.day===ti).length;
+  return `Сегодня сделано ${done} из ${all} по плану. ` + parts.join(", ") + ".";
+}
+function weekText(){
+  const w = getWeek(curKey()), gs = goalState(w, todayI());
+  const rows = goalCats().map(c => `${CATS[c].full}: ${gs[c].done} из ${gs[c].goal}` + (gs[c].deficit ? ` (не хватает ${gs[c].deficit})` : ""));
+  return "Неделя по целям:\n" + rows.join("\n");
+}
+function commentFor(e){
+  const ck = curKey(), ti = todayI(), w = getWeek(ck), L = intakeOf((w.days[ti]||{}).log);
+  if(e.type === "caffeine"){
+    if(e.time && e.time > settings.caffeineCutoff) return `Это уже после ${settings.caffeineCutoff}, может помешать заснуть. Кофеина сегодня ≈${L.mg} мг.`;
+    if(L.mg > settings.caffeineMax) return `Кофеина сегодня уже ≈${L.mg} мг, это больше ${settings.caffeineMax}. Дальше лучше вода или травяной чай.`;
+    return `Кофеина сегодня ≈${L.mg} мг.`;
+  }
+  if(e.type === "water") return L.water >= settings.waterGoal ? `Норма воды выполнена: ${L.water} мл!` : `Воды сегодня ${L.water} из ${settings.waterGoal} мл.`;
+  if(e.type === "protein") return `Белка сегодня ${L.protein} из ${settings.proteinGoal} г.`;
+  if(e.type === "alcohol") return "Не забудь стакан воды на каждую порцию, так сон пострадает меньше.";
+  if(e.type === "sweets") return L.sweets >= 3 ? "Сладкого сегодня уже немало, дальше лучше фрукты или орехи." : "";
+  if(e.type === "meal") return "Приятного аппетита!";
+  if(e.type === "sleep") return e.event === "wake" ? "Доброе утро! Хорошего дня." : "Спокойной ночи!";
+  if(TYPES[e.type] && TYPES[e.type].g === "screen") return (L.screen > settings.screenLimit) ? `Развлекательных экранов уже ${fmtDur(L.screen)} при лимите ${fmtDur(settings.screenLimit)}. Может, прогуляемся 15 минут?` : "";
+  if(goalCats().includes(e.type)){ const g = goalState(w, ti)[e.type]; return pick(["Отлично!","Так держать!","Супер!","Молодец!","Здорово!"]) + ` ${CATS[e.type].full}: ${g.done} из ${g.goal} на этой неделе.`; }
+  if(CATS[e.type] && CATS[e.type].move) return pick(["Отлично!","Так держать!","Супер!"]);
+  return "";
+}
+
+// ---------- actions in chat ----------
+function act(label, a){ return {l:label, a}; }
+function runAction(msgId, i){
+  const arr = getChat(), m = arr.find(x=>x.id===msgId); if(!m || !m.acts || m.chosen != null) return;
+  const a = m.acts[i].a; m.chosen = i; saveChat(arr);
+  let reply = "";
+  if(a.op === "move"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.day = a.day; }); reply = `Перенёс «${a.t}» ${DACC[a.day]}.`; }
+  else if(a.op === "remove"){ mutateQuiet(a.key, w => { w.items = w.items.filter(x=>x.id!==a.id); }); reply = `Убрал «${a.t}» из плана.`; }
+  else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
+  else if(a.op === "type"){
+    const pend = (m.pending||[])[a.idx]; if(pend){ pend.type = a.type; pend.changed = true; pend.wasUnknown = true; fillDefaults(pend);
+      if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else logFromChat([pend]); reply = `Запомнил: «${pend.name}» — это ${CATS[a.type].full.toLowerCase()}.` + (pend.future ? "" : " " + (commentFor(pend)||"")); }
+  }
+  else if(a.op === "typechoose"){
+    const pend = (m.pending||[])[a.idx];
+    chooseType(`Что такое «${pend ? pend.name : ""}»?`, null, t => { m.acts.push(act(CATS[t].n, {op:"type", idx:a.idx, type:t})); m.chosen = null; saveChat(getChat().map(x=>x.id===m.id?m:x)); runAction(m.id, m.acts.length-1); });
+    m.chosen = null; saveChat(arr); return;
+  }
+  else if(a.op === "review"){ openReview(); return; }
+  else if(a.op === "tab"){ tab = a.tab; render(); return; }
+  else if(a.op === "water"){ quickWater(a.ml); reply = commentFor({type:"water"}); }
+  if(reply) bot(reply.trim());
+  render(); scrollChat();
+}
+
+// ---------- writing to journal and plan ----------
+function logFromChat(entries){
+  const k = curKey(), d = todayI(); const linked = [];
+  mutateQuiet(k, w => {
+    const day = w.days[d] = {...(w.days[d]||{})}; day.log = (day.log||[]).slice();
+    for(const e of entries){
+      if(e.changed || e.wasUnknown) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
+      const rec = {id:uid(), type:e.type, name:e.name, time:e.time || (TYPES[e.type].unit === "min" ? "" : nowHM()), text:e.text, src:"chat"};
+      for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived"]) if(e[f] != null) rec[f] = e[f];
+      if(rec.stepsOnly) day.stepsManual = rec.steps;
+      if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
+        const it = w.items.find(i => i.day===d && i.cat===rec.type && !i.done);
+        if(it){ it.done = true; rec.plan = it.id; linked.push(it); }
+      }
+      day.log.push(rec);
+    }
+  });
+  if(rvState) rvState = getReview(getWeek(k), d);
+  return linked;
+}
+function addPlanFromChat(e, date){
+  const key = dateKeyOf(date), d = dayIdxOf(date); let res = {added:null, updated:null};
+  mutateQuiet(key, w => {
+    const same = w.items.find(i => i.day===d && i.cat===e.type && !i.done);
+    if(same){ if(e.time) same.time = e.time; res.updated = same; }
+    else { const it = {id:uid(), day:d, cat:e.type, t:e.name, time:e.time||"", done:false}; w.items.push(it); res.added = it; }
+  });
+  if(e.changed || e.wasUnknown) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
+  return res;
+}
+
+// ---------- understanding a message ----------
+function respond(text){
+  const s = nrm(text);
+  // small talk & commands
+  if(/^ (привет|здравств|хай|добр(ое|ый|ой)|салют|йо) /.test(s)) return bot(`${pick(["Привет!","Привет-привет!","Здравствуй!"])} ${planText(new Date())}`);
+  if(/ (спасибо|спс|благодарю) /.test(s) && s.length < 30) return bot(pick(["Пожалуйста!","Обращайся!","Всегда рад помочь."]));
+  if(/ (помощь|помоги|что ты умеешь|как пользоваться|help) /.test(s)) return bot(HELP_TEXT);
+  if(/ (разбор|подведи итог|подвести итог|итоги дня) /.test(s)) return bot("Давай подведём итоги дня.", [act("Открыть разбор", {op:"review"})]);
+  if(/ (что|какой|какие|покажи) .*(план|сегодня|по плану)|^ план /.test(s) && !/ завтра /.test(s) && !RITM.parse(text).some(e=>e.type && !/ (что|какой|какие) /.test(nrm(e.text)) )) return bot(planText(new Date()));
+  if(/ (что|какой|покажи|план) .*завтра| завтра что /.test(s) && !/ (будет|буду|пойду) /.test(s)) return bot(planText(addDays(new Date(),1)));
+  if(/ (как|что) .*(недел)| недел[яюи] /.test(s) && / (как|что|итог|цел) /.test(s)) return bot(weekText());
+  if(/ (сколько|как|итоги|статистик|как прошел|как дела у меня) /.test(s) && / (вод|кофе|белк|шаг|сегодня|телефон|итог|статистик) /.test(s)) return bot(todayStatsText());
+  const mv = /^ (перенеси|сдвинь|передвинь|перенести) (.+?) на (.+) $/.exec(s);
+  if(mv) return moveCommand(mv[2], mv[3]);
+  const rm = /^ (отмени|убери|удали|отменяю) (.+) $/.exec(s);
+  if(rm) return removeCommand(rm[2]);
+  if(/^ (ничего|ничем|отдыхаю|просто отдыхаю|ничего особенного) /.test(s)) return bot(pick(["Отдых тоже важен. Если захочется движения, короткая прогулка на 15 минут отлично перезагружает.","Понял. Если что-то будешь делать, напиши, я запишу."]));
+
+  // activities: past → journal, future → plan
+  const msgDay = dayFromText(text);
+  const entries = RITM.parse(text);
+  if(!entries.length) return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?».");
+  const lastBot = getChat().filter(m=>m.who==="bot").slice(-1)[0];
+  const ctxKind = lastBot && Date.now() - lastBot.at < 3*3600*1000 ? lastBot.kind : null;
+
+  const past = [], future = [], unknown = [];
+  for(const e of entries){
+    if(!e.type){ unknown.push(e); continue; }
+    fillDefaults(e);
+    const cd = dayFromText(e.text) || msgDay;
+    const fut = TYPES[e.type].unit === "min" && !e.stepsOnly && (isFutureClause(e.text, text, e) || (cd && dateKeyOf(cd)+dayIdxOf(cd) !== curKey()+todayI()));
+    if(fut){ e.future = true; e.date = (cd || new Date()).getTime(); future.push(e); } else past.push(e);
+  }
+  // answer to the lunch question: make sure the meal itself is recorded
+  if(ctxKind === "lunch" && !past.some(e=>e.type==="meal") && (past.length || unknown.length)){
+    past.push({type:"meal", name:"Обед: " + text.trim().slice(0,60), time:nowHM(), srv:1, text});
+    for(const u of unknown.splice(0)) void u;
+  }
+  const out = [];
+  if(past.length){
+    const linked = logFromChat(past);
+    const groups = []; for(const e of past){ const g = groups.find(x => x.name === e.name && x.type === e.type); if(g) g.items.push(e); else groups.push({name:e.name, type:e.type, items:[e]}); }
+    const desc = groups.map(g => { if(g.items.length === 1){ const e = g.items[0]; return `${lc(e.name)}${describe(e) ? " ("+describe(e)+")" : ""}`; }
+      const times = g.items.map(e=>e.time).filter(Boolean); return `${lc(g.name)} ×${g.items.length}${times.length ? " (в "+times.join(", ")+")" : ""}`; }).join(", ");
+    const comments = [...new Set(past.map(commentFor).filter(Boolean))].slice(0,2).join(" ");
+    out.push(`Записал: ${desc}.` + (linked.length ? ` Отметил в плане: ${linked.map(i=>"«"+i.t+"»").join(", ")}.` : "") + (comments ? " " + comments : ""));
+    // did something else instead of the plan?
+    const ti = todayI(), w = getWeek(curKey());
+    const movedPast = past.filter(e => MAJOR.has(e.type) && !linked.some(i=>i.cat===e.type));
+    if(movedPast.length){
+      const other = w.items.find(i => i.day===ti && !i.done && MAJOR.has(i.cat) && i.cat !== movedPast[0].type);
+      if(other){
+        const bd = bestDayInWeek(curKey(), other.cat, ti+1);
+        const acts = [];
+        if(bd >= 0) acts.push(act(`Да, перенести ${DACC[bd]}`, {op:"move", key:curKey(), id:other.id, day:bd, t:other.t}));
+        acts.push(act("Да, убрать из плана", {op:"remove", key:curKey(), id:other.id, t:other.t}));
+        acts.push(act("Нет, она ещё будет", {op:"keep"}));
+        bot(out.join(" ")); out.length = 0;
+        bot(`Это было вместо «${other.t}»?`, acts);
+      }
+    }
+  }
+  for(const e of future){
+    const date = new Date(e.date), key = dateKeyOf(date), d = dayIdxOf(date);
+    const res = addPlanFromChat(e, date);
+    const when = whenWord(date) + (e.time ? " в " + e.time : "");
+    let line = res.updated ? `«${res.updated.t}» уже в плане, поставил ${when}.` : `Добавил в план: ${lc(e.name)} ${when}.`;
+    const w = getWeek(key);
+    const conflicts = w.items.filter(i => i.day===d && !i.done && i.cat !== e.type && MAJOR.has(i.cat) && MAJOR.has(e.type));
+    if(conflicts.length){
+      const c = conflicts[0], from = key === curKey() ? Math.max(todayI(), d) : 0;
+      const bd = bestDayInWeek(key, c.cat, from, d);
+      const acts = [];
+      if(bd >= 0) acts.push(act(`Перенести «${c.t}» ${DACC[bd]}`, {op:"move", key, id:c.id, day:bd, t:c.t}));
+      acts.push(act(`Убрать «${c.t}»`, {op:"remove", key, id:c.id, t:c.t}));
+      acts.push(act("Оставить обе", {op:"keep"}));
+      if(out.length){ bot(out.join(" ")); out.length = 0; }
+      bot(line + ` Но на ${whenWord(date)} уже стоит «${c.t}». Две тренировки в день многовато. Заменить?`, acts);
+      continue;
+    }
+    const near = e.time ? w.items.find(i => i.day===d && i.time && i.cat !== e.type && Math.abs((+i.time.slice(0,2)*60 + +i.time.slice(3)) - (+e.time.slice(0,2)*60 + +e.time.slice(3))) < 60) : null;
+    if(near) line += ` Рядом по времени стоит «${near.t}» в ${near.time}, проверь, что всё успеваешь.`;
+    out.push(line);
+  }
+  if(out.length) bot(out.join("\n"));
+  unknown.forEach((u, idx) => {
+    const guesses = ["walk","strength","sport","hobby","relax","meal","work","other"].filter(t => TYPES[t]);
+    const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
+      guesses.slice(0,6).map(t => act(CATS[t].n, {op:"type", idx:0, type:t})).concat([act("Другое…", {op:"typechoose", idx:0})]),
+      {pending:[{...u, future: isFutureClause(u.text, text, u), date: (dayFromText(u.text) || msgDay || new Date()).getTime()}]});
+    void m;
+  });
+}
+function findPlanned(q){
+  const qs = nrm(q), type = RITM.guessType(q), ck = curKey(), ti = todayI();
+  const keys = [ck, iso(addDays(new Date(ck+"T00:00:00"),7))];
+  for(const key of keys){ const w = getWeek(key); const from = key === ck ? ti : 0;
+    const it = w.items.filter(i => i.day >= from && !i.done).sort((a,b)=>a.day-b.day).find(i => (type && i.cat === type) || nrm(i.t).includes(qs.trim()));
+    if(it) return {key, it}; }
+  return null;
+}
+function moveCommand(what, where){
+  const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}». Напиши точнее или посмотри вкладку «Неделя».`);
+  const date = dayFromText(" " + where + " ") || dayFromText(" в " + where + " ");
+  if(!date) return bot("Не понял, на какой день. Например: «перенеси силовую на четверг».");
+  const tm = /(\d{1,2})(?:[:.](\d{2}))?/.exec(where);
+  const key = dateKeyOf(date), d = dayIdxOf(date);
+  mutateQuiet(f.key, w => { w.items = w.items.filter(x=>x.id!==f.it.id); });
+  mutateQuiet(key, w => { w.items.push({...f.it, day:d, time: tm && /в\s*\d/.test(where) ? pad(+tm[1])+":"+pad(+(tm[2]||0)) : f.it.time}); });
+  bot(`Перенёс «${f.it.t}» на ${whenWord(date)}.`);
+}
+function removeCommand(what){
+  const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}».`);
+  bot(`Убрать «${f.it.t}» (${DACC[f.it.day]}) из плана?`, [act("Да, убрать", {op:"remove", key:f.key, id:f.it.id, t:f.it.t}), act("Нет", {op:"keep"})]);
+}
+const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
+
+// ---------- check-ins: messages from Ritm during the day ----------
+function wakeTime(){
+  const t = new Date(), w = [];
+  for(let i=0;i<7;i++){ const s = sleepFor(iso(addDays(t,-i))); if(s) w.push(+s.end.slice(0,2)*60 + +s.end.slice(3,5)); }
+  if(w.length >= 3){ w.sort((a,b)=>a-b); const m = w[Math.floor(w.length/2)]; return pad(Math.floor(m/60))+":"+pad(m%60); }
+  return settings.wake || "08:00";
+}
+const toMinHM = t => +t.slice(0,2)*60 + +t.slice(3,5);
+const fromMin = m => pad(Math.floor(((m%1440)+1440)%1440/60))+":"+pad(((m%60)+60)%60);
+function buildCheckins(){
+  const freq = settings.checkins ?? 2; if(!freq) return [];
+  const out = [], now = Date.now();
+  for(let off = 0; off < 3; off++){
+    const date = addDays(new Date(), off); date.setHours(0,0,0,0);
+    const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key);
+    const its = w.items.filter(i=>i.day===d && !i.done).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+    const wake = toMinHM(wakeTime()), bed = bedMin(usualBedtime().hm) % 1440 || 1410, end = (bed < 6*60 ? bed + 1440 : bed) - 60;
+    const jit = n => (hash(iso(date)+n) % 21) - 10;
+    const slots = [];
+    const planLine = its.length ? "Сегодня в плане: " + its.slice(0,3).map(i => (i.time ? i.time+" " : "") + lc(i.t)).join(", ") + "." : "В плане сегодня пусто. Чем займёмся?";
+    slots.push({m: wake + 60 + jit("m"), kind:"morning", title:"Доброе утро!", text: planLine + " Как спалось?"});
+    if(freq >= 2) slots.push({m: toMinHM(settings.lunch || "13:00") + jit("l"), kind:"lunch", title:"Время обеда", text: pick(["Пора пообедать. Что будет на обед?","Обеденное время! Что сегодня на обед?","Не забудь пообедать. Что ешь сегодня?"])});
+    if(freq >= 2) for(const i of its.filter(i=>i.time && CATS[i.cat] && (CATS[i.cat].move || CATS[i.cat].grp==="social")).slice(0,2))
+      slots.push({m: toMinHM(i.time) - 60, kind:"before", title:`Через час: ${lc(i.t)}`, text:`В ${i.time} по плану «${i.t}». Всё в силе? Если планы поменялись, напиши.`});
+    if(freq >= 3) slots.push({m: 11*60 + jit("a"), kind:"doing", title:"Как дела?", text: pick(["Что делаешь?","Чем занят?","Как идёт день?"]) + " Не забывай про воду."});
+    if(freq >= 3) slots.push({m: 16*60 + 30 + jit("b"), kind:"doing", title:"Что делаешь?", text: pick(["Как проходит день? Что делаешь?","Чем занимаешься? Может, пора размяться минут 5?"])});
+    if(freq >= 4) slots.push({m: 19*60 + 30 + jit("c"), kind:"doing", title:"Как вечер?", text: "Как вечер? Что делаешь?"});
+    for(const sl of slots){
+      if(sl.m < wake + 30 || sl.m > end) continue;
+      const at = date.getTime() + sl.m*60000; if(at < now + 60000) continue;
+      if(out.some(x => Math.abs(x.at - at) < 50*60000)) continue;
+      out.push({id: iso(date)+"-"+sl.kind+"-"+sl.m, at, title:sl.title, text:sl.text, kind:sl.kind});
+    }
+  }
+  return out.sort((a,b)=>a.at-b.at);
+}
+let lastCheckinSync = "";
+function syncCheckins(){
+  if(!NATIVE || !NATIVE.setCheckins) return;
+  const list = settings.notify ? buildCheckins() : [];
+  const s = JSON.stringify(list.map(x=>({...x, text:x.text.replace(/Как спалось\?|Что будет на обед\?|Что делаешь\?/g, m=>m)})));
+  if(s !== lastCheckinSync){ lastCheckinSync = s; try{ NATIVE.setCheckins(s); }catch(e){} }
+}
+function pullNative(){
+  if(!NATIVE) return;
+  let fired = [], inbox = [];
+  try{ fired = JSON.parse(NATIVE.consumeFired() || "[]"); }catch(e){}
+  try{ inbox = JSON.parse(NATIVE.consumeInbox() || "[]"); }catch(e){}
+  const all = fired.map(f => ({t:f.firedAt || f.at, f})).concat(inbox.map(m => ({t:m.at, m}))).sort((a,b)=>a.t-b.t);
+  for(const x of all){
+    if(x.f) pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t});
+    else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); respond(x.m.text); }
+  }
+  if(all.length) render();
+}
+
+// ---------- chat screen ----------
+function fmtTime(ms){ const d = new Date(ms); const t = new Date(); const same = d.toDateString() === t.toDateString(); return (same ? "" : d.getDate() + " " + MON[d.getMonth()] + ", ") + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+function renderChat(){
+  $("subtitle").textContent = "Пиши как другу: что делал и что планируешь";
+  let arr = getChat();
+  if(!arr.length){ bot("Привет! Я Ритм. Пиши мне обычными словами, что делал или что планируешь. Например: «выпил кофе в 9:30», «сегодня бассейн в 18», «что сегодня?». Я всё запишу, подскажу и днём иногда буду спрашивать, как дела.", [act("Что я умею", {op:"help"})]); arr = getChat(); }
+  const view = arr.slice(-120);
+  let html = "", lastDay = "";
+  for(const m of view){
+    const dd = new Date(m.at).toDateString();
+    if(dd !== lastDay){ lastDay = dd; const d = new Date(m.at); html += `<div class="cday">${dd === new Date().toDateString() ? "Сегодня" : d.getDate()+" "+MONG[d.getMonth()]}</div>`; }
+    html += `<div class="msg ${m.who}"><div class="bub">${esc(m.text).replace(/\n/g,"<br>")}</div>`;
+    if(m.acts && m.acts.length) html += `<div class="macts">${m.acts.map((a,i) => m.chosen != null ? (i === m.chosen ? `<span class="chosen">${esc(a.l)}</span>` : "") : `<button class="btn" data-ma="${m.id}" data-mi="${i}">${esc(a.l)}</button>`).join("")}</div>`;
+    html += `<span class="mt">${fmtTime(m.at)}</span></div>`;
+  }
+  $("chatLog").innerHTML = html;
+  $("chatQuick").innerHTML = ["Что сегодня?","+ стакан воды","Что завтра?","Как неделя?","Разбор"].map(q => `<button class="chip" data-cq="${q}">${q}</button>`).join("");
+}
+function scrollChat(){ if(tab === "chat") requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight})); }
+function sendChat(text){
+  text = (text||"").trim(); if(!text) return;
+  pushMsg({who:"me", text});
+  try{ respond(text); }catch(err){ bot("Что-то пошло не так, попробуй написать иначе."); }
+  render(); scrollChat();
+}
+function chatClick(ds){
+  if(ds.ma){ const arr = getChat(), m = arr.find(x=>x.id===ds.ma); const a = m && m.acts[+ds.mi] && m.acts[+ds.mi].a;
+    if(a && a.op === "help"){ m.chosen = +ds.mi; saveChat(arr); bot(HELP_TEXT); render(); scrollChat(); return true; }
+    runAction(ds.ma, +ds.mi); return true; }
+  if(ds.cq){
+    if(ds.cq === "+ стакан воды"){ pushMsg({who:"me", text:"+ стакан воды"}); quickWater(250); bot(commentFor({type:"water"})); render(); scrollChat(); return true; }
+    if(ds.cq === "Разбор"){ openReview(); return true; }
+    sendChat(ds.cq); return true;
+  }
+  return false;
+}
 
 /* ---------- screen time by app (Android app, usage access) ---------- */
 const APP_GROUPS = {
@@ -1149,7 +1504,7 @@ function reviewClick(ds){
 }
 
 /* ---------- android app bridge ---------- */
-function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } return false; }
+function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } if(o === "chat"){ closeSheet(); tab = "chat"; render(); scrollChat(); return true; } return false; }
 window.__ritmNative = {
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
@@ -1157,7 +1512,7 @@ window.__ritmNative = {
       LS.set("health", health); render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} if(!checkOpen()) render(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -1172,6 +1527,10 @@ if(NATIVE){
   $("nTest").onclick = () => { syncNative(); try{ NATIVE.testNotification(); }catch(e){} };
   $("nTestReview").onclick = () => { syncNative(); try{ NATIVE.testReview(); }catch(e){} };
   $("nReviewToggle").onclick = () => { settings.reviewOn = !settings.reviewOn; persistSettings(); render(); toast(settings.reviewOn ? "Разбор дня включён" : "Разбор дня выключен"); };
+  $("nWake").onchange = () => { if($("nWake").value){ settings.wake = $("nWake").value; persistSettings(); render(); toast("Сохранено"); } };
+  $("nLunch").onchange = () => { if($("nLunch").value){ settings.lunch = $("nLunch").value; persistSettings(); render(); toast("Сохранено"); } };
+  $("nFreq").onclick = e => { const b = e.target.closest("[data-freq]"); if(!b) return; settings.checkins = +b.dataset.freq; persistSettings(); render(); toast("Сохранено"); };
+  $("nTestCheckin").onclick = () => { try{ NATIVE.testCheckin(); }catch(e){} };
   $("nBed").onchange = () => { if($("nBed").value){ settings.bedtime = $("nBed").value; persistSettings(); render(); toast("Время отбоя сохранено"); } };
   const saveTimes = () => { settings.morning = $("nMorning").value || settings.morning; settings.evening = $("nEvening").value || settings.evening; persistSettings(); if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Время сохранено"); };
   $("nMorning").onchange = saveTimes; $("nEvening").onchange = saveTimes;
@@ -1188,5 +1547,8 @@ if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () =
 document.addEventListener("visibilitychange", () => { if(!document.hidden){ dismissed = new Set(); render(); } });
 
 render();
-if(!checkOpen() && !LS.get("intro2")) openIntro();
+pullNative();
+if(!checkOpen()) scrollChat();
+$("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
+$("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 })();

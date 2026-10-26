@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Reminders.ensureChannel(this)
+        Checkins.ensureChannel(this)
         pendingOpen = intent?.getStringExtra("open")
 
         web = WebView(this)
@@ -194,6 +195,11 @@ class MainActivity : ComponentActivity() {
             Reminders.saveReview(this@MainActivity, time, enabled)
             Reminders.schedule(this@MainActivity)
         }
+
+        @JavascriptInterface fun setCheckins(json: String) = Checkins.set(this@MainActivity, json)
+        @JavascriptInterface fun consumeFired(): String = Checkins.consumeFired(this@MainActivity)
+        @JavascriptInterface fun consumeInbox(): String = Checkins.consumeInbox(this@MainActivity)
+        @JavascriptInterface fun testCheckin() = Checkins.show(this@MainActivity, "Что делаешь?", "Проверка: так будут выглядеть вопросы днём. Можно ответить прямо отсюда.")
 
         @JavascriptInterface fun consumeOpen(): String {
             val v = pendingOpen ?: ""

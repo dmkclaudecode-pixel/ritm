@@ -120,5 +120,5 @@ class ReminderReceiver : BroadcastReceiver() {
 }
 
 class BootReceiver : BroadcastReceiver() {
-    override fun onReceive(ctx: Context, intent: Intent) = Reminders.schedule(ctx)
+    override fun onReceive(ctx: Context, intent: Intent) { Reminders.schedule(ctx); Checkins.schedule(ctx) }
 }

@@ -53,7 +53,7 @@ function learned(){ try{ return JSON.parse(localStorage.getItem("ritm:learned")|
 function custom(){ try{ return JSON.parse(localStorage.getItem("ritm:custom")||"[]"); }catch(e){ return []; } }
 
 // ядро фразы для запоминания: без чисел, времени, единиц и служебных глаголов
-const FILLER = /(?<![a-zа-я0-9])(выпил[аи]?|попил[аи]?|сделал[аи]?|съел[аи]?|поел[аи]?|был[аи]?|ходил[аи]?|сходил[аи]?|принял[аи]?|потратил[аи]?|провел[аи]?|занимал(?:ся|ась)|утром|днем|вечером|ночью|около|примерно|еще|ещё|потом|затем|сегодня|немного|чуть)(?![a-zа-я0-9])/g;
+const FILLER = /(?<![a-zа-я0-9])(выпил[аи]?|попил[аи]?|сделал[аи]?|съел[аи]?|поел[аи]?|был[аи]?|ходил[аи]?|сходил[аи]?|принял[аи]?|потратил[аи]?|провел[аи]?|занимал(?:ся|ась)|утром|днем|вечером|ночью|около|примерно|еще|ещё|потом|затем|сегодня|завтра|послезавтра|будет|буду|будем|собираюсь|собираемся|планирую|пойду|пойдем|поеду|схожу|сходим|хочу|хотим|займусь|понедельник|вторник|среду|среда|четверг|пятницу|пятница|субботу|суббота|воскресенье|немного|чуть)(?![a-zа-я0-9])/g;
 function core(text){
   let s = norm(text).replace(/(?<![a-zа-я])в\s*\d{1,2}(?:[:.]\d{2})?(?!\d)/g," ").replace(/(?<![a-zа-я])с\s*\d{1,2}(?:[:.]\d{2})?\s*до\s*\d{1,2}(?:[:.]\d{2})?/g," ");
   s = s.replace(UNIT_RE, " ").replace(new RegExp("(?<![a-zа-я0-9])"+NUM+"(?![a-zа-я0-9])","g")," ").replace(FILLER," ").replace(/(?<![a-zа-я0-9])(в|на|с|и|по|до|за|к|со|о|об)(?![a-zа-я0-9])/g," ");
@@ -114,7 +114,7 @@ function parseQty(s){
 function buildEntry(act, clause, times, qty){
   const t = R.TYPES[act.type] || R.TYPES.other, e = act.entry || {};
   let name = act.name || e.n;
-  if(!name){ const c = core(clause), w0 = (c.split(" ")[0]||""); name = c && c.length > 2 && !/(л|ла|ли|лся|лась|ть|ться)$/.test(w0) ? cap(c).slice(0,40) : (t.short || t.n); }
+  if(!name){ const c = core(clause), w0 = (c.split(" ")[0]||""); name = c && c.length > 2 && c.includes(" ") && !/(л|ла|ли|лся|лась|ть|ться)$/.test(w0) ? cap(c).slice(0,40) : (t.short || t.n); }
   if(act.type === "water" && (e.n === "Стакан воды" || e.n === "Бутылка воды" || !e.n)) name = "Вода";
   const out = {type:act.type, name, time:times.time || "", text:clause.trim()};
   const q = k => qty.find(x=>x.unit===k);
