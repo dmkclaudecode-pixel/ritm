@@ -26,4 +26,5 @@ for(const [t, exp] of NLU){
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
 require("./stress.js");
+{ const cp = require("child_process"); for(const a of [[], ["--noise"]]){ const x = cp.spawnSync(process.execPath, [__dirname + "/gen.js", "8000", ...a], {encoding:"utf8"}); console.log("Генератор" + (a.length ? " с шумом" : "") + ": " + x.stdout.split("\n")[0]); if(x.status) process.exitCode = 1; } }
 process.exit(bad || process.exitCode ? 1 : 0);
