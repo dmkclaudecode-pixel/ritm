@@ -589,10 +589,24 @@ $("icsWeek").onclick = async () => {
 };
 
 /* ---------- backup ---------- */
+function backupData(){ const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}}; for(const k of LS.keys()) if(k !== "chat" || true) data.entries[k] = LS.get(k); return data; }
+// автокопия: раз в 7 дней, если в приложении есть что сохранять (только в Android-версии, файл попадает в «Загрузки»)
+function maybeAutoBackup(){
+  if(!NATIVE || settings.autoBackup === false) return;
+  const last = LS.get("lastBackup") || 0, weeks = LS.keys().filter(k => /^w:/.test(k)).length;
+  if(!weeks || Date.now() - last < 7*86400000) return;
+  try{ const ok = NATIVE.saveFile("ritm-auto-backup-" + iso(new Date()) + ".json", JSON.stringify(backupData()), "application/json"); if(ok){ LS.set("lastBackup", Date.now()); renderBackupNote(); } }catch(e){}
+}
+function renderBackupNote(){
+  const n = $("backupNote"), t = $("autoBackupToggle"); if(!n) return;
+  const last = LS.get("lastBackup");
+  n.textContent = NATIVE ? (last ? "Последняя автокопия: " + new Date(last).toLocaleDateString("ru-RU") + "." : "Автокопий пока не было.") : "Автокопия работает только в приложении для Android.";
+  t.hidden = !NATIVE; t.textContent = settings.autoBackup === false ? "Автокопия выключена" : "Автокопия включена"; t.classList.toggle("primary", settings.autoBackup !== false);
+}
+$("autoBackupToggle").onclick = () => { settings.autoBackup = settings.autoBackup === false; persistSettings(); renderBackupNote(); toast(settings.autoBackup === false ? "Автокопия выключена" : "Автокопия включена"); maybeAutoBackup(); };
 $("exportBtn").onclick = () => {
-  const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}};
-  for(const k of LS.keys()) data.entries[k] = LS.get(k);
-  download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); if(!NATIVE) toast("Копия сохранена в загрузках");
+  const data = backupData();
+  download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); LS.set("lastBackup", Date.now()); renderBackupNote(); if(!NATIVE) toast("Копия сохранена в загрузках");
 };
 $("importFile").onchange = async e => {
   const f = e.target.files && e.target.files[0]; e.target.value = ""; if(!f) return;
@@ -2889,7 +2903,7 @@ window.__ritmNative = {
       LS.set("health", health); try{ suggestWalks(); }catch(e){} render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(tab === "chat" && !maybeWeeklyReport() && !morningBrief()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(tab === "chat" && !maybeWeeklyReport() && !morningBrief()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -2907,6 +2921,14 @@ if(NATIVE){
   $("nWake").onchange = () => { if($("nWake").value){ settings.wake = $("nWake").value; persistSettings(); render(); toast("Сохранено"); } };
   $("nLunch").onchange = () => { if($("nLunch").value){ settings.lunch = $("nLunch").value; persistSettings(); render(); toast("Сохранено"); } };
   $("nFreq").onclick = e => { const b = e.target.closest("[data-freq]"); if(!b) return; settings.checkins = +b.dataset.freq; persistSettings(); render(); toast("Сохранено"); };
+  $("nDiag").onclick = () => { let d = {}; try{ d = JSON.parse(NATIVE.diag()); }catch(e){ $("nDiagOut").textContent = "Эта версия приложения не умеет показывать состояние будильников. Обновите приложение."; return; }
+    const on = x => x ? "включено" : "выключено";
+    $("nDiagOut").textContent = ["Утренний план: " + (d.morning||"—") + " (" + on(d.enabled) + "), ближайший " + d.nextMorning,
+      "Вечерний вопрос: " + (d.evening||"—") + " (" + on(d.enabled) + "), ближайший " + d.nextEvening,
+      "Разбор дня: " + (d.review||"—") + " (" + on(d.reviewEnabled) + "), ближайший " + d.nextReview + ". В приложении сейчас: " + reviewTime() + ".",
+      "Уведомления Android: " + (d.notif ? "разрешены" : "ЗАПРЕЩЕНЫ"),
+      "Экономия батареи: " + (d.batteryUnrestricted ? "без ограничений" : "включена, Android может задерживать напоминания (Настройки → Приложения → Ритм недели → Батарея → Без ограничений)")].join("\n");
+    if(d.review && d.review !== reviewTime()){ lastReviewSync = ""; syncNative(); $("nDiagOut").textContent += "\nВремя разбора не совпало, отправил заново. Нажмите ещё раз."; } };
   $("nTestCheckin").onclick = () => { try{ NATIVE.testCheckin(); }catch(e){} };
   $("nWatch").onclick = e => { const b = e.target.closest("[data-watch]"); if(!b) return; settings.watchMin = +b.dataset.watch; persistSettings(); render(); toast("Сохранено"); };
   $("nTestWatch").onclick = () => { syncWatch(); try{ NATIVE.testWatch(); toast("Проверил. Если есть повод, придёт уведомление"); }catch(e){} };
@@ -2925,7 +2947,7 @@ window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; t
 if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 document.addEventListener("visibilitychange", () => { if(!document.hidden){ dismissed = new Set(); render(); } });
 
-render();
+render(); renderBackupNote(); setTimeout(maybeAutoBackup, 3000);
 pullNative();
 if(tab === "chat" && getChat().length) { if(!maybeWeeklyReport() && !morningBrief()) askRoutine(); render(); }
 if(!checkOpen()) scrollChat();

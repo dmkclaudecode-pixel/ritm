@@ -18,7 +18,7 @@ import java.time.ZonedDateTime
 
 object Reminders {
     private const val CHANNEL = "ritm_daily"
-    private const val PREFS = "ritm"
+    const val PREFS = "ritm"
 
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)

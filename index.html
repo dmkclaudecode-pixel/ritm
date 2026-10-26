@@ -113,7 +113,7 @@
       <div class="remrow"><span class="rl"><b>Обед</b><span class="note">спрошу, что на обед</span></span><input type="time" id="nLunch" aria-label="Время обеда"></div>
       <div class="remrow"><span class="rl"><b>Разбор дня</b><span class="note" id="nReviewNote">За 30 минут до сна</span></span><button class="btn" id="nReviewToggle">Вкл</button></div>
       <div class="remrow"><span class="rl"><b>Обычно ложусь в</b><span class="note">если данных о сне ещё нет</span></span><input type="time" id="nBed" aria-label="Обычное время отбоя"></div>
-      <details class="base"><summary>Проверить, что уведомления работают</summary><div class="tools"><button class="btn" id="nTest">Пробное</button><button class="btn" id="nTestReview">Пробный разбор</button><button class="btn" id="nTestCheckin">Пробный вопрос</button></div></details>
+      <details class="base"><summary>Проверить, что уведомления работают</summary><div class="tools"><button class="btn" id="nTest">Пробное</button><button class="btn" id="nTestReview">Пробный разбор</button><button class="btn" id="nTestCheckin">Пробный вопрос</button><button class="btn" id="nDiag">Что стоит в будильниках</button></div><pre class="note" id="nDiagOut" style="white-space:pre-wrap"></pre></details>
     </section>
     <section class="card" id="remCard">
       <h2>Напоминания</h2>
@@ -132,7 +132,9 @@
     <section class="card" id="actsCard"></section>
     <section class="card">
       <h2>Резервная копия</h2>
-      <p class="note">Данные хранятся только на этом телефоне. Сохраняйте копию время от времени, чтобы не потерять их при смене телефона.</p>
+      <p class="note">Данные хранятся только на этом телефоне. Раз в неделю приложение само кладёт копию в папку «Загрузки» (она переживёт переустановку). Можно сохранить и вручную.</p>
+      <p class="note" id="backupNote"></p>
+      <div class="tools"><button class="btn" id="autoBackupToggle">Автокопия включена</button></div>
       <div class="tools">
         <button class="btn" id="exportBtn">Сохранить копию</button>
         <label class="btn" for="importFile" style="cursor:pointer">Восстановить из копии</label>

@@ -196,6 +196,27 @@ class MainActivity : ComponentActivity() {
             Reminders.schedule(this@MainActivity)
         }
 
+        /** Что реально сохранено для будильников: время, включённость, ближайший запуск, ограничения батареи. */
+        @JavascriptInterface fun diag(): String {
+            val p = getSharedPreferences(Reminders.PREFS, MODE_PRIVATE)
+            val zone = java.time.ZoneId.systemDefault()
+            fun next(hm: String?): String {
+                val t = try { java.time.LocalTime.parse(hm ?: "") } catch (e: Exception) { return "—" }
+                var at = java.time.ZonedDateTime.of(java.time.LocalDate.now(zone), t, zone)
+                if (!at.isAfter(java.time.ZonedDateTime.now(zone))) at = at.plusDays(1)
+                return at.format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm"))
+            }
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            return JSONObject()
+                .put("morning", p.getString("morning", null)).put("evening", p.getString("evening", null)).put("enabled", p.getBoolean("enabled", false))
+                .put("review", p.getString("review", null)).put("reviewEnabled", p.getBoolean("reviewEnabled", false))
+                .put("nextMorning", next(p.getString("morning", "08:45"))).put("nextEvening", next(p.getString("evening", "19:45")))
+                .put("nextReview", next(p.getString("review", "23:00")))
+                .put("batteryUnrestricted", pm.isIgnoringBatteryOptimizations(packageName))
+                .put("notif", NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled())
+                .toString()
+        }
+
         @JavascriptInterface fun setCheckins(json: String) = Checkins.set(this@MainActivity, json)
         @JavascriptInterface fun setWatch(json: String) = Watcher.configure(this@MainActivity, json)
         @JavascriptInterface fun nudges(): String = Watcher.history(this@MainActivity).toString()
