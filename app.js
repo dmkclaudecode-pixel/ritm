@@ -611,23 +611,24 @@ function llmCall(messages, done){
 function llmCallLocal(prompt, done){
   const id = ++llmSeq; const to = setTimeout(() => { if(llmWait[id]){ delete llmWait[id]; done(null, "модель не успела ответить"); } }, 120000);
   llmWait[id] = (status, text) => { clearTimeout(to); if(status !== 200) return done(null, text || "сбой модели");
-    const m = /"?kind"?\s*[:=]\s*"?(activity|plan|chat)/i.exec(text) || /\b(activity|plan|chat)\b/i.exec(text);
+    const m = /"?kind"?\s*[:=]\s*"?(activity|plan|command|chat)/i.exec(text) || /\b(activity|plan|command|chat)\b/i.exec(text);
     if(!m) return done(null, "непонятный ответ модели"); const w = /"?why"?\s*[:=]\s*"([^"]{1,100})/i.exec(text);
     done({kind: m[1].toLowerCase(), why: w ? w[1] : ""}); };
   try{ NATIVE.llmLocalAsk(id, prompt); }catch(e){ clearTimeout(to); delete llmWait[id]; done(null, "ошибка запуска модели"); }
 }
-const LLM_SYS = "Ты проверяешь записи в дневнике привычек. Пользователь пишет боту. Реши про ПОСЛЕДНЕЕ сообщение пользователя: " +
-  "activity — он сообщает, что сам сделал занятие, поел, выпил, поспал и т. п.; plan — он сообщает, что собирается сделать; " +
-  "chat — разговор, эмоции, оценка, вопрос, где он находится или куда едет, действия других людей, погода, работа как обстановка («вернулся с работы», «еду на работу»). " +
-  "Учитывай предыдущие реплики. Ответь только JSON: {\"kind\":\"activity|plan|chat\",\"why\":\"коротко по-русски\"}.";
-function llmJudge(text, done){
+const LLM_SYS = "Ты проверяешь, правильно ли приложение поняло сообщение пользователя. Приложение хочет записать в дневник то, что указано в «Приложение записало». Реши про ПОСЛЕДНЕЕ сообщение пользователя: " +
+  "activity — он сообщает, что сам сделал занятие, поел, выпил, поспал и т. п. (запись верна); plan — он сообщает, что собирается сделать (запись верна); " +
+  "command — это просьба или вопрос к приложению: отменить, убрать, перенести, изменить план, показать что-то, исправить (записывать ничего не надо); " +
+  "chat — разговор, эмоции, оценка, где он находится или куда едет, действия других людей, погода, работа как обстановка («вернулся с работы», «еду на работу») (записывать не надо). " +
+  "Учитывай предыдущие реплики. Ответь только JSON: {\"kind\":\"activity|plan|command|chat\",\"why\":\"коротко по-русски\"}.";
+function llmJudge(text, done, did){
   const hist = getChat().slice(-8, -2).filter(m => m.text);
   if(llmMode() === "local"){
     const ctx = hist.slice(-3).map(m => (m.who === "me" ? "Пользователь: " : "Бот: ") + String(m.text).slice(0, 150)).join("\n");
-    return llmCallLocal("<|im_start|>system\n" + LLM_SYS + "<|im_end|>\n<|im_start|>user\n" + (ctx ? "Предыдущие реплики:\n" + ctx + "\n\n" : "") + "Последнее сообщение пользователя: " + text + "<|im_end|>\n<|im_start|>assistant\n", done);
+    return llmCallLocal("<|im_start|>system\n" + LLM_SYS + "<|im_end|>\n<|im_start|>user\n" + (ctx ? "Предыдущие реплики:\n" + ctx + "\n\n" : "") + (did ? "Приложение записало: " + did + "\n" : "") + "Последнее сообщение пользователя: " + text + "<|im_end|>\n<|im_start|>assistant\n", done);
   }
   const ctx = hist.map(m => ({role: m.who === "me" ? "user" : "assistant", content: String(m.text || "").slice(0, 300)}));
-  llmCall([{role:"system", content:LLM_SYS}, ...ctx, {role:"user", content:"Последнее сообщение пользователя: " + text}], done);
+  llmCall([{role:"system", content:LLM_SYS}, ...ctx, {role:"user", content:(did ? "Приложение записало: " + did + "\n" : "") + "Последнее сообщение пользователя: " + text}], done);
 }
 /* ---------- ответы моделью: правила считают и записывают, модель говорит ---------- */
 const replyOn = () => llmOn() && llmCfg().reply !== false;
@@ -670,26 +671,33 @@ function llmReply(text, plain){
     else fetch(LLM_URL, {method:"POST", headers:{"Content-Type":"application/json", Authorization:"Bearer " + c.key}, body}).then(async r => llmWait[id] && llmWait[id](r.status, await r.text())).catch(() => { delete llmWait[id]; });
   }
 }
+function undoLogged(L, text, v){
+  const L2 = LS.get("lastLog"); if(!L2 || L2.at !== L.at) return false;
+  let n = 0, words = [];
+  mutateQuiet(L2.key, w => { const day = w.days[L2.day]; if(!day) return; const rm = (day.log||[]).filter(r => L2.ids.includes(r.id)); n = rm.length;
+    for(const r of rm){ if(r.fuzzyWord) words.push(r.fuzzyWord); if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } }
+    day.log = (day.log||[]).filter(r => !rm.includes(r)); });
+  if(!n) return false;
+  if(v.kind === "chat") RITM.forget(text, words[0]);
+  LS.set("lastLog", null);
+  const why = v.why ? " (" + String(v.why).slice(0, 80) + ")" : "";
+  bot(v.kind === "command"
+    ? "Поправка: «" + text + "» — это просьба, а не запись" + why + ". Запись убрал. Напишите, что именно отменить или перенести, например: «отмени йогу в среду» или «перенеси силовую на пятницу»."
+    : "Поправка: «" + text + "» — это не занятие" + why + ". Запись убрал и запомнил.");
+  render(); scrollChat();
+  return true;
+}
 function respond(text){
   const t0 = Date.now(); respondRules(text);
-  if(replyOn()){
-    const plain = getChat().filter(m => m.who === "bot" && m.at >= t0 - 50 && m.text && !m.acts && !m.kind);
-    if(plain.length) llmReply(text, plain);
-  }
-  if(!llmOn() || /\d/.test(text)) return;
-  const L = LS.get("lastLog"); if(!L || L.at < t0) return;                       // правила ничего не записали
-  llmJudge(text, (v, err) => {
-    if(!v || v.kind !== "chat") return;
-    const L2 = LS.get("lastLog"); if(!L2 || L2.at !== L.at) return;
-    let n = 0, words = [];
-    mutateQuiet(L2.key, w => { const day = w.days[L2.day]; if(!day) return; const rm = (day.log||[]).filter(r => L2.ids.includes(r.id)); n = rm.length;
-      for(const r of rm){ if(r.fuzzyWord) words.push(r.fuzzyWord); if(r.plan){ const it = w.items.find(i => i.id === r.plan); if(it) it.done = false; } }
-      day.log = (day.log||[]).filter(r => !rm.includes(r)); });
-    if(!n) return;
-    RITM.forget(text, words[0]);
-    LS.set("lastLog", null); render();
-    bot("Поправка: «" + text + "» — это не занятие" + (v.why ? " (" + String(v.why).slice(0, 80) + ")" : "") + ". Запись убрал и запомнил.");
-  });
+  const mine = getChat().filter(m => m.who === "bot" && m.at >= t0 - 50);
+  const plain = mine.filter(m => m.text && !m.acts && !m.kind);
+  const L = LS.get("lastLog"), logged = !!(L && L.at >= t0);
+  const reply = () => { if(replyOn() && plain.length) llmReply(text, plain); };
+  // если бот что-то записал, сначала модель проверяет, правильно ли он понял; только потом пишет ответ
+  if(llmOn() && logged && !/\d/.test(text)){
+    const did = plain.map(m => m.text).join(" ").slice(0, 200);
+    llmJudge(text, (v, err) => { if(v && (v.kind === "chat" || v.kind === "command") && undoLogged(L, text, v)) return; reply(); }, did);
+  } else reply();
 }
 let llmDl = null;   // {pct, err}
 function renderLlm(){
@@ -1165,8 +1173,8 @@ function respondRules(text){
   if(/ (сколько|как|итоги|статистик|как прошел|как дела у меня) /.test(s) && / (вод|кофе|белк|шаг|сегодня|телефон|итог|статистик) /.test(s)) return bot(todayStatsText());
   const mv = /^ (перенеси|сдвинь|передвинь|перенести) (.+?) на (.+) $/.exec(s);
   if(mv) return moveCommand(mv[2], mv[3]);
-  const rm = /^ (отмени|убери|удали|отменяю) (.+) $/.exec(s);
-  if(rm) return removeCommand(rm[2]);
+  const rm = /^ (отмени|убери|удали|отменяю|отмените|уберите|удалите) (.+) $/.exec(s) || (() => { const m = /^ (.+?) (отмени|убери|удали|отмените|уберите|удалите|отменяется|отменяем|отмена) $/.exec(s); return m ? [0, 0, m[1]] : null; })();
+  if(rm && !/^ (последн|это|эту|запись)/.test(" " + rm[2])) return removeCommand(rm[2]);
   if(/^ (ничего|ничем|отдыхаю|просто отдыхаю|ничего особенного) /.test(s)) return bot(pick(["Отдых тоже важен. Если захочется движения, короткая прогулка на 15 минут отлично перезагружает.","Понял. Если что-то будешь делать, напиши, я запишу."]));
 
   if(/ (не пиши|не беспокой|не трогай|хватит писать|помолчи|не надо писать)/.test(s) && !hasAct){ const t = new Date(); t.setDate(t.getDate()+1); t.setHours(6,0,0,0); settings.ciPauseUntil = t.getTime(); persistSettings(); lastCheckinSync = ""; return bot("Понял, сегодня больше не пишу. Завтра продолжим. Если хочешь реже насовсем — напиши «пиши реже»."); }
