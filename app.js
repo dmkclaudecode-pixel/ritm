@@ -198,16 +198,13 @@ function autoFill(key){
     let need = gs[c].deficit;
     let off = 0;
     while(need > 0){
-      let best = -1, bl = 99;
-      for(let d = ti; d < 7; d++){
-        if(w.items.some(i => i.day===d && i.cat===c)) continue;
-        let l = load[d] + (c==="swim" && d<5 ? 2 : 0) + (d===ti && new Date().getHours()>=20 ? 5 : 0) + (w.items.some(i => i.cat===c && Math.abs(i.day-d)===1) ? 2 : 0);
-        if(l < bl){ bl = l; best = d; }
-      }
+      const best = smartDay(key, c, ti, -1, load, w);
       if(best < 0) break;
       const idea = ideasFor(c, best, null, off++, recent) || {t:CATS[c].n, time:""};
       recent.add(idea.t);
-      w.items.push({id:uid(), day:best, cat:c, t:idea.t, time:smartTime(c, best, idea.time||""), done:false});
+      let tm = (!idea.time || idea.when === "any") ? learnedTime(c, best, smartTime(c, best, idea.time||"")) : smartTime(c, best, idea.time);
+      if(key === curKey() && best === todayI() && tm && tm < fromMin(toMinHM(nowHM()) + 30)) tm = "";
+      w.items.push({id:uid(), day:best, cat:c, t:idea.t, time:tm, done:false});
       load[best]++; added.push(idea.t); need--;
     }
   }
@@ -395,19 +392,20 @@ function renderStats(){
       const am = avg(sl.map(x=>x.min)), starts = sl.map(x=>bedMin(x.start)), spread = Math.max(...starts) - Math.min(...starts);
       ins.push([am >= 420 ? "ok" : "warn", `Сон в среднем ${fmtDur(Math.round(am))}.` + (am < 420 ? " Взрослым обычно нужно 7–9 часов." : "") + (spread > 90 ? ` Время засыпания гуляет на ${Math.round(spread/6)/10} ч; ровный отбой помогает легче вставать.` : " Время отбоя стабильное.")]);
     }
-    if(eGood.length >= 2 && eBad.length >= 2){ const df = avg(eGood) - avg(eBad); if(df > 0.2) ins.push(["ok", `После ночей от 7 часов энергия выше в среднем на ${df.toFixed(1)} балла.`]); }
+    if(eGood.length >= 2 && eBad.length >= 2){ const df = avg(eGood) - avg(eBad); if(df > 0.2) ins.push(["ok", `После ночей от 7 часов энергия выше в среднем на ${df.toFixed(1).replace(".", ",")} балла.`]); }
   }
   if(eM.length >= 2 && eR.length >= 2){
     const diff = avg(eM) - avg(eR);
-    ins.push([diff > 0 ? "ok" : "sun", diff > 0.2 ? `В дни с движением энергия выше в среднем на ${diff.toFixed(1)} балла. Движение вам реально помогает.` : `Пока разницы в энергии между днями с движением и без почти нет. Продолжайте отмечать, картина станет точнее.`]);
+    ins.push([diff > 0 ? "ok" : "sun", diff > 0.2 ? `В дни с движением энергия выше в среднем на ${diff.toFixed(1).replace(".", ",")} балла. Движение вам реально помогает.` : `Пока разницы в энергии между днями с движением и без почти нет. Продолжайте отмечать, картина станет точнее.`]);
   } else ins.push(["sun", "Отмечайте энергию каждый вечер во вкладке «Сегодня». Через неделю здесь появится, как движение влияет на ваше самочувствие."]);
-  if(mood.length >= 3) ins.push(["ok", `Среднее настроение за неделю: ${avg(mood).toFixed(1)} из 5.`]);
+  if(mood.length >= 3) ins.push(["ok", `Среднее настроение за неделю: ${avg(mood).toFixed(1).replace(".", ",")} из 5.`]);
   const doneNow = w.items.filter(i=>i.done && i.day<=ti).length, donePrev = pw.items.filter(i=>i.done && i.day<=ti).length;
   if(pw.items.length) ins.push(["ok", `К этому дню на прошлой неделе было сделано ${donePrev}, сейчас ${doneNow}.`]);
   const games = w.items.filter(i=>isScreen(i.cat)), late = games.filter(i=>i.time && i.time >= settings.screensOff);
   if(late.length) ins.push(["warn", `Игры после ${settings.screensOff} стоят ${late.length} ${plural(late.length,"раз","раза","раз")}. Это мешает заснуть; лучше сдвинуть раньше.`]);
   if(NATIVE) for(const x of weekScreenInsights(ck, ti)) ins.push(x);
   if(NATIVE){ const ns = nudgeStats(new Date(ck+"T00:00:00").getTime(), Date.now()+1); if(ns.n) ins.push([ns.ignored > ns.obeyed ? "warn" : "ok", `За неделю я ${ns.n} ${plural(ns.n,"раз","раза","раз")} просил сделать перерыв: послушался ${ns.obeyed}, по работе ${ns.exempt}, проигнорировал ${ns.ignored}` + (ns.promisedIgnored ? ` (из них ${ns.promisedIgnored} — после обещания выключить)` : "") + "."]); }
+  renderPatterns();
   $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + ins.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("");
 }
 
@@ -419,7 +417,8 @@ function renderMore(){
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
     $("nWatch").innerHTML = [[0,"Выкл"],[30,"Строго"],[40,"Обычно"],[60,"Мягко"]].map(([v,l]) => `<button class="${(settings.watchMin ?? 40)===v?"on":""}" data-watch="${v}">${l}</button>`).join("");
     $("nWake").value = settings.wake || "08:00"; $("nLunch").value = settings.lunch || "13:00";
-    $("nFreq").innerHTML = [[0,"Не писать"],[1,"Только утром"],[2,"Обычно"],[3,"Часто"],[4,"Очень часто"]].map(([v,l]) => `<button class="${(settings.checkins ?? 2)===v?"on":""}" data-freq="${v}">${l}</button>`).join("");
+    $("nFreq").innerHTML = [[0,"Не писать"],[1,"Только утром"],[2,"Редко"],[3,"Иногда"],[5,"Раз в час, с подстройкой"]].map(([v,l]) => `<button class="${(settings.checkins ?? 5)===v?"on":""}" data-freq="${v}">${l}</button>`).join("");
+    const bh = bestHours(); $("nFreqNote").textContent = bh.length ? `Лучше всего ты отвечаешь около ${bh.map(h => h + ":00").join(", ")}. Часы, когда ты почти не отвечаешь, я постепенно пропускаю.` : "Со временем я пойму, в какие часы тебе удобно отвечать, и буду писать в основном тогда.";
     $("nReviewToggle").textContent = settings.reviewOn ? "Включён" : "Выключен"; $("nReviewToggle").classList.toggle("primary", !!settings.reviewOn);
     $("nReviewNote").textContent = `В ${reviewTime()}, за 30 минут до ${ub.auto ? "вашего обычного отбоя по данным сна ("+ub.hm+")" : "отбоя в "+ub.hm}`; }
 }
@@ -512,6 +511,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("button"); if(!t) return;
   const ds = t.dataset;
   if(chatClick(ds)) return;
+  if(ds.report){ tab = "chat"; postWeeklyReport(); render(); scrollChat(); return; }
   if(journalClick(ds, t)) return;
   if(appsClick(ds)) return;
   if(actsClick(ds)) return;
@@ -677,12 +677,7 @@ const dayIdxOf = d => (d.getDay()+6)%7;
 const whenWord = d => { d = new Date(d); d.setHours(0,0,0,0); const t = new Date(); t.setHours(0,0,0,0); const diff = Math.round((d - t)/86400000); return diff === 0 ? "сегодня" : diff === 1 ? "завтра" : diff === 2 ? "послезавтра" : DACC[dayIdxOf(d)]; };
 const lc = s => s ? s.charAt(0).toLowerCase() + s.slice(1) : s;
 
-function bestDayInWeek(key, cat, fromDay, avoid){
-  const w = getWeek(key), load = Array(7).fill(0); w.items.forEach(i=>load[i.day]++);
-  let b = -1, bl = 99;
-  for(let d = fromDay; d < 7; d++){ if(d === avoid || w.items.some(i=>i.day===d && i.cat===cat)) continue; const l = load[d] + (w.items.some(i=>i.cat===cat && Math.abs(i.day-d)===1) ? 2 : 0); if(l < bl){ bl = l; b = d; } }
-  return b;
-}
+function bestDayInWeek(key, cat, fromDay, avoid){ return smartDay(key, cat, Math.max(0, fromDay), avoid); }
 
 // ---------- replies ----------
 function planText(date){
@@ -731,6 +726,8 @@ function runAction(msgId, i){
   const a = m.acts[i].a; m.chosen = i; saveChat(arr);
   let reply = "";
   if(a.op === "move"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it) it.day = a.day; }); reply = `Перенёс «${a.t}» ${DACC[a.day]}.`; }
+  else if(a.op === "planNext"){ const nk = iso(addDays(new Date(curKey()+"T00:00:00"), todayI() >= 5 ? 7 : 0)); applyRecurring(nk); const n = autoFill(nk); reply = n ? `Составил план: добавил ${n} ${plural(n,"занятие","занятия","занятий")} в дни и часы, когда у тебя обычно получается. Посмотреть — вкладка «Неделя».` : "Все цели уже стоят в плане."; }
+  else if(a.op === "goal"){ settings.goals[a.c] = a.to; persistSettings(); reply = `Цель «${CATS[a.c].full}» теперь ${a.to} в неделю.`; }
   else if(a.op === "swap"){ mutateQuiet(a.key, w => { const it = w.items.find(x=>x.id===a.id); if(it){ it.cat = a.type; it.t = a.name; } }); reply = `Заменил «${a.t}» на «${a.name}».`; }
   else if(a.op === "addToday"){ mutateQuiet(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:a.cat, t:a.name, time:a.time||"", done:false})); reply = `Добавил на сегодня: «${a.name}»${a.time ? " в " + a.time : ""}.`; }
   else if(a.op === "clearMajor"){ let n = 0; const base = new Date(); base.setHours(0,0,0,0);
@@ -840,6 +837,14 @@ function respond(text){
   if(rm) return removeCommand(rm[2]);
   if(/^ (ничего|ничем|отдыхаю|просто отдыхаю|ничего особенного) /.test(s)) return bot(pick(["Отдых тоже важен. Если захочется движения, короткая прогулка на 15 минут отлично перезагружает.","Понял. Если что-то будешь делать, напиши, я запишу."]));
 
+  if(/ (не пиши|не беспокой|не трогай|хватит писать|помолчи|не надо писать)/.test(s) && !hasAct){ const t = new Date(); t.setDate(t.getDate()+1); t.setHours(6,0,0,0); settings.ciPauseUntil = t.getTime(); persistSettings(); lastCheckinSync = ""; return bot("Понял, сегодня больше не пишу. Завтра продолжим. Если хочешь реже насовсем — напиши «пиши реже»."); }
+  if(/ (пиши реже|реже пиши|слишком часто пишешь|часто пишешь)/.test(s)){ settings.checkins = Math.max(1, Math.min(4, (settings.checkins ?? 5) === 5 ? 3 : (settings.checkins ?? 5) - 1)); persistSettings(); lastCheckinSync = ""; return bot("Хорошо, буду писать реже. Вернуть как было — «пиши чаще»."); }
+  if(/ (пиши чаще|чаще пиши|пиши почаще|пиши каждый час)/.test(s)){ settings.checkins = 5; settings.ciPauseUntil = 0; persistSettings(); lastCheckinSync = ""; return bot("Договорились: буду писать примерно раз в час, пока ты не спишь, и постепенно подстроюсь под время, когда тебе удобно отвечать."); }
+  if(/ (отчет|итоги недели|недельн|как прошла неделя)/.test(s) && !hasAct){ postWeeklyReport(); return; }
+  if(/ (что ты (понял|заметил)|закономерност|выводы обо мне|что влияет|что мне помогает|что мне мешает)/.test(s)){ const ins = personalInsights(); return bot(ins.length ? "Вот что я заметил по твоим данным:\n" + ins.slice(0,5).map(x => "• " + x.text).join("\n") : "Пока мало данных для выводов. Нужно хотя бы 1–2 недели: отмечай энергию и настроение, пиши, что делал, — и я начну находить закономерности."); }
+  if(/ (серии|стрик|сколько дней подряд)/.test(s)){ const st = streaks(); return bot(st.length ? "Твои серии: " + st.join("; ") + ". Не прерывай!" : "Пока серий нет — начни сегодня, и я буду считать."); }
+  if(/ (что я пропускаю|что срывается|что не получается)/.test(s)){ const sk = skipPatterns(); return bot(sk.length ? "Чаще всего срывается:\n" + sk.slice(0,4).map(x => "• " + x.text).join("\n") + "\nМогу ставить эти занятия на дни, когда у тебя получается лучше: напиши «составь план»." : "Явных провалов пока не вижу. Так держать!"); }
+  if(/ (составь план|спланируй неделю|план на неделю|распланируй)/.test(s)){ const nk = iso(addDays(new Date(curKey()+"T00:00:00"), todayI() >= 5 ? 7 : 0)); applyRecurring(nk); const n = autoFill(nk); return bot(n ? `Добавил ${n} ${plural(n,"занятие","занятия","занятий")} — в дни и часы, когда у тебя обычно получается. Посмотри вкладку «Неделя».` : "Все цели уже в плане."); }
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
   if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; }
@@ -1017,7 +1022,7 @@ function removeCommand(what){
   const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}».`);
   bot(`Убрать «${f.it.t}» (${DACC[f.it.day]}) из плана?`, [act("Да, убрать", {op:"remove", key:f.key, id:f.it.id, t:f.it.t}), act("Нет", {op:"keep"})]);
 }
-const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
+const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\n• самочувствие: «устал», «не выспался», «болит спина», «заболел» — подстрою план\n• поправки: «не 30, а 45 минут», «это было вчера», «удали последнее»\n• выводы: «что ты заметил?», «отчёт», «что я пропускаю?», «составь план»\n• «пиши реже», «пиши чаще», «не пиши сегодня»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
 
 // ---------- check-ins: messages from Ritm during the day ----------
 function wakeTime(){
@@ -1028,9 +1033,16 @@ function wakeTime(){
 }
 const toMinHM = t => +t.slice(0,2)*60 + +t.slice(3,5);
 const fromMin = m => pad(Math.floor(((m%1440)+1440)%1440/60))+":"+pad(((m%60)+60)%60);
+const CI_KINDS = new Set(["morning","lunch","before","doing","work","water","evening","afterwork"]);
+const ciStats = () => LS.get("ciStats") || {};
+function ciRate(h){ const x = ciStats()[h] || {sent:0, ans:0}; return {sent:x.sent, ans:x.ans, rate:(x.ans + 0.6) / (x.sent + 1)}; }
+function ciNoteFired(f){ if(!CI_KINDS.has(f.kind)) return; const h = new Date(f.firedAt || f.at).getHours(), st = ciStats(); st[h] = st[h] || {sent:0, ans:0}; st[h].sent++; LS.set("ciStats", st); LS.set("lastCi", {at:f.firedAt || f.at, h, answered:false}); }
+function ciNoteAnswer(){ const lc = LS.get("lastCi"); if(!lc || lc.answered || Date.now() - lc.at > 45*60000) return; const st = ciStats(); st[lc.h] = st[lc.h] || {sent:1, ans:0}; st[lc.h].ans++; lc.answered = true; LS.set("ciStats", st); LS.set("lastCi", lc); }
+function bestHours(){ return Object.entries(ciStats()).filter(([,x]) => x.sent >= 3).map(([h,x]) => [+h, (x.ans + 0.6)/(x.sent + 1)]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([h])=>h).sort((a,b)=>a-b); }
 function buildCheckins(){
-  const freq = settings.checkins ?? 2; if(!freq) return [];
-  const out = [], now = Date.now();
+  const freq = settings.checkins ?? 5; if(!freq) return [];
+  if(settings.ciPauseUntil && Date.now() < settings.ciPauseUntil) return [];
+  const out = [], now = Date.now(), r = getRoutine();
   for(let off = 0; off < 3; off++){
     const date = addDays(new Date(), off); date.setHours(0,0,0,0);
     const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key);
@@ -1039,18 +1051,50 @@ function buildCheckins(){
     const jit = n => (hash(iso(date)+n) % 21) - 10;
     const slots = [];
     const planLine = its.length ? "Сегодня в плане: " + its.slice(0,3).map(i => (i.time ? i.time+" " : "") + lc(i.t)).join(", ") + "." : "В плане сегодня пусто. Чем займёмся?";
-    slots.push({m: wake + 60 + jit("m"), kind:"morning", title:"Доброе утро!", text: planLine + " Как спалось?"});
-    if(freq >= 2) slots.push({m: toMinHM(getRoutine().lunch || settings.lunch || "13:00") + jit("l"), kind:"lunch", title:"Время обеда", text: pick(["Пора пообедать. Что будет на обед?","Обеденное время! Что сегодня на обед?","Не забудь пообедать. Что ешь сегодня?"])});
-    if(freq >= 2) for(const i of its.filter(i=>i.time && CATS[i.cat] && (CATS[i.cat].move || CATS[i.cat].grp==="social")).slice(0,2))
-      slots.push({m: toMinHM(i.time) - 60, kind:"before", title:`Через час: ${lc(i.t)}`, text:`В ${i.time} по плану «${i.t}». Всё в силе? Если планы поменялись, напиши.`});
-    if(freq >= 3) slots.push({m: 11*60 + jit("a"), kind:"doing", title:"Как дела?", text: pick(["Что делаешь?","Чем занят?","Как идёт день?"]) + " Не забывай про воду."});
-    if(freq >= 3) slots.push({m: 16*60 + 30 + jit("b"), kind:"doing", title:"Что делаешь?", text: pick(["Как проходит день? Что делаешь?","Чем занимаешься? Может, пора размяться минут 5?"])});
-    if(freq >= 4) slots.push({m: 19*60 + 30 + jit("c"), kind:"doing", title:"Как вечер?", text: "Как вечер? Что делаешь?"});
+    slots.push({m: wake + 45 + jit("m"), kind:"morning", title:"Доброе утро!", text: planLine + " Как спалось?", fixed:true});
+    const lunch = toMinHM(r.lunch || settings.lunch || "13:00");
+    if(freq >= 2) slots.push({m: lunch + jit("l"), kind:"lunch", title:"Время обеда", text: pick(["Пора пообедать. Что будет на обед?","Обеденное время! Что сегодня на обед?","Не забудь пообедать. Что ешь сегодня?"]), fixed:true});
+    if(freq >= 2) for(const i of its.filter(i=>i.time && CATS[i.cat] && (CATS[i.cat].move || CATS[i.cat].grp==="social")).slice(0,3))
+      slots.push({m: toMinHM(i.time) - 60, kind:"before", title:`Через час: ${lc(i.t)}`, text:`В ${i.time} по плану «${i.t}». Всё в силе? Если планы поменялись, напиши.`, fixed:true});
+    if(d === 6) slots.push({m: 19*60 + 30, kind:"report", title:"Неделя позади!", text:"Загляни в чат: там отчёт за неделю, что я заметил и готовый план на следующую.", fixed:true});
+    // живые подсказки на сегодня: мало движения, мало воды, короткая ночь
+    const dyn = [];
+    if(off === 0){ const tds = iso(date), stp = stepsFor(tds), Lt = intakeOf((w.days[d]||{}).log), sln = sleepFor(tds);
+      if(sln && sln.min < 360) dyn.push({from:0, to:14*60, text:`Ночь была короткой (${fmtDur(sln.min)}). Сегодня без кофе после 14:00 и постарайся лечь пораньше.`});
+      if(stp != null && stp < settings.stepsGoal * 0.3) dyn.push({from:15*60, to:20*60, text:`Сегодня пока мало движения: ${fmtNum(stp)} шагов. Может, прогулка 15 минут?`});
+      if(Lt.water < settings.waterGoal * 0.3) dyn.push({from:12*60, to:19*60, text:`Воды сегодня пока ${Lt.water} мл. Выпей стакан прямо сейчас?`}); }
+    if(freq >= 5){
+      // примерно раз в час в остальное время бодрствования, с подстройкой под часы, когда ты отвечаешь
+      const workEnd = r.work && isWorkDay(d) && !r.noWork ? toMinHM(r.work.to) + (r.commute||0) : null;
+      for(let m = wake + 120; m <= end; m += 60){
+        const at = m + jit("h" + m), h = Math.floor(((at % 1440) + 1440) % 1440 / 60);
+        const st = ciRate(h);
+        if(st.sent >= 4 && st.rate < 0.2){ const lastKept = slots.filter(x=>x.m < at).map(x=>x.m).sort((a,b)=>b-a)[0] || wake; if(at - lastKept < 180) continue; }
+        let kind = "doing", title = "Что делаешь?", text;
+        const busy = busyAt(d, fromMin(at)), waterTarget = Math.round(settings.waterGoal * Math.min(1, (at - wake) / Math.max(60, end - wake)) / 50) * 50;
+        const pool = [];
+        if(busy){ kind = "work"; title = "Как работа?"; pool.push("Как работа? Встань на минуту, потянись и попей воды.", "Как идёт рабочий день? Сделай паузу на пару минут: пройдись и разомни шею.", "Как дела на работе? Если сидишь давно — 2 минуты разминки помогут голове."); }
+        else if(workEnd && at >= workEnd && at < workEnd + 60){ kind = "afterwork"; title = "Как прошёл день?"; pool.push("Рабочий день позади? Как прошёл? Что планируешь на вечер?", "Как день? Чем займёшься вечером?"); }
+        else if(at >= end - 90){ kind = "evening"; title = "Как вечер?"; pool.push(`Как вечер? Что делаешь? Помни: экраны до ${settings.screensOff}.`, "Чем занимаешься? Скоро пора готовиться ко сну.", "Как прошёл день? Перед сном можно подвести итоги — напиши «разбор»."); }
+        else { pool.push("Что делаешь?", "Чем занят?", "Как настроение? Что сейчас делаешь?", "Как идёт день?");
+          if(h >= 11) { kind = "water"; pool.push(`Как с водой? К этому времени хорошо бы около ${waterTarget} мл. Сколько уже выпил?`); }
+          if(h >= 15) pool.push("Как самочувствие? Может, пора размяться минут 5?"); }
+        text = pool[hash(iso(date) + at) % pool.length];
+        const dy = dyn.find(x => at >= x.from && at < x.to && !x.used); if(dy && !busy){ text = dy.text; dy.used = true; kind = "doing"; }
+        if(kind === "water" && !/с водой/.test(text)) kind = "doing";
+        slots.push({m: at, kind, title, text});
+      }
+    } else {
+      if(freq >= 3) slots.push({m: 11*60 + jit("a"), kind:"doing", title:"Как дела?", text: pick(["Что делаешь?","Чем занят?","Как идёт день?"]) + " Не забывай про воду."});
+      if(freq >= 3) slots.push({m: 16*60 + 30 + jit("b"), kind:"doing", title:"Что делаешь?", text: pick(["Как проходит день? Что делаешь?","Чем занимаешься? Может, пора размяться минут 5?"])});
+      if(freq >= 4) slots.push({m: 19*60 + 30 + jit("c"), kind:"doing", title:"Как вечер?", text: "Как вечер? Что делаешь?"});
+    }
+    slots.sort((a,b) => (b.fixed?1:0) - (a.fixed?1:0) || a.m - b.m);
     for(const sl of slots){
       if(sl.m < wake + 30 || sl.m > end) continue;
-      if(sl.kind === "doing" && busyAt(d, fromMin(sl.m))){ sl.title = "Как работа?"; sl.text = pick(["Как работа? Не забывай раз в час вставать и пить воду.","Как идёт рабочий день? Сделай паузу на пару минут: встань, потянись, попей воды."]); }
+      if(sl.kind === "doing" && busyAt(d, fromMin(sl.m))){ sl.kind = "work"; sl.title = "Как работа?"; sl.text = "Как работа? Не забывай раз в час вставать и пить воду."; }
       const at = date.getTime() + sl.m*60000; if(at < now + 60000) continue;
-      if(out.some(x => Math.abs(x.at - at) < 50*60000)) continue;
+      if(out.some(x => Math.abs(x.at - at) < 40*60000)) continue;
       out.push({id: iso(date)+"-"+sl.kind+"-"+sl.m, at, title:sl.title, text:sl.text, kind:sl.kind});
     }
   }
@@ -1070,7 +1114,7 @@ function pullNative(){
   try{ inbox = JSON.parse(NATIVE.consumeInbox() || "[]"); }catch(e){}
   const all = fired.map(f => ({t:f.firedAt || f.at, f})).concat(inbox.map(m => ({t:m.at, m}))).sort((a,b)=>a.t-b.t);
   for(const x of all){
-    if(x.f) pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t});
+    if(x.f){ pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t}); ciNoteFired(x.f); }
     else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); if(x.m.ctx !== "nudge") handleUser(x.m.text, false); }
   }
   if(all.length) render();
@@ -1305,10 +1349,205 @@ function adviceText(){
   return tips.slice(0, 3).join("\n");
 }
 
+/* ---------- stage 2: personal patterns, trends, streaks, weekly report ---------- */
+function dayRecord(date){
+  const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key), day = w.days[d] || {}, ds = iso(date);
+  const log = day.log || [], L = intakeOf(log), sl = sleepFor(ds);
+  const its = w.items.filter(i => i.day === d);
+  const doneIts = its.filter(i => i.done);
+  const rv = day.review || {};
+  let moveMin = 0;
+  for(const i of doneIts) if(CATS[i.cat] && CATS[i.cat].move) moveMin += (rv.entries && rv.entries[i.id] ? rv.entries[i.id].min : defaultMin(i)) || 0;
+  moveMin += L.move;
+  const pd = typeof phoneDay === "function" ? phoneDay(ds) : null;
+  const screenEnt = pd ? pd.ent : (L.screen || null), lateScreen = pd ? pd.late : L.lateScreen;
+  const lastCafM = L.lastCaf ? toMinHM(L.lastCaf) : null;
+  return {
+    date:ds, dow:d, past: date < new Date(new Date().setHours(0,0,0,0)),
+    sleepMin: sl ? sl.min : null, bedM: sl ? bedMin(sl.start) : null, wakeM: sl ? toMinHM(sl.end) : null,
+    energy: day.energy ?? null, mood: day.mood ?? null, stress: day.stress ?? (rv.stress ?? null), sick: !!day.sick,
+    steps: stepsFor(ds), moveMin, major: doneIts.some(i => MAJOR.has(i.cat)) || log.some(e => MAJOR.has(e.type) && !e.plan),
+    caf: L.mg, lateCaf: lastCafM != null ? lastCafM >= 14*60 + 30 : null, alcohol: L.alcohol > 0 ? 1 : (log.length ? 0 : null),
+    water: log.length ? L.water : null, screenEnt, lateScreen: lateScreen != null ? lateScreen : null,
+    planned: its.length, done: doneIts.length, reviewed: !!rv.done, hasData: !!(sl || log.length || day.energy || doneIts.length)
+  };
+}
+function history(n){ const out = [], t = new Date(); t.setHours(0,0,0,0); for(let i = n; i >= 0; i--) out.push(dayRecord(addDays(t, -i))); return out; }
+const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+// сравнение «в дни, когда X» против «остальные дни» с поправкой на малую выборку
+function compare(days, cond, val, minN){
+  const A = [], B = [];
+  for(const x of days){ const c = cond(x), v = val(x); if(c == null || v == null) continue; (c ? A : B).push(v); }
+  if(A.length < (minN||3) || B.length < (minN||3)) return null;
+  return {a:mean(A), b:mean(B), nA:A.length, nB:B.length, diff:mean(A) - mean(B)};
+}
+function personalInsights(){
+  const days = history(42), next = i => days[i+1];
+  const pairs = days.map((x, i) => ({x, y: next(i)})).filter(p => p.y);
+  const out = [];
+  const add = (score, text, kind) => out.push({score, text, kind});
+  // кофеин после 14:30 → сон этой ночью
+  let r = compare(pairs, p => p.x.lateCaf, p => p.y.sleepMin);
+  if(r && r.diff <= -20) add(-r.diff, `В дни, когда ты пьёшь кофеин после 14:30, спишь в среднем на ${fmtDur(Math.round(-r.diff))} меньше (${r.nA} таких дней).`, "caffeine");
+  r = compare(pairs, p => p.x.lateCaf, p => p.y.bedM);
+  if(r && r.diff >= 20) add(r.diff, `После позднего кофе ты засыпаешь в среднем на ${fmtDur(Math.round(r.diff))} позже.`, "caffeine");
+  // экраны после отбоя-часа → сон
+  r = compare(pairs, p => p.x.lateScreen == null ? null : p.x.lateScreen >= 20, p => p.y.sleepMin);
+  if(r && r.diff <= -20) add(-r.diff, `Когда ты сидишь в телефоне после ${settings.screensOff}, сон короче в среднем на ${fmtDur(Math.round(-r.diff))}.`, "screen");
+  r = compare(pairs, p => p.x.lateScreen == null ? null : p.x.lateScreen >= 20, p => p.y.bedM);
+  if(r && r.diff >= 20) add(r.diff, `Поздний телефон сдвигает твоё засыпание примерно на ${fmtDur(Math.round(r.diff))}.`, "screen");
+  // алкоголь → сон и энергия на следующий день
+  r = compare(pairs, p => p.x.alcohol == null ? null : p.x.alcohol > 0, p => p.y.energy);
+  if(r && r.diff <= -0.5) add(-r.diff*40, `На следующий день после алкоголя твоя энергия ниже в среднем на ${(-r.diff).toFixed(1).replace(".", ",")} балла.`, "alcohol");
+  r = compare(pairs, p => p.x.alcohol == null ? null : p.x.alcohol > 0, p => p.y.sleepMin);
+  if(r && r.diff <= -20) add(-r.diff, `После алкоголя ты спишь в среднем на ${fmtDur(Math.round(-r.diff))} меньше.`, "alcohol");
+  // сон → энергия и настроение в тот же день
+  r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= 420, x => x.energy);
+  if(r && r.diff >= 0.5) add(r.diff*40, `После ночей от 7 часов твоя энергия выше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
+  r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= 420, x => x.mood);
+  if(r && r.diff >= 0.5) add(r.diff*40, `Когда высыпаешься, настроение лучше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
+  // движение → энергия, настроение, сон
+  r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.energy);
+  if(r && r.diff >= 0.5) add(r.diff*40, `В дни, когда ты двигаешься хотя бы 20 минут, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "move");
+  r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.mood);
+  if(r && r.diff >= 0.5) add(r.diff*40, `Движение поднимает тебе настроение: в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "move");
+  r = compare(pairs, p => p.x.hasData ? p.x.major : null, p => p.y.sleepMin);
+  if(r && r.diff >= 20) add(r.diff, `После тренировок ты спишь на ${fmtDur(Math.round(r.diff))} дольше.`, "move");
+  // шаги → настроение
+  r = compare(days, x => x.steps == null ? null : x.steps >= settings.stepsGoal, x => x.mood);
+  if(r && r.diff >= 0.5) add(r.diff*40, `В дни, когда ты проходишь свою норму шагов, настроение лучше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "steps");
+  // много развлечений в телефоне → настроение
+  r = compare(days, x => x.screenEnt == null ? null : x.screenEnt > settings.screenLimit, x => x.mood);
+  if(r && r.diff <= -0.5) add(-r.diff*40, `В дни, когда развлечений в телефоне больше лимита, настроение ниже на ${(-r.diff).toFixed(1).replace(".", ",")} балла.`, "screen");
+  // вода → энергия
+  r = compare(days, x => x.water == null ? null : x.water >= settings.waterGoal * 0.8, x => x.energy);
+  if(r && r.diff >= 0.5) add(r.diff*40, `Когда ты пьёшь достаточно воды, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "water");
+  // режим: разброс времени отбоя → энергия
+  const beds = days.filter(x => x.bedM != null).map(x => x.bedM);
+  if(beds.length >= 5){ const avg = mean(beds), sd = Math.sqrt(mean(beds.map(b => (b-avg)**2))); if(sd >= 50) add(sd/2, `Время отбоя у тебя гуляет примерно на ±${fmtDur(Math.round(sd))}. Ровный режим — один из самых простых способов высыпаться.`, "rhythm"); }
+  return out.sort((a,b) => b.score - a.score);
+}
+function streaks(){
+  const days = history(60).reverse(); // сегодня первым
+  const run = (test, skipToday) => { let n = 0; for(let i = skipToday ? 1 : 0; i < days.length; i++){ const v = test(days[i]); if(v === null) { if(n) break; else continue; } if(!v) break; n++; } return n; };
+  const out = [];
+  const s1 = run(x => x.hasData ? x.moveMin >= 20 : null, true); if(s1 >= 2) out.push(`${s1} ${plural(s1,"день","дня","дней")} подряд с движением от 20 минут`);
+  const s2 = run(x => x.sleepMin == null ? null : x.sleepMin >= 420, false); if(s2 >= 2) out.push(`${s2} ${plural(s2,"ночь","ночи","ночей")} подряд от 7 часов сна`);
+  const s3 = run(x => x.water == null ? null : x.water >= settings.waterGoal, true); if(s3 >= 2) out.push(`${s3} ${plural(s3,"день","дня","дней")} подряд норма воды`);
+  const s4 = run(x => x.screenEnt == null ? null : x.screenEnt <= settings.screenLimit, true); if(s4 >= 2) out.push(`${s4} ${plural(s4,"день","дня","дней")} подряд экраны в пределах лимита`);
+  const s5 = run(x => x.past || x.reviewed ? x.reviewed : null, true); if(s5 >= 2) out.push(`${s5} ${plural(s5,"разбор","разбора","разборов")} дня подряд`);
+  return out;
+}
+// что ты пропускаешь: по типу, дню недели и времени суток
+const partOf = t => !t ? "без времени" : t < "12:00" ? "утром" : t < "17:00" ? "днём" : "вечером";
+function itemHistory(weeks){
+  const out = [], base = mondayOf(new Date()), today = new Date(); today.setHours(0,0,0,0);
+  for(let k = 0; k <= weeks; k++){ const key = iso(addDays(base, -7*k)), w = getWeek(key);
+    for(const i of w.items){ const dt = addDays(new Date(key+"T00:00:00"), i.day); if(dt >= today) continue;
+      const lg = Object.values(w.days||{}).flatMap(x => x.log||[]).find(e => e.plan === i.id);
+      out.push({cat:i.cat, dow:i.day, time:(lg && lg.time) || i.time || "", done:!!i.done, title:i.t}); } }
+  return out;
+}
+function skipPatterns(){
+  const h = itemHistory(6).filter(x => goalCats().includes(x.cat) || MAJOR.has(x.cat));
+  const groups = {};
+  for(const x of h){ const k = x.cat + "|" + x.dow + "|" + partOf(x.time); (groups[k] = groups[k] || {cat:x.cat, dow:x.dow, part:partOf(x.time), n:0, miss:0}); groups[k].n++; if(!x.done) groups[k].miss++; }
+  return Object.values(groups).filter(g => g.n >= 3 && g.miss / g.n >= 0.6).sort((a,b) => b.miss - a.miss)
+    .map(g => ({...g, text:`${CATS[g.cat].full} ${DACC[g.dow]}${g.part !== "без времени" ? " " + g.part : ""}: пропущено ${g.miss} из ${g.n}.`}));
+}
+// когда ты реально это делаешь: лучший день недели и типичный час
+function bestSlotFor(cat){
+  const h = itemHistory(8).filter(x => x.cat === cat);
+  const logs = []; const base = mondayOf(new Date());
+  for(let k = 0; k <= 8; k++){ const key = iso(addDays(base, -7*k)), w = getWeek(key);
+    for(const [d, day] of Object.entries(w.days||{})) for(const e of day.log||[]) if(e.type === cat && !e.plan && e.time) logs.push({dow:+d, time:e.time, done:true}); }
+  const all = h.concat(logs); const done = all.filter(x => x.done);
+  if(done.length < 3) return null;
+  const byDow = Array.from({length:7}, (_, d) => { const xs = all.filter(x => x.dow === d); const ok = xs.filter(x => x.done).length; return {d, rate: xs.length ? (ok + 0.5)/(xs.length + 1) : 0.4, n:xs.length}; });
+  const times = done.filter(x => x.time).map(x => toMinHM(x.time)).sort((a,b)=>a-b);
+  return {byDow, time: times.length >= 2 ? fromMin(Math.round(times[Math.floor(times.length/2)]/15)*15) : null, n:done.length};
+}
+function weekNumbers(key){
+  const w = getWeek(key), base = new Date(key+"T00:00:00"), recs = [];
+  for(let d=0; d<7; d++){ const dt = addDays(base, d); if(dt > new Date()) break; recs.push(dayRecord(dt)); }
+  const val = f => { const xs = recs.map(f).filter(v => v != null); return xs.length ? mean(xs) : null; };
+  return {done: w.items.filter(i=>i.done).length, planned: w.items.length, move: recs.reduce((s,x)=>s+(x.moveMin||0),0), sleep: val(x=>x.sleepMin), screen: val(x=>x.screenEnt), steps: val(x=>x.steps), energy: val(x=>x.energy), mood: val(x=>x.mood), days: recs.length};
+}
+function weeklyReport(){
+  const ck = curKey(), pk = iso(addDays(new Date(ck+"T00:00:00"), -7));
+  const a = weekNumbers(ck), b = weekNumbers(pk), gs = goalState(getWeek(ck), 7);
+  const L = [];
+  L.push(`Неделя: сделано ${a.done} из ${a.planned} запланированного, движения ${fmtDur(a.move)}${b.planned ? ` (прошлая: ${b.done} из ${b.planned}, ${fmtDur(b.move)})` : ""}.`);
+  const cmp = (x, y, f, better) => x == null || y == null ? "" : Math.abs(x - y) < (better === "sleep" ? 10 : 0.3) ? "" : (x > y ? "больше" : "меньше");
+  if(a.sleep != null) L.push(`Сон в среднем ${fmtDur(Math.round(a.sleep))}${b.sleep != null && Math.abs(a.sleep - b.sleep) >= 10 ? ` — на ${fmtDur(Math.round(Math.abs(a.sleep-b.sleep)))} ${a.sleep > b.sleep ? "больше" : "меньше"}, чем неделей раньше` : ""}.`);
+  if(a.screen != null) L.push(`Развлечения в телефоне: ${fmtDur(Math.round(a.screen))} в день${b.screen != null && Math.abs(a.screen-b.screen) >= 10 ? ` (${a.screen < b.screen ? "меньше" : "больше"} на ${fmtDur(Math.round(Math.abs(a.screen-b.screen)))})` : ""}.`);
+  if(a.steps != null) L.push(`Шагов в среднем ${fmtNum(Math.round(a.steps))} в день.`);
+  const good = goalCats().filter(c => gs[c].done >= gs[c].goal).map(c => CATS[c].full.toLowerCase());
+  const miss = goalCats().filter(c => gs[c].done < gs[c].goal).map(c => `${CATS[c].full.toLowerCase()} ${gs[c].done}/${gs[c].goal}`);
+  if(good.length) L.push(`Получилось: ${good.join(", ")}.`);
+  if(miss.length) L.push(`Не дотянул: ${miss.join(", ")}.`);
+  const st = streaks(); if(st.length) L.push(`Серии: ${st.join("; ")}.`);
+  const ins = personalInsights().slice(0, 2); if(ins.length) L.push("Что я заметил:\n" + ins.map(x => "• " + x.text).join("\n"));
+  const sk = skipPatterns().slice(0, 2); if(sk.length) L.push("Чаще всего срывается:\n" + sk.map(x => "• " + x.text).join("\n"));
+  return L.join("\n");
+}
+
+/* ---------- stage 3: plan that fits the real you ---------- */
+// лучший день для занятия с учётом того, когда ты его реально делаешь
+function smartDay(key, cat, from, avoid, load, wObj){
+  const bs = bestSlotFor(cat), w = wObj || getWeek(key);
+  let best = -1, bestScore = -1e9;
+  for(let d = from; d < 7; d++){
+    if(d === avoid || w.items.some(i => i.day===d && i.cat===cat)) continue;
+    let sc = -(load ? load[d] : w.items.filter(i=>i.day===d).length) * 1.2;
+    if(w.items.some(i => i.cat === cat && Math.abs(i.day - d) === 1)) sc -= 2;
+    if(MAJOR.has(cat) && w.items.some(i => i.day === d && MAJOR.has(i.cat))) sc -= 3;
+    if(cat === "swim" && d < 5) sc -= 1;
+    if(key === curKey() && d === todayI()) sc -= new Date().getHours() >= 19 ? 5 : new Date().getHours() >= 12 ? 2 : 0;
+    if(bs) sc += (bs.byDow[d].rate - 0.5) * 6;
+    if(sc > bestScore){ bestScore = sc; best = d; }
+  }
+  return best;
+}
+function learnedTime(cat, d, fallback){ const bs = bestSlotFor(cat); if(bs && bs.time && !busyAt(d, bs.time)) return bs.time; return fallback; }
+// подстройка целей по последним двум неделям
+function goalSuggestions(){
+  const out = [], base = mondayOf(new Date());
+  const wk = k => goalState(getWeek(iso(addDays(base, -7*k))), 7);
+  const w1 = wk(1), w2 = wk(2);
+  for(const c of goalCats()){
+    const g = settings.goals[c], a = w1[c] ? w1[c].done : 0, b = w2[c] ? w2[c].done : 0;
+    if(a >= g + 1 && b >= g + 1 && g < 7) out.push({c, to:g+1, text:`${CATS[c].full}: две недели подряд ты делаешь больше цели (${b} и ${a} при цели ${g}). Поднять цель до ${g+1}?`});
+    else if(a <= g - 2 && b <= g - 2 && g > 1) out.push({c, to:g-1, text:`${CATS[c].full}: две недели подряд получается ${b} и ${a} при цели ${g}. Может, сделать цель реалистичнее — ${g-1}? Лучше стабильно, чем идеально.`});
+  }
+  return out;
+}
+function postWeeklyReport(){
+  bot(weeklyReport(), [act("Составить план на следующую неделю", {op:"planNext"}), act("Открыть итоги", {op:"tab", tab:"stats"})], {kind:"report"});
+  for(const g of goalSuggestions().slice(0, 2)) bot(g.text, [act(g.to > settings.goals[g.c] ? "Поднять" : "Снизить", {op:"goal", c:g.c, to:g.to}), act("Оставить", {op:"keep"})]);
+}
+
+function renderPatterns(){
+  const el = $("patternsCard"); if(!el) return;
+  const ins = personalInsights(), st = streaks(), sk = skipPatterns();
+  const dataDays = history(28).filter(x => x.hasData).length;
+  el.innerHTML = `<h2>Что я про тебя понял</h2>` +
+    (ins.length ? `<ul class="list">${ins.slice(0,5).map(x => `<li>${esc(x.text)}</li>`).join("")}</ul>`
+      : `<p class="note">Для личных выводов нужно 1–2 недели данных: отмечай энергию и настроение, пиши в чат, что делал. Сейчас дней с данными: ${dataDays} из 14.</p><div class="bar"><div class="dn" style="width:${Math.min(100, dataDays/14*100)}%;background:var(--accent)"></div></div>`) +
+    (st.length ? `<span class="label">Серии</span><ul class="list tips">${st.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "") +
+    (sk.length ? `<span class="label">Что чаще срывается</span><ul class="list bad">${sk.slice(0,4).map(x => `<li>${esc(x.text)}</li>`).join("")}</ul><p class="note">При планировании я ставлю такие занятия на дни и часы, когда у тебя получается лучше.</p>` : "") +
+    `<div class="tools"><button class="btn primary" data-report="1">Отчёт недели в чат</button></div>`;
+}
+function maybeWeeklyReport(){
+  const h = new Date().getHours(), ck = curKey();
+  if(todayI() === 6 && h >= 18 && LS.get("reportPosted") !== ck){ LS.set("reportPosted", ck); postWeeklyReport(); return true; }
+  return false;
+}
 /* ---------- message entry point ---------- */
 let ruleMiss = false;
 function handleUser(text, pushMe){
   text = (text||"").trim(); if(!text) return;
+  ciNoteAnswer();
   if(pushMe !== false) pushMsg({who:"me", text});
   try{ respond(text); }catch(err){ console.error(err); bot("Что-то пошло не так, попробуй написать иначе."); }
   render(); scrollChat();
@@ -1460,6 +1699,7 @@ function busyAt(d, hm){ const r = getRoutine(); if(!r.work || !isWorkDay(d) || r
 // time for a planned activity that respects work hours and training preference
 function smartTime(cat, d, fallback){
   const r = getRoutine();
+  if(CATS[cat] && CATS[cat].move){ const lt = learnedTime(cat, d, null); if(lt) return lt; }
   const major = MAJOR.has(cat);
   if(major && r.train && r.train !== "any" && isWorkDay(d)){
     if(r.train === "morning") return r.trainTime || fromMin(toMinHM(wakeFor(d)) + 30);
@@ -2072,7 +2312,7 @@ window.__ritmNative = {
       LS.set("health", health); render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); if(tab === "chat" && !maybeWeeklyReport()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -2110,7 +2350,7 @@ document.addEventListener("visibilitychange", () => { if(!document.hidden){ dism
 
 render();
 pullNative();
-if(tab === "chat" && getChat().length) { askRoutine(); render(); }
+if(tab === "chat" && getChat().length) { if(!maybeWeeklyReport()) askRoutine(); render(); }
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
