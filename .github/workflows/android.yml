@@ -33,7 +33,18 @@ jobs:
           cp -r icons android/app/src/main/assets/www/
 
       - name: Собрать APK
-        run: gradle -p android assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle -p android assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Сохранить хвост лога при сбое
+        if: failure()
+        run: |
+          grep -iE "error|e: |wrong|could not|unresolved|minSdk|incompatible|metadata|manifest" build.log | head -60 > /tmp/log.txt || true
+          echo "---- tail ----" >> /tmp/log.txt; tail -40 build.log >> /tmp/log.txt || true
+          git config user.name ci; git config user.email ci@example.com
+          git checkout --orphan ci-log; git rm -rf . -q
+          cp /tmp/log.txt log.txt; git add log.txt; git commit -qm "build log"; git push -f origin ci-log
 
       - name: Переименовать
         run: cp android/app/build/outputs/apk/release/app-release.apk ritm.apk
