@@ -171,6 +171,14 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface fun refreshHealth() = this@MainActivity.refreshHealth()
 
+        @JavascriptInterface fun openAppSettings() = runOnUiThread {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+            } catch (e: ActivityNotFoundException) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+        }
+
+        @JavascriptInterface fun androidVersion(): Int = Build.VERSION.SDK_INT
+
         @JavascriptInterface fun requestNotifications() = runOnUiThread {
             if (Build.VERSION.SDK_INT >= 33) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             else js("window.__ritmNative && window.__ritmNative.onNotifPermission(" +

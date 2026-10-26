@@ -78,7 +78,10 @@ object HealthReader {
             for (key in est.keys()) if (!sleep.has(key)) sleep.put(key, est.getJSONObject(key))
         }
 
+        val apps = if (usage) try { AppUsageReader.read(ctx) } catch (e: Exception) { JSONObject() } else JSONObject()
+
         return JSONObject()
+            .put("apps", apps)
             .put("steps", steps)
             .put("sleep", sleep)
             .put("stepsGranted", STEPS in granted)

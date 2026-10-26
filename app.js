@@ -67,7 +67,7 @@ const persistSettings = () => LS.set("settings", settings);
 /* ---------- phone data: steps & sleep (Android app only) ---------- */
 const NATIVE = window.RitmNative || null;
 let health = LS.get("health") || {steps:{}, sleep:{}};
-const fmtDur = m => `${Math.floor(m/60)} ч ${pad(m%60)} мин`;
+const fmtDur = m => { m = Math.round(m); return m < 60 ? `${m} мин` : (m % 60 ? `${Math.floor(m/60)} ч ${pad(m%60)} мин` : `${m/60} ч`); };
 const fmtNum = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
 const dateOf = (key, d) => iso(addDays(new Date(key+"T00:00:00"), d));
 function dayLog(ds){ const d = new Date(ds+"T00:00:00"); const w = LS.get("w:"+iso(mondayOf(d))); return (w && w.days && w.days[(d.getDay()+6)%7]) || {}; }
@@ -236,6 +236,7 @@ function renderToday(){
   const C = 2*Math.PI*30;
   $("todayHero").innerHTML = `<div class="ring"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="36" cy="36" r="30" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-frac)}"/></svg><span class="rv">${done}/${total}</span></div><div class="ht"><span class="big">${msg}</span><span class="note">Нажмите на кружок, когда сделаете дело</span></div>`;
   renderBody(ck, ti);
+  renderScreenCard(ck, ti);
   renderJournal();
   const rvDone = !!((w.days[ti]||{}).review||{}).done, hr = new Date().getHours();
   $("reviewCta").hidden = !(hr >= 17 || rvDone);
@@ -304,7 +305,8 @@ function renderHealthCard(){
   card.innerHTML = `<h2>Шаги и сон</h2>
     <p class="note">Шаги и сон приходят из Health Connect: туда их пишут Google Fit, Samsung Health, часы и трекеры сна. Если трекера сна нет, приложение примерно определит сон по тому, когда вы перестаёте и начинаете пользоваться телефоном.</p>
     <div class="status"><span class="rl"><b>Health Connect</b><span class="note">шаги и сон</span></span>${hcLine}</div>
-    <div class="status"><span class="rl"><b>Сон по экрану телефона</b><span class="note">если нет трекера сна</span></span>${health.usage ? `<span class="ok">включено</span>` : `<button class="btn" data-native="usage">Разрешить</button>`}</div>
+    <div class="status"><span class="rl"><b>История использования</b><span class="note">экранное время по приложениям и сон, если нет трекера</span></span>${health.usage ? `<span class="ok">включено</span>` : ""}</div>
+    ${health.usage ? "" : usageHelpHtml()}
     <div class="field"><span class="label">Цель по шагам в день</span><div class="stepper"><button data-steps="-1000" aria-label="Меньше">−</button><span class="num" style="min-width:4em;text-align:center">${fmtNum(settings.stepsGoal)}</span><button data-steps="1000" aria-label="Больше">+</button></div></div>`;
 }
 
@@ -404,6 +406,7 @@ function renderStats(){
   if(pw.items.length) ins.push(["ok", `К этому дню на прошлой неделе было сделано ${donePrev}, сейчас ${doneNow}.`]);
   const games = w.items.filter(i=>isScreen(i.cat)), late = games.filter(i=>i.time && i.time >= settings.screensOff);
   if(late.length) ins.push(["warn", `Игры после ${settings.screensOff} стоят ${late.length} ${plural(late.length,"раз","раза","раз")}. Это мешает заснуть; лучше сдвинуть раньше.`]);
+  if(NATIVE) for(const x of weekScreenInsights(ck, ti)) ins.push(x);
   $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + ins.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("");
 }
 
@@ -503,6 +506,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("button"); if(!t) return;
   const ds = t.dataset;
   if(journalClick(ds, t)) return;
+  if(appsClick(ds)) return;
   if(actsClick(ds)) return;
   if(tab==="review" && reviewClick(ds)) return;
   if(ds.openreview){ openReview(); return; }
@@ -514,7 +518,7 @@ document.addEventListener("click", e => {
   else if(ds.hab){ const k = curKey(); mutate(k, w => { const d = todayI(); const cur = ds.hab==="sleep" ? sleepOk(w,k,d) : !!(w.days[d]||{})[ds.hab]; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.hab] = !cur; }); }
   else if(ds.sc){ mutate(curKey(), w => { const d = todayI(), v = +ds.v; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.sc] = w.days[d][ds.sc]===v ? null : v; }); }
   else if(ds.light){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{}), light:true}; }); toast("Отмечено: дневной свет"); }
-  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
+  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
   else if(ds.steps){ settings.stepsGoal = Math.max(2000, Math.min(20000, settings.stepsGoal + +ds.steps)); persistSettings(); render(); }
   else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"unplug", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
   else if(ds.dismiss){ dismissed.add(ds.dismiss); render(); }
@@ -625,6 +629,90 @@ function openIntro(){
 
 let toastT = null;
 function toast(msg){ const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
+
+/* ---------- screen time by app (Android app, usage access) ---------- */
+const APP_GROUPS = {
+  video:{n:"Видео", ent:true, c:"--c-games"}, series:{n:"Фильмы и сериалы", ent:true, c:"--c-games"}, gaming:{n:"Игры", ent:true, c:"--c-games"},
+  feeds:{n:"Соцсети", ent:true, c:"--c-social"}, chat:{n:"Мессенджеры", c:"--c-pool"}, browser:{n:"Браузер", c:"--c-other"},
+  music:{n:"Музыка и подкасты", c:"--c-fun"}, work:{n:"Работа и учёба", c:"--c-offline"}, health:{n:"Здоровье и спорт", c:"--c-walk"},
+  maps:{n:"Карты и такси", c:"--c-mobility"}, shop:{n:"Покупки", c:"--c-fun"}, other:{n:"Другое", c:"--c-other"}
+};
+const KNOWN_APPS = {
+  "com.google.android.youtube":"video","app.revanced.android.youtube":"video","com.zhiliaoapp.musically":"video","com.ss.android.ugc.trill":"video","tv.twitch.android.app":"video","com.vk.vkvideo":"video","ru.rutube.app":"video","com.google.android.apps.youtube.kids":"video",
+  "com.netflix.mediaclient":"series","ru.kinopoisk":"series","ru.ivi.client":"series","ru.more.play":"series","ru.okko.android":"series","com.disney.disneyplus":"series","com.amazon.avod.thirdpartyclient":"series","com.hbo.hbonow":"series","com.wbd.stream":"series",
+  "com.instagram.android":"feeds","com.instagram.barcelona":"feeds","com.vkontakte.android":"feeds","com.facebook.katana":"feeds","com.twitter.android":"feeds","com.reddit.frontpage":"feeds","com.pinterest":"feeds","ru.ok.android":"feeds","com.snapchat.android":"feeds","ru.zen.android":"feeds","com.linkedin.android":"feeds","com.threads.android":"feeds",
+  "org.telegram.messenger":"chat","org.telegram.messenger.web":"chat","org.thunderdog.challegram":"chat","com.whatsapp":"chat","com.viber.voip":"chat","com.discord":"chat","com.google.android.apps.messaging":"chat","ru.oneme.app":"chat","com.vk.im":"chat","com.facebook.orca":"chat","org.thoughtcrime.securesms":"chat",
+  "com.android.chrome":"browser","org.mozilla.firefox":"browser","com.yandex.browser":"browser","com.opera.browser":"browser","com.microsoft.emmx":"browser","com.brave.browser":"browser","com.sec.android.app.sbrowser":"browser","com.heytap.browser":"browser",
+  "com.spotify.music":"music","ru.yandex.music":"music","com.google.android.apps.youtube.music":"music","com.apple.android.music":"music","com.soundcloud.android":"music","com.google.android.apps.podcasts":"music",
+  "com.google.android.apps.maps":"maps","ru.yandex.yandexmaps":"maps","ru.yandex.taxi":"maps","com.ubercab":"maps","ru.yandex.yandexnavi":"maps","com.waze":"maps",
+  "com.google.android.gm":"work","com.microsoft.office.outlook":"work","com.Slack":"work","com.slack":"work","com.microsoft.teams":"work","notion.id":"work","com.google.android.apps.docs":"work","com.google.android.calendar":"work","us.zoom.videomeetings":"work","com.duolingo":"work","com.google.android.keep":"work",
+  "com.google.android.apps.fitness":"health","com.sec.android.app.shealth":"health","com.strava":"health","com.heytap.health":"health","com.oplus.health":"health",
+  "com.wildberries.ru":"shop","ru.ozon.app.android":"shop","com.avito.android":"shop","com.alibaba.aliexpresshd":"shop","com.amazon.mShop.android.shopping":"shop"
+};
+const CAT_MAP = {0:"gaming", 1:"music", 2:"video", 3:"other", 4:"feeds", 5:"feeds", 6:"maps", 7:"work"};
+const appGroup = a => (LS.get("appTypes")||{})[a.p] || KNOWN_APPS[a.p] || CAT_MAP[a.c] || "other";
+const appsFor = ds => (health.apps && health.apps[ds]) || null;
+const offHour = () => { const [h,m] = settings.screensOff.split(":").map(Number); return h + m/60; };
+function phoneDay(ds){
+  const d = appsFor(ds); if(!d) return null;
+  const by = {}; let ent = 0;
+  const apps = (d.apps||[]).map(a => ({...a, grp:appGroup(a)}));
+  for(const a of apps){ by[a.grp] = (by[a.grp]||0) + a.m; if(APP_GROUPS[a.grp] && APP_GROUPS[a.grp].ent) ent += a.m; }
+  const off = offHour(), hrs = d.hours || [];
+  let late = 0; for(let h=0; h<24; h++){ const v = hrs[h]||0; if(h+1 <= off) continue; late += h >= off ? v : v * (h+1-off); }
+  return {total:d.total||0, pickups:d.pickups||0, ent, by, apps, late:Math.round(late)};
+}
+function chooseAppGroup(a){
+  openSheet(`<h2>${esc(a.l)}: что это за приложение?</h2><p class="note">От этого зависит, считаю ли я его развлечением.</p>
+    <div class="chips" id="agPick">${Object.entries(APP_GROUPS).map(([k,g]) => `<button type="button" class="chip ${appGroup(a)===k?"on":""}" data-ag="${k}"><i style="background:var(${g.c})"></i>${g.n}</button>`).join("")}</div>
+    <div class="tools"><button class="btn" id="agCancel">Отмена</button></div>`);
+  $("agPick").onclick = e => { const b = e.target.closest("[data-ag]"); if(!b) return; const m = LS.get("appTypes")||{}; m[a.p] = b.dataset.ag; LS.set("appTypes", m); closeSheet(); render(); toast("Запомнил"); };
+  $("agCancel").onclick = closeSheet;
+}
+function usageHelpHtml(){
+  return `<div class="help"><b>Если переключатель серый или написано «Ограниченная настройка»</b>
+    <ol><li>Нажмите «Настройки приложения» ниже.</li><li>В правом верхнем углу нажмите <b>⋮</b> → <b>«Разрешить ограниченные настройки»</b> и подтвердите.</li><li>Вернитесь сюда и снова нажмите «Разрешить».</li></ol>
+    <span class="note">Если пункта в меню ⋮ нет, сначала один раз попробуйте включить переключатель, закройте предупреждение, и пункт появится. Так Android защищает приложения, установленные не из Google Play.</span>
+    <div class="tools"><button class="btn primary" data-native="usage">Разрешить</button><button class="btn" data-native="appsettings">Настройки приложения</button></div></div>`;
+}
+let appsShowAll = false;
+function renderScreenCard(ck, ti){
+  const card = $("screenCard"); if(!card) return;
+  if(!NATIVE){ card.hidden = true; return; }
+  card.hidden = false;
+  if(!health.usage){ card.innerHTML = `<h2>Экранное время</h2><p class="note">Разрешите доступ к истории использования, и я буду видеть, сколько времени уходит на каждое приложение, и учитывать это в советах.</p>${usageHelpHtml()}`; return; }
+  const pd = phoneDay(dateOf(ck, ti));
+  if(!pd){ card.innerHTML = `<h2>Экранное время</h2><p class="note">Данных за сегодня пока нет. Нажмите «Обновить» в блоке шагов и сна.</p>`; return; }
+  const lim = settings.screenLimit, list = appsShowAll ? pd.apps : pd.apps.slice(0, 5);
+  card.innerHTML = `<div class="bhead"><h2>Экранное время</h2><span class="note">${pd.pickups} ${plural(pd.pickups,"разблокировка","разблокировки","разблокировок")}</span></div>
+    <div class="metrics"><div class="metric"><span class="mv">${fmtDur(pd.total)}</span><span class="mk">телефон сегодня</span></div>
+      <div class="metric"><span class="mv">${fmtDur(pd.ent)}</span><span class="mk">развлечения из ${fmtDur(lim)}</span><div class="bar"><div class="dn" style="width:${Math.min(100, pd.ent/lim*100)}%;background:var(${pd.ent > lim ? "--warn" : "--c-games"})"></div></div></div></div>
+    ${pd.late ? `<p class="note">После ${settings.screensOff}: ${pd.late} мин</p>` : ""}
+    <div class="loglist">${list.map(a => `<div class="lrow"><span class="ldot" style="background:var(${(APP_GROUPS[a.grp]||APP_GROUPS.other).c})"></span><span class="lt">${esc(a.l)}<small>${fmtDur(a.m)}</small></span><button class="chip" data-app="${esc(a.p)}">${(APP_GROUPS[a.grp]||APP_GROUPS.other).n}</button></div>`).join("")}
+    ${pd.apps.length > 5 && !appsShowAll ? `<button class="btn" data-appsall="1">Все приложения (${pd.apps.length})</button>` : ""}</div>
+    <p class="note">Нажмите на тип приложения, если я определил его неверно.</p>`;
+}
+function appsClick(ds){
+  if(ds.app){ const ck = curKey(), pd = phoneDay(dateOf(ck, todayI())); const a = pd && pd.apps.find(x=>x.p===ds.app); if(a) chooseAppGroup(a); return true; }
+  if(ds.appsall){ appsShowAll = true; render(); return true; }
+  return false;
+}
+function weekScreenInsights(ck, ti){
+  const out = [], days = [], prev = [];
+  for(let d=0; d<=ti; d++){ const p = phoneDay(dateOf(ck,d)); if(p && (d < ti || p.total > 0)) days.push(p); }
+  for(let d=0; d<7; d++){ const p = phoneDay(dateOf(iso(addDays(new Date(ck+"T00:00:00"),-7)), d)); if(p) prev.push(p); }
+  if(!days.length) return out;
+  const avg = a => a.reduce((x,y)=>x+y,0)/a.length;
+  const tot = avg(days.map(p=>p.total)), ent = avg(days.map(p=>p.ent)), pick = avg(days.map(p=>p.pickups)), late = avg(days.map(p=>p.late));
+  out.push([ent > settings.screenLimit ? "warn" : "ok", `Телефон в среднем ${fmtDur(Math.round(tot))} в день, из них развлечения ${fmtDur(Math.round(ent))} при лимите ${fmtDur(settings.screenLimit)}.`]);
+  const agg = {}; for(const p of days) for(const a of p.apps) if(APP_GROUPS[a.grp] && APP_GROUPS[a.grp].ent) agg[a.l] = (agg[a.l]||0) + a.m;
+  const top = Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  if(top.length) out.push(["sun", `Больше всего времени в развлечениях: ${top.map(([l,m]) => `${l} (${fmtDur(Math.round(m/days.length))} в день)`).join(", ")}.`]);
+  if(pick >= 60) out.push(["warn", `В среднем ${Math.round(pick)} разблокировок в день. Отключите уведомления у неважных приложений: каждое тянет взять телефон.`]);
+  if(late >= 20) out.push(["warn", `После ${settings.screensOff} в среднем ${Math.round(late)} минут в телефоне. Это сдвигает засыпание.`]);
+  if(prev.length >= 3){ const pe = avg(prev.map(p=>p.ent)); const df = ent - pe; if(Math.abs(df) >= 15) out.push([df < 0 ? "ok" : "warn", `Развлечений ${df < 0 ? "меньше" : "больше"}, чем на прошлой неделе, на ${fmtDur(Math.round(Math.abs(df)))} в день.`]); }
+  return out;
+}
 
 /* ---------- journal: free-text log, intake, own activities ---------- */
 function typeChipsHtml(cur, filter){
@@ -844,7 +932,10 @@ function analyzeDay(rv){
   const L = intakeOf(h.log);
   const undone = its.filter(i=>!isScreen(i.cat) && !(rv.entries[i.id] && rv.entries[i.id].done));
   const moveMin = doneIts.filter(i=>MOVE(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>MOVE(x.cat)).reduce((s,x)=>s+(x.min||0),0) + L.move;
-  const screenMin = doneIts.filter(i=>isScreen(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>isScreen(x.cat)).reduce((s,x)=>s+(x.min||0),0) + L.screen;
+  const PD = phoneDay(ds);
+  const otherDevice = c => c === "gaming" || c === "series";
+  const screenMin = PD ? PD.ent + doneIts.filter(i=>otherDevice(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + (h.log||[]).filter(e=>otherDevice(e.type) && !e.plan).reduce((s,e)=>s+(e.min||0),0)
+    : doneIts.filter(i=>isScreen(i.cat)).reduce((s,i)=>s+(rv.entries[i.id].min||0),0) + rv.extras.filter(x=>isScreen(x.cat)).reduce((s,x)=>s+(x.min||0),0) + L.screen;
   const steps = stepsFor(ds) ?? rv.steps;
   const sl = sleepFor(ds);
   const sleepMin = sl ? sl.min : (rv.sleepH != null ? rv.sleepH*60 : null);
@@ -873,7 +964,13 @@ function analyzeDay(rv){
   if(L.protein >= pg) good.push(`Белка ${L.protein} г: цель закрыта.`);
   if(L.mg > settings.caffeineMax) bad.push(`Кофеина около ${L.mg} мг: больше безопасных ${settings.caffeineMax} мг в день.`);
   if(L.sweets >= 3) bad.push("Много сладкого за день.");
-  if(L.lateScreen) bad.push(`Экраны после ${settings.screensOff}: ${L.lateScreen} мин.`);
+  const lateMin = Math.max(L.lateScreen, PD ? PD.late : 0);
+  if(lateMin >= 10) bad.push(`Экраны после ${settings.screensOff}: ${lateMin} мин.`);
+  if(PD){
+    if(PD.total >= 300) bad.push(`Телефон ${fmtDur(PD.total)} за день.`); else if(PD.total <= 120 && new Date().getHours() >= 18) good.push(`Телефон всего ${fmtDur(PD.total)} за день.`);
+    if(PD.pickups >= 80) bad.push(`${PD.pickups} разблокировок телефона.`);
+  }
+  const topEnt = PD ? PD.apps.filter(a => APP_GROUPS[a.grp] && APP_GROUPS[a.grp].ent)[0] : null;
   if(h.light) good.push("Был дневной свет. Это помогает и бодрости днём, и сну ночью.");
   if(sleepMin != null){ if(sleepMin >= 420) good.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: в норме.`); else if(sleepMin < 390) bad.push(`Сон прошлой ночью ${fmtDur(sleepMin)}: меньше нормы в 7–9 часов.`); }
   if(its.length && !undone.length) good.push("Все дела из плана выполнены.");
@@ -894,7 +991,10 @@ function analyzeDay(rv){
   if(L.water === 0) tips.push("Записывайте воду кнопкой «+ стакан» в журнале: так я смогу подсказать, хватает ли её.");
   if((did("strength") || did("sport")) && L.protein < pg*0.6) tips.push("В день силовой белок помогает восстановлению: творог, яйца, мясо, рыба или протеин.");
   if(hadAlcohol) tips.push("Если завтра хочется отдохнуть, попробуйте без алкоголя и сравните, как будете спать.");
-  if((screenMin > settings.screenLimit) || (rv.screen != null && rv.screen >= 2)) tips.push(`Ограничьте игры и Ютуб часом и заканчивайте к ${settings.screensOff}.`);
+  if(topEnt && screenMin > settings.screenLimit) tips.push(`Больше всего времени ушло на ${topEnt.l} (${fmtDur(topEnt.m)}). Поставьте на него таймер: Настройки → Цифровое благополучие → Таймеры приложений.`);
+  if(PD && PD.pickups >= 80) tips.push("Отключите уведомления у соцсетей и игр: меньше поводов брать телефон.");
+  if(lateMin >= 20) tips.push(`Включите режим «Отход ко сну» в Цифровом благополучии на ${settings.screensOff}: экран станет серым, и залипать сложнее.`);
+  else if((screenMin > settings.screenLimit) || (rv.screen != null && rv.screen >= 2)) tips.push(`Ограничьте игры и Ютуб часом и заканчивайте к ${settings.screensOff}.`);
   if(steps != null && steps < goalSteps*0.7) tips.push(`Добавьте 20–30 минут ходьбы: прогулка после ужина даёт около 2 000–3 000 шагов.`);
   if(weekMin < pace) tips.push(`За неделю пока ${weekMin} минут движения при ориентире ${pace} на сегодня (150 в неделю — рекомендация ВОЗ). Небольшие прогулки быстро закрывают разницу.`);
   if(rv.stress != null && rv.stress >= 4) tips.push("Перед сном 10 минут спокойной прогулки или медленного дыхания (вдох на 4, выдох на 6) снижают напряжение.");
@@ -1053,7 +1153,7 @@ function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.cons
 window.__ritmNative = {
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
-      health = {steps:d.steps||{}, sleep:d.sleep||{}, stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
+      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, usage:!!d.usage, at:d.at};
       LS.set("health", health); render();
     }catch(e){}
   },

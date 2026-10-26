@@ -124,3 +124,6 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;color:var(--in
 details.base summary{cursor:pointer;color:var(--accent);font-weight:600;padding:6px 0}
 details.base input{font:inherit;font-size:16px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);width:100%;margin:6px 0}
 #actBase{max-height:420px;overflow-y:auto}
+
+.help{background:var(--sun-soft);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;font-size:.9rem}
+.help ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
