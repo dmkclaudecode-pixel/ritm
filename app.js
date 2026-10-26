@@ -588,10 +588,14 @@ $("icsWeek").onclick = async () => {
   download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
 };
 
-/* ---------- умный разбор: DeepSeek как судья «дело или разговор» ---------- */
+/* ---------- умный разбор: нейросеть как судья «дело или разговор» ---------- */
 const LLM_URL = "https://api.deepseek.com/chat/completions";
+const LOCAL_MODEL_URL = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm";
 const llmCfg = () => LS.get("llm") || {};
-const llmOn = () => { const c = llmCfg(); return !!(c.on && c.key); };
+const localSize = () => { try{ return NATIVE && NATIVE.llmLocalSize ? +NATIVE.llmLocalSize() : 0; }catch(e){ return 0; } };
+const llmMode = () => llmCfg().mode === "cloud" ? "cloud" : (NATIVE && NATIVE.llmLocalAsk ? "local" : "cloud");
+const llmReady = () => llmMode() === "local" ? localSize() > 1e9 : !!llmCfg().key;
+const llmOn = () => !!(llmCfg().on && llmReady());
 let llmSeq = 0; const llmWait = {};
 function llmCall(messages, done){
   const c = llmCfg(); if(!c.key) return done(null, "нет ключа");
@@ -602,12 +606,26 @@ function llmCall(messages, done){
   if(NATIVE && NATIVE.llmRequest) { try{ NATIVE.llmRequest(id, LLM_URL, c.key, body); }catch(e){ delete llmWait[id]; done(null, "ошибка запроса"); } }
   else fetch(LLM_URL, {method:"POST", headers:{"Content-Type":"application/json", Authorization:"Bearer " + c.key}, body}).then(async r => llmWait[id] && llmWait[id](r.status, await r.text())).catch(() => { if(llmWait[id]){ delete llmWait[id]; done(null, "нет сети"); } });
 }
+// локальная модель: одна строка-запрос, ответ парсим из свободного текста
+function llmCallLocal(prompt, done){
+  const id = ++llmSeq; const to = setTimeout(() => { if(llmWait[id]){ delete llmWait[id]; done(null, "модель не успела ответить"); } }, 120000);
+  llmWait[id] = (status, text) => { clearTimeout(to); if(status !== 200) return done(null, text || "сбой модели");
+    const m = /"?kind"?\s*[:=]\s*"?(activity|plan|chat)/i.exec(text) || /\b(activity|plan|chat)\b/i.exec(text);
+    if(!m) return done(null, "непонятный ответ модели"); const w = /"?why"?\s*[:=]\s*"([^"]{1,100})/i.exec(text);
+    done({kind: m[1].toLowerCase(), why: w ? w[1] : ""}); };
+  try{ NATIVE.llmLocalAsk(id, prompt); }catch(e){ clearTimeout(to); delete llmWait[id]; done(null, "ошибка запуска модели"); }
+}
 const LLM_SYS = "Ты проверяешь записи в дневнике привычек. Пользователь пишет боту. Реши про ПОСЛЕДНЕЕ сообщение пользователя: " +
   "activity — он сообщает, что сам сделал занятие, поел, выпил, поспал и т. п.; plan — он сообщает, что собирается сделать; " +
   "chat — разговор, эмоции, оценка, вопрос, где он находится или куда едет, действия других людей, погода, работа как обстановка («вернулся с работы», «еду на работу»). " +
   "Учитывай предыдущие реплики. Ответь только JSON: {\"kind\":\"activity|plan|chat\",\"why\":\"коротко по-русски\"}.";
 function llmJudge(text, done){
-  const ctx = getChat().slice(-8, -2).map(m => ({role: m.who === "me" ? "user" : "assistant", content: String(m.text || "").slice(0, 300)})).filter(m => m.content);
+  const hist = getChat().slice(-8, -2).filter(m => m.text);
+  if(llmMode() === "local"){
+    const ctx = hist.slice(-3).map(m => (m.who === "me" ? "Пользователь: " : "Бот: ") + String(m.text).slice(0, 150)).join("\n");
+    return llmCallLocal("<|im_start|>system\n" + LLM_SYS + "<|im_end|>\n<|im_start|>user\n" + (ctx ? "Предыдущие реплики:\n" + ctx + "\n\n" : "") + "Последнее сообщение пользователя: " + text + "<|im_end|>\n<|im_start|>assistant\n", done);
+  }
+  const ctx = hist.map(m => ({role: m.who === "me" ? "user" : "assistant", content: String(m.text || "").slice(0, 300)}));
   llmCall([{role:"system", content:LLM_SYS}, ...ctx, {role:"user", content:"Последнее сообщение пользователя: " + text}], done);
 }
 function respond(text){
@@ -615,8 +633,7 @@ function respond(text){
   if(!llmOn() || /\d/.test(text)) return;
   const L = LS.get("lastLog"); if(!L || L.at < t0) return;                       // правила ничего не записали
   llmJudge(text, (v, err) => {
-    if(!v) return;
-    if(v.kind !== "chat") return;
+    if(!v || v.kind !== "chat") return;
     const L2 = LS.get("lastLog"); if(!L2 || L2.at !== L.at) return;
     let n = 0, words = [];
     mutateQuiet(L2.key, w => { const day = w.days[L2.day]; if(!day) return; const rm = (day.log||[]).filter(r => L2.ids.includes(r.id)); n = rm.length;
@@ -628,15 +645,32 @@ function respond(text){
     bot("Поправка: «" + text + "» — это не занятие" + (v.why ? " (" + String(v.why).slice(0, 80) + ")" : "") + ". Запись убрал и запомнил.");
   });
 }
+let llmDl = null;   // {pct, err}
 function renderLlm(){
-  const c = llmCfg(); const t = $("llmToggle"); if(!t) return;
+  const c = llmCfg(), t = $("llmToggle"); if(!t) return;
+  const mode = llmMode(), canLocal = !!(NATIVE && NATIVE.llmLocalAsk), sz = localSize();
+  $("llmModeLocal").hidden = !canLocal; $("llmModeLocal").classList.toggle("primary", mode === "local"); $("llmModeCloud").classList.toggle("primary", mode === "cloud");
+  $("llmLocalBox").hidden = mode !== "local"; $("llmCloudBox").hidden = mode !== "cloud";
   if(document.activeElement !== $("llmKey")) $("llmKey").value = c.key || "";
+  $("llmDl").hidden = sz > 1e9 || !!(llmDl && !llmDl.err); $("llmDel").hidden = !(sz > 0);
+  $("llmDl").textContent = llmDl && llmDl.err ? "Повторить скачивание" : "Скачать модель (1,6 ГБ)";
+  $("llmBar").hidden = !(llmDl && !llmDl.err); $("llmBarFill").style.width = (llmDl ? llmDl.pct : 0) + "%";
   t.textContent = c.on ? "Включён" : "Выключен"; t.classList.toggle("primary", !!c.on);
+  if(mode === "local" && !(llmDl && !llmDl.err) && !$("llmNote").textContent) $("llmNote").textContent = sz > 1e9 ? "Модель скачана." : (sz > 0 ? "Скачано не полностью, нажмите «Скачать» ещё раз, докачается." : "");
 }
+function setMode(m){ const c = llmCfg(); c.mode = m; LS.set("llm", c); $("llmNote").textContent = ""; renderLlm(); }
+$("llmModeLocal").onclick = () => setMode("local"); $("llmModeCloud").onclick = () => setMode("cloud");
 $("llmKey").onchange = () => { const c = llmCfg(); c.key = $("llmKey").value.trim(); LS.set("llm", c); $("llmNote").textContent = c.key ? "Ключ сохранён." : ""; };
-$("llmToggle").onclick = () => { const c = llmCfg(); if(!c.key && !c.on){ $("llmNote").textContent = "Сначала вставьте ключ."; return; } c.on = !c.on; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено. Проверяю только то, что бот записал по тексту без цифр." : "Выключено, бот работает по правилам."; };
-$("llmTest").onclick = () => { const c = llmCfg(); c.key = $("llmKey").value.trim(); LS.set("llm", c); $("llmNote").textContent = "Проверяю…";
-  llmCall([{role:"system", content:LLM_SYS}, {role:"user", content:"Последнее сообщение пользователя: вернулся с работы"}], (v, err) => { $("llmNote").textContent = v ? "Работает. Тестовый ответ: «вернулся с работы» — " + v.kind + "." : "Не вышло: " + err + "."; }); };
+$("llmDl").onclick = () => { llmDl = {pct:0}; $("llmNote").textContent = "Скачиваю. Можно закрыть экран, но приложение лучше не выгружать."; renderLlm(); try{ NATIVE.llmLocalDownload(LOCAL_MODEL_URL); }catch(e){ llmDl = {pct:0, err:"нет доступа"}; renderLlm(); } };
+$("llmDel").onclick = () => { try{ NATIVE.llmLocalDelete(); }catch(e){} const c = llmCfg(); c.on = false; LS.set("llm", c); llmDl = null; $("llmNote").textContent = "Модель удалена."; renderLlm(); };
+$("llmToggle").onclick = () => { const c = llmCfg(); if(!c.on && !llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Сначала скачайте модель." : "Сначала вставьте ключ."; return; } c.on = !c.on; LS.set("llm", c); renderLlm(); $("llmNote").textContent = c.on ? "Включено. Проверяю только то, что бот записал по тексту без цифр." : "Выключено, бот работает по правилам."; };
+$("llmTest").onclick = () => { const c = llmCfg(); if(llmMode() === "cloud"){ c.key = $("llmKey").value.trim(); LS.set("llm", c); }
+  if(!llmReady()){ $("llmNote").textContent = llmMode() === "local" ? "Модель ещё не скачана." : "Нет ключа."; return; }
+  $("llmNote").textContent = llmMode() === "local" ? "Проверяю… первый запуск модели может занять до минуты." : "Проверяю…"; const t0 = Date.now();
+  const tests = ["вернулся с работы", "поиграл в доту час"], res = [];
+  const run = i => { if(i >= tests.length){ $("llmNote").textContent = "Готово за " + Math.round((Date.now()-t0)/1000) + " с. " + res.join("; "); return; }
+    llmJudge(tests[i], (v, err) => { res.push("«" + tests[i] + "» → " + (v ? v.kind : "сбой: " + err)); run(i + 1); }); };
+  run(0); };
 /* ---------- backup ---------- */
 function backupData(){ const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}}; for(const k of LS.keys()) if(k !== "llm") data.entries[k] = LS.get(k); return data; }
 // автокопия: раз в 7 дней, если в приложении есть что сохранять (только в Android-версии, файл попадает в «Загрузки»)
@@ -2946,6 +2980,7 @@ function suggestWalks(){
 const fmtHM = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
 
 window.__ritmNative = {
+  onLlmDl(pct, state){ if(state === 'run'){ llmDl = {pct}; } else if(state === 'done'){ llmDl = null; $('llmNote').textContent = 'Модель скачана. Нажмите «Проверить», затем «Включить».'; } else { llmDl = {pct:0, err:state.slice(6)}; $('llmNote').textContent = 'Не скачалось: ' + state.slice(6) + '. Нажмите ещё раз, докачается.'; } renderLlm(); },
   onLlm(id, status, text){ const f = llmWait[id]; if(f){ delete llmWait[id]; f(status, text); } },
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;

@@ -233,6 +233,22 @@ class MainActivity : ComponentActivity() {
             }.start()
         }
 
+        // ---- локальная модель ----
+        @JavascriptInterface fun llmLocalSize(): Long = LocalLlm.size(this@MainActivity)
+        @JavascriptInterface fun llmLocalDelete() { LocalLlm.delete(this@MainActivity) }
+        @JavascriptInterface fun llmLocalDownload(url: String) {
+            LocalLlm.download(this@MainActivity, url) { pct, state ->
+                js("window.__ritmNative && window.__ritmNative.onLlmDl($pct, ${JSONObject.quote(state)})")
+            }
+        }
+        @JavascriptInterface fun llmLocalAsk(id: Int, prompt: String) {
+            Thread {
+                var status = 200; var text = ""
+                try { text = LocalLlm.ask(this@MainActivity, prompt) } catch (e: Throwable) { status = -1; text = e.message ?: e.javaClass.simpleName }
+                js("window.__ritmNative && window.__ritmNative.onLlm($id, $status, ${JSONObject.quote(text)})")
+            }.start()
+        }
+
         @JavascriptInterface fun setCheckins(json: String) = Checkins.set(this@MainActivity, json)
         @JavascriptInterface fun setWatch(json: String) = Watcher.configure(this@MainActivity, json)
         @JavascriptInterface fun nudges(): String = Watcher.history(this@MainActivity).toString()
