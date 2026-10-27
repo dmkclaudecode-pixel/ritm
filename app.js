@@ -746,7 +746,7 @@ function openGoals(){
   };
   openSheet(`<h2>Цели</h2><p class="note">Сколько раз в неделю вы хотите каждое занятие и дневные нормы. По ним приложение считает, чего не хватает, и подбирает советы. Ноль — без цели.</p>
     <div id="gRows">${rows()}</div>
-    <div class="field"><label class="label" for="gWeight">Вес, кг <span class="note">— для нормы белка (1,4 г на кг при силовых)</span></label><input id="gWeight" type="number" min="30" max="250" inputmode="numeric" value="${settings.weight || ""}" placeholder="не указан"></div>
+    <div class="field"><label class="label" for="gWeight">Вес, кг <span class="note">— для нормы белка (1,6 г на кг при силовых, 1,2 без них)</span></label><input id="gWeight" type="number" min="30" max="250" inputmode="numeric" value="${settings.weight || ""}" placeholder="не указан"></div>
     <div class="field"><label class="label" for="gHeight">Рост, см · возраст · пол <span class="note">— для нормы калорий</span></label><div class="tools"><input id="gHeight" type="number" min="120" max="230" inputmode="numeric" value="${settings.height || ""}" placeholder="рост" style="width:5.5em"><input id="gAge" type="number" min="12" max="100" inputmode="numeric" value="${settings.age || ""}" placeholder="лет" style="width:5em"><select id="gSex"><option value="">пол</option><option value="m"${settings.sex==="m"?" selected":""}>мужской</option><option value="f"${settings.sex==="f"?" selected":""}>женский</option></select></div></div>
     <div class="field"><label class="label" for="gSleep">Сколько сна тебе нужно, ч <span class="note">— пусто: определю по самочувствию</span></label><input id="gSleep" type="number" min="3" max="12" step="0.5" inputmode="decimal" value="${settings.sleepNeed ? settings.sleepNeed/60 : ""}" placeholder="определю сам"></div>
     <div class="field"><label class="label" for="gCaf">Последний кофе до <span class="note">— сам считаю по отбою: за 9 часов до сна</span></label><input id="gCaf" type="time" value="${settings.caffeineCutoff}"></div>
@@ -875,12 +875,13 @@ function commentFor(e){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), L = intakeOf((w.days[ti]||{}).log);
   if(e.type === "caffeine"){
     if(e.time && e.time > settings.caffeineCutoff) return `Это уже после ${settings.caffeineCutoff}, может помешать заснуть. Кофеина сегодня ≈${L.mg} мг.`;
+    if(e.mg > 200) return `Это ≈${e.mg} мг за раз, а EFSA считает безопасной разовой порцией до 200 мг. Кофеина сегодня ≈${L.mg} мг.`;
     if(L.mg > settings.caffeineMax) return `Кофеина сегодня уже ≈${L.mg} мг, это больше ${settings.caffeineMax}. Дальше лучше вода или травяной чай.`;
     return `Кофеина сегодня ≈${L.mg} мг.`;
   }
   if(e.type === "water") return L.water >= settings.waterGoal ? `Норма воды выполнена: ${L.water} мл!` : `Воды сегодня ${L.water} из ${settings.waterGoal} мл.`;
   if(e.type === "protein") return `Белка сегодня ${L.protein} из ${settings.proteinGoal} г.`;
-  if(e.type === "alcohol") return "Не забудь стакан воды на каждую порцию, так сон пострадает меньше.";
+  if(e.type === "alcohol") return "Не забудь стакан воды на каждую порцию, так сон пострадает меньше. Безопасной дозы алкоголя нет (ВОЗ, 2023): чем реже, тем лучше.";
   if(e.type === "sweets") return L.sweets >= 3 ? "Сладкого сегодня уже немало, дальше лучше фрукты или орехи." : "";
   if(e.type === "meal") return "Приятного аппетита!";
   if(e.type === "sleep") return e.event === "wake" ? "Доброе утро! Хорошего дня." : "Спокойной ночи!";
@@ -1475,7 +1476,14 @@ function noteMiss(text, why){
 }
 function dropMiss(text){ const t = String(text||"").trim(); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== t && !t.includes(x.text) && !x.text.includes(t))); }
 
-const proteinFor = kg => Math.max(60, Math.min(250, Math.round(kg * 1.4 / 10) * 10));
+// DGA 2025–2030: 1,2–1,6 г/кг для взрослых; ISSN: 1,4–2,0 при тренировках. С силовыми целями берём 1,6, без них 1,2
+const proteinFor = kg => Math.max(60, Math.min(250, Math.round(kg * ((settings.goals && settings.goals.strength) >= 2 ? 1.6 : 1.2) / 10) * 10));
+(function migrateNorms(){
+  if(settings.normsV >= 2) return;
+  const old = settings.weight ? Math.max(60, Math.min(250, Math.round(settings.weight * 1.4 / 10) * 10)) : null;
+  if(old != null && settings.proteinGoal === old) settings.proteinGoal = proteinFor(settings.weight);   // норму, посчитанную автоматически, пересчитываем; ручную не трогаем
+  settings.normsV = 2; persistSettings();
+})();
 function profileStatement(s, text){
   let said = [];
   const h = /(?:^| )рост (?:у меня )?(\d{3})(?: см)?(?: |$)|(?:^| )мой рост (\d{3})/.exec(s); if(h){ const v = +(h[1]||h[2]); if(v >= 120 && v <= 230){ settings.height = v; said.push(`рост ${v} см`); } }
@@ -2339,7 +2347,7 @@ const ROUTINE_QS = [
 ROUTINE_QS.push({k:"sleepneed", q:"Сколько часов сна тебе обычно хватает, чтобы чувствовать себя нормально? У каждого своя норма: кому-то хватает 6, кому-то нужно 8. Ответь числом, например «6,5», или пропусти.",
   parse(t, r){ const m = /(\d{1,2}(?:[.,]\d)?)/.exec(t); const hv = m ? parseFloat(m[1].replace(",", ".")) : NaN; if(!(hv >= 3 && hv <= 12)) return null; settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); needCache = {t:0, v:null};
     return `Записал: тебе хватает около ${fmtDur(settings.sleepNeed)}. Буду сверять это с твоим самочувствием.`; }});
-ROUTINE_QS.push({k:"weight", q:"Сколько ты примерно весишь? Нужно, чтобы посчитать норму белка (1,4 г на кг). Можно пропустить.",
+ROUTINE_QS.push({k:"weight", q:"Сколько ты примерно весишь? Нужно, чтобы посчитать норму белка (1,2–1,6 г на кг). Можно пропустить.",
   parse(t, r){ const m = /(\d{2,3})/.exec(t); if(!m || +m[1] < 30 || +m[1] > 250) return null; return setWeight(+m[1]); }});
 function routineKnown(r){ return ROUTINE_QS.filter(q => r.asked[q.k]).length; }
 function nextRoutineQ(r){ return ROUTINE_QS.find(q => !r.asked[q.k]); }
