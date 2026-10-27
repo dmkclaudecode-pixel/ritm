@@ -329,6 +329,7 @@ function renderToday(){
   else msg = `Осталось ${total-done} ${plural(total-done,"дело","дела","дел")}. Дальше: ${esc(next.t)}${next.time?" в "+next.time:""}.`;
   const C = 2*Math.PI*30;
   $("todayHero").innerHTML = `<div class="ring"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="36" cy="36" r="30" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-frac)}"/></svg><span class="rv">${done}/${total}</span></div><div class="ht"><span class="big">${msg}</span><span class="note">Нажмите на кружок, когда сделаете дело</span></div>`;
+  renderNoticed();
   renderBody(ck, ti);
   renderScreenCard(ck, ti);
   renderJournal();
@@ -655,6 +656,7 @@ document.addEventListener("click", e => {
   else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="healthbg") NATIVE.requestHealthBg(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
   else if(ds.steps){ settings.stepsGoal = Math.max(2000, Math.min(20000, settings.stepsGoal + +ds.steps)); persistSettings(); render(); }
   else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"unplug", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
+  else if(ds.nt){ noticedAnswer(ds.nid, ds.nt === "yes"); }
   else if(ds.dismiss){ dismissed.add(ds.dismiss); render(); }
   else if(ds.snext){ offsets[ds.snext] = (offsets[ds.snext]||0) + 1; render(); }
   else if(ds.sadd){ const s = lastSugg[+ds.sadd]; if(!s) return; const tm = s.idea.time && s.idea.time > nowHM() ? s.idea.time : "";
@@ -2334,6 +2336,54 @@ const KNOWN_APPS = {
 };
 const CAT_MAP = {0:"gaming", 1:"music", 2:"video", 3:"other", 4:"feeds", 5:"feeds", 6:"maps", 7:"work"};
 const appGroup = a => (LS.get("appTypes")||{})[a.p] || KNOWN_APPS[a.p] || CAT_MAP[a.c] || "other";
+
+/* ---------- «Заметил за день»: приложение само собирает день по шагам и экрану, человек подтверждает одной кнопкой ---------- */
+const noticedMem = () => LS.get("noticed") || {};
+function noticedList(){
+  const out = [], ck = curKey(), ti = todayI(), day = dateOf(ck, ti), mem = noticedMem(), now = Date.now();
+  if(health && health.stepBuckets && health.stepBuckets.length){
+    const logged = ((getWeek(ck).days[ti] || {}).log || []), bad = LS.get("walkNo") || {};
+    for(const g of walkSegments(health.stepBuckets, now)){
+      const st = new Date(g.start); if(dateKeyOf(st) !== ck || dayIdxOf(st) !== ti) continue;
+      const id = "w" + g.start; if(mem[id] != null) continue;
+      if((bad[st.getHours()] || 0) >= 2) continue;
+      const m0 = st.getHours()*60 + st.getMinutes();
+      if(logged.some(e => e.time && e.min && (CATS[e.type] && CATS[e.type].move) && Math.abs(+e.time.slice(0,2)*60 + +e.time.slice(3,5) - m0) < 30)) continue;
+      out.push({id, kind:"walk", title:`Прогулка, ${g.min} мин`, sub:`${fmtHM(st)}–${fmtHM(new Date(g.end))}, ${fmtNum(g.steps)} шагов`, g});
+    }
+  }
+  const pd = health && health.usage ? phoneDay(day) : null;
+  if(pd){
+    const got = (LS.get("usageLogged") || {})[day] || {};
+    for(const a of pd.apps){
+      if(!["video","series","gaming","feeds"].includes(a.grp)) continue;
+      const m = Math.round(a.m - (got[a.p] || 0)); if(m < 10) continue;
+      const id = "u" + a.p + ":" + Math.round(a.m / 10); if(mem[id] != null) continue;
+      out.push({id, kind:"app", title:`${a.l}, ${fmtDur(m)}`, sub:"по истории использования телефона", a, m});
+    }
+  }
+  return out.slice(0, 5);
+}
+function renderNoticed(){
+  const card = $("noticedCard"); if(!card) return;
+  const list = noticedList(); card.hidden = !list.length; if(!list.length) return;
+  card.innerHTML = `<h2>Заметил за день</h2><p class="note">Приложение само это увидело. Верно ли?</p>` + list.map(n =>
+    `<div class="status"><span class="rl"><b>${esc(n.title)}</b><span class="note">${esc(n.sub)}</span></span><span class="tools" style="margin:0"><button class="btn primary" data-nt="yes" data-nid="${esc(n.id)}" style="padding:5px 12px">Верно</button><button class="btn" data-nt="no" data-nid="${esc(n.id)}" style="padding:5px 12px">Нет</button></span></div>`).join("");
+}
+function noticedAnswer(id, yes){
+  const n = noticedList().find(x => x.id === id); if(!n) return render();
+  const mem = noticedMem(); mem[id] = yes ? 1 : 0; LS.set("noticed", mem);
+  if(!yes){ if(n.kind === "walk"){ const b = LS.get("walkNo") || {}, h = new Date(n.g.start).getHours(); b[h] = (b[h]||0) + 1; LS.set("walkNo", b); } toast("Понял, не записываю"); return render(); }
+  const ck = curKey(), ti = todayI(), day = dateOf(ck, ti);
+  if(n.kind === "walk"){
+    const st = new Date(n.g.start);
+    mutateQuiet(ck, w => { const d = w.days[ti] = {...(w.days[ti]||{})}; d.log = (d.log||[]).slice(); const it = w.items.find(i => i.day===ti && i.cat==="walk" && !i.done); const rec = {id:uid(), type:"walk", name:"Прогулка", time:fmtHM(st), min:n.g.min, text:"прогулка по шагам", src:"steps"}; if(it){ it.done = true; rec.plan = it.id; } d.log.push(rec); });
+  } else {
+    const e = {type:n.a.grp, name:n.a.l, text:n.a.l, dayOffset:0, min:n.m}; fillDefaults(e); logFromChat([e]);
+    const all = LS.get("usageLogged") || {}, got = all[day] || {}; got[n.a.p] = n.a.m; LS.set("usageLogged", {[day]:got});
+  }
+  toast("Записал"); render();
+}
 /* что человек делает в телефоне сегодня: берём самое долгое приложение с экраном, минус уже записанное */
 function usageGuess(){
   const pd = phoneDay(dateOf(curKey(), todayI())); if(!pd) return null;
@@ -2886,7 +2936,7 @@ function reviewClick(ds){
 }
 
 /* ---------- android app bridge ---------- */
-function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } if(o === "chat"){ closeSheet(); tab = "chat"; render(); scrollChat(); return true; } return false; }
+function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } if(o === "chat"){ closeSheet(); tab = "chat"; render(); scrollChat(); return true; } if(o === "today"){ closeSheet(); tab = "today"; render(); return true; } return false; }
 /* ---------- прогулки по шагам: замечаем ходьбу и предлагаем записать ---------- */
 // сегмент: подряд идущие 10-минутные отрезки, где ≥60 шагов в минуту; ≥15 минут и ≥1200 шагов
 function walkSegments(buckets, nowMs){
@@ -2903,6 +2953,7 @@ function walkSegments(buckets, nowMs){
              .filter(g => g.min >= 20 && g.steps >= 1200 && g.end <= nowMs - 10*60000);
 }
 function suggestWalks(){
+  return;   // теперь прогулки показывает карточка «Заметил за день» на экране «Сегодня»
   if(!health || !health.stepBuckets || !health.stepBuckets.length) return;
   const seen = LS.get("walkSeen") || {}, bad = LS.get("walkNo") || {}, nowMs = Date.now();
   let posted = 0;

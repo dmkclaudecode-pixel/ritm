@@ -85,7 +85,7 @@ object WalkWatcher {
             sentToday++
             val t0 = Instant.ofEpochMilli(g.start).atZone(zone).toLocalTime().toString().take(5)
             val t1 = Instant.ofEpochMilli(g.end).atZone(zone).toLocalTime().toString().take(5)
-            notify(ctx, "Заметил прогулку", "С $t0 до $t1 вы шли около ${g.min} минут, ${g.steps} шагов. Откройте Ритм, чтобы записать её.")
+            notify(ctx, "Заметил прогулку", "С $t0 до $t1 вы шли около ${g.min} минут, ${g.steps} шагов. Откройте Ритм, чтобы подтвердить.")
         }
         val keep = JSONArray(); seenSet.sortedDescending().take(60).forEach { keep.put(it) }
         p.edit().putString("walkSeenNative", keep.toString()).putString("walkDay", today).putInt("walkCount", sentToday).apply()
@@ -94,7 +94,7 @@ object WalkWatcher {
     @SuppressLint("MissingPermission")
     private fun notify(ctx: Context, title: String, text: String) {
         Checkins.ensureChannel(ctx)
-        val open = PendingIntent.getActivity(ctx, 132, Intent(ctx, MainActivity::class.java).putExtra("open", "chat").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        val open = PendingIntent.getActivity(ctx, 132, Intent(ctx, MainActivity::class.java).putExtra("open", "today").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(ctx, "ritm_chat").setSmallIcon(R.drawable.ic_notify).setColor(0xFF0F7A73.toInt())
             .setContentTitle(title).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
