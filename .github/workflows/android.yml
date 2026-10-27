@@ -29,7 +29,7 @@ jobs:
       - name: Положить интерфейс внутрь приложения
         run: |
           mkdir -p android/app/src/main/assets/www
-          cp index.html app.js app.css styles.css catalog.js food.js parser.js nlu.js android/app/src/main/assets/www/
+          cp index.html app.js app.css styles.css catalog.js catalog2.js food.js food2.js parser.js nlu.js android/app/src/main/assets/www/
           cp -r icons android/app/src/main/assets/www/
 
       - name: Собрать APK

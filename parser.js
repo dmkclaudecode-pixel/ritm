@@ -119,18 +119,20 @@ const GENERIC_PLAY = new Set(["поиграл","играл","игра","игру
 const MEALWORD = /^(завтрак|позавтракал|обед|пообедал|ужин|поужинал|перекус|перекусил|листал|листала|скроллил|скролил|залип|втыкал|сидел в телефоне|сидела в телефоне|в телефоне|посидели|играл|поиграл)$/;
 const PREFIXES = ["пере","раз","рас","по","про","при","на","за","вы","от","до","у","с"];
 
+const REC = new Map();
+const wordRe = a => { let r = REC.get(a); if(!r){ r = new RegExp("(^|[\\s\\-])" + esc(a)); REC.set(a, r); } return r; };
 function exactMatch(s){
   let best = null, bestAlias = "";
   const consider = (entry, alias, own) => {
     const a = alias.trim(); if(!a) return;
-    if(new RegExp("(^|[\\s\\-])" + esc(a)).test(s)){ const sc = a.length + (own ? 50 : 0) - (MEALWORD.test(a) ? 6 : 0); if(!best || sc > best.score){ best = {entry, type:entry.t, name:entry.n, score:sc}; bestAlias = a; } }
+    if(wordRe(a).test(s)){ const sc = a.length + (own ? 50 : 0) - (MEALWORD.test(a) ? 6 : 0); if(!best || sc > best.score){ best = {entry, type:entry.t, name:entry.n, score:sc}; bestAlias = a; } }
   };
   for(const e of custom()) for(const a of [e.n.toLowerCase(), ...(e.a||"").split("|")]) consider(e, a.replace(/ё/g,"е"), true);
-  for(const e of R.CATALOG){ consider(e, e.n.toLowerCase().replace(/ё/g,"е"), false); for(const a of (e.a||"").split("|")) consider(e, a, false); }
+  for(const e of R.CATALOG){ if(!e.x) consider(e, e.n.toLowerCase().replace(/ё/g,"е"), false); for(const a of (e.a||"").split("|")) consider(e, a, false); }
   let tbest = null, tAlias = "";
   for(const [id, t] of Object.entries(R.TYPES)) for(const st of (t.stems||"").split("|")){
     const a = st.trim(); if(!a) continue;
-    if(new RegExp("(^|[\\s\\-])" + esc(a)).test(s) && (!tbest || a.length > tbest.score)){ tbest = {entry:null, type:id, name:null, score:a.length}; tAlias = a; }
+    if(wordRe(a).test(s) && (!tbest || a.length > tbest.score)){ tbest = {entry:null, type:id, name:null, score:a.length}; tAlias = a; }
   }
   let res = best, alias = bestAlias;
   if(best && tbest && tbest.score > best.score + 3 && best.entry && best.entry.t !== tbest.type){ res = tbest; alias = tAlias; }
@@ -143,7 +145,7 @@ let FUZZY = null;
 function fuzzyIndex(){
   if(FUZZY) return FUZZY;
   FUZZY = [];
-  for(const e of R.CATALOG) for(const a of [e.n.toLowerCase().replace(/ё/g,"е"), ...(e.a||"").split("|")]) if(a && !a.includes(" ") && a.length >= 4) FUZZY.push({a, entry:e, type:e.t});
+  for(const e of R.CATALOG) if(!e.x) for(const a of [e.n.toLowerCase().replace(/ё/g,"е"), ...(e.a||"").split("|")]) if(a && !a.includes(" ") && a.length >= 4) FUZZY.push({a, entry:e, type:e.t});
   for(const [id, t] of Object.entries(R.TYPES)) for(const a of (t.stems||"").split("|")) if(a && !a.includes(" ") && a.length >= 5) FUZZY.push({a, entry:null, type:id});
   return FUZZY;
 }

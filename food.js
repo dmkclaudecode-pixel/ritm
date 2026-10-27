@@ -70,11 +70,19 @@ RITM.looksLikeFood = t => EAT.test(N(t));
 // Разбор фразы про еду → [{food, grams, kcal, p, f, c, label}]
 RITM.parseFood = function(text){
   const s = N(text), out = [];
-  const parts = s.split(/,| и | \+ | с | а также |;/);
-  for(const part of parts){
-    for(const fd of RITM.FOOD){
-      const re = new RegExp("(?:^|[^а-я])(?:" + fd.a.replace(/ё/g, "е") + ")");
+  const parts = s.split(/,| и | \+ | а также |;/);
+  // из всех подошедших продуктов берём тот, чьё слово в фразе длиннее и точнее («куриный суп» важнее «суп»)
+  const pick = part => {
+    let fd = null, bestLen = 0, multi = false;
+    for(const x of RITM.FOOD){
+      const re = x._re || (x._re = new RegExp("(?:^|[^а-я])(?:" + x.a.replace(/ё/g, "е") + ")"));
       if(!re.test(part)) continue;
+      if(!x._ar) x._ar = x.a.replace(/ё/g, "е").split("|").map(a => new RegExp("(?:^|[^а-я])(" + a + ")"));
+      for(const r of x._ar){ const m = r.exec(part); if(m && m[1].length >= bestLen){ bestLen = m[1].length; fd = x; multi = /[ ]./.test(m[1].trim()); } }
+    }
+    return fd ? {fd, multi} : null;
+  };
+  const emit = (fd, part) => {
       let qty = null, unit = "";
       const m = /(\d+(?:[.,]\d+)?)\s*(кг|г|гр|грамм\w*|мл|л|шт\w*|кусоч\w*|ломт\w*|ложк\w*|л\.|стакан\w*|порци\w*|тарел\w*|банк\w*|чашк\w*|бутыл\w*|кружк\w*)?/.exec(part);
       if(m){ qty = parseFloat(m[1].replace(",", ".")); unit = m[2] || ""; }
@@ -92,11 +100,14 @@ RITM.parseFood = function(text){
       else if(/^(порци|тарел|банк)/.test(unit)) grams = qty * fd.sv;
       else if(qty != null) grams = qty * (fd.pc || fd.sv);
       else grams = fd.sv;
-      if(!(grams > 0) || grams > 5000) continue;
+      if(!(grams > 0) || grams > 5000) return;
       const r = x => Math.round(x * grams / 100 * 10) / 10;
       out.push({food: fd.n, cat: fd.cat || null, grams: Math.round(grams), kcal: Math.round(fd.k * grams / 100), p: r(fd.p), f: r(fd.f), c: r(fd.c), label: fd.n.toLowerCase() + " " + Math.round(grams) + (fd.ml ? " мл" : " г")});
-      break;
-    }
+  };
+  for(const part of parts){
+    const c = pick(part);
+    if(c && c.multi){ emit(c.fd, part); continue; }                       // «гречка с курицей», «борщ со сметаной»: готовое блюдо
+    for(const sub of part.split(/ с | со /)){ const d = pick(sub); if(d) emit(d.fd, sub); }   // «хлеб с маслом»: два продукта
   }
   return out;
 };

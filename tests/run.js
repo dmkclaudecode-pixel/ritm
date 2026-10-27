@@ -1,7 +1,7 @@
 // Прогон тестовых фраз: node tests/run.js  (код выхода 1, если что-то сломалось)
 const store = {}; global.localStorage = {getItem:k=>store[k]??null, setItem:(k,v)=>store[k]=v};
 global.window = global;
-require("../catalog.js"); require("../parser.js"); require("../nlu.js");
+require("../catalog.js"); require("../catalog2.js"); require("../food.js"); require("../food2.js"); require("../parser.js"); require("../nlu.js");
 const {PARSE, NLU} = require("./phrases.js");
 RITM.ctx = {now:"14:30", workEnd:"19:00", commute:0, lunch:"13:30", bed:"23:00", wake:"08:00"};
 let ok = 0, bad = 0; const fails = [];
@@ -25,6 +25,6 @@ for(const [t, exp] of NLU){
 }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
-require("./stress.js");
+require("./stress.js"); require("./food.js");
 { const cp = require("child_process"); for(const a of [[], ["--noise"]]){ const x = cp.spawnSync(process.execPath, [__dirname + "/gen.js", "8000", ...a], {encoding:"utf8"}); console.log("Генератор" + (a.length ? " с шумом" : "") + ": " + x.stdout.split("\n")[0]); if(x.status) process.exitCode = 1; } }
 process.exit(bad || process.exitCode ? 1 : 0);

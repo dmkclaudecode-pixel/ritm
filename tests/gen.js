@@ -1,6 +1,6 @@
 // Генератор размеченных фраз: node tests/gen.js [--show N]. Золотой ответ известен по построению.
 global.localStorage={getItem:()=>null,setItem(){}}; global.window=global;
-['catalog','food','parser','nlu'].forEach(f=>require('../'+f+'.js'));
+['catalog','catalog2','food','food2','parser','nlu'].forEach(f=>require('../'+f+'.js'));
 RITM.ctx={now:"14:30",workEnd:"19:00",commute:0,lunch:"13:30",bed:"23:00",wake:"08:00"};
 const ACTS=[ // [фраза в прошедшем, тип]
 ["поплавал","swim"],["сходил в бассейн","swim"],["плавал в бассейне","swim"],["позанимался в зале","strength"],["потренировался в зале","strength"],["сделал силовую","strength"],["покачался","strength"],
