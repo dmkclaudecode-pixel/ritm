@@ -289,7 +289,12 @@ const PARSE = [
   ["сегодня будет бассейн а силовой не будет", [{type:"swim", neg:null}, {type:"strength", neg:true}]],
   ["не меняй план", []],
   ["поспал 3 часа вечером", [{unknown:true, min:180}]],
-  ["лёг в 23 встал в 7", [{type:"sleep", event:"bed"}, {type:"sleep", event:"wake"}]]
+  ["лёг в 23 встал в 7", [{type:"sleep", event:"bed"}, {type:"sleep", event:"wake"}]],
+  ["пропустил тренировку", [{type:"strength", neg:true}]],
+  ["не смог позаниматься", [{type:"strength", neg:true}]],
+  ["не пошёл в зал", [{type:"strength", neg:true}]],
+  ["собирался на пробежку, не получилось", [{type:"run", neg:true}]],
+  ["хотел 40 минут, а бегал 20", [{type:"run"}]],
 ];
 
 const NLU = [

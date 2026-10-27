@@ -922,7 +922,10 @@ function runAction(msgId, i){
   else if(a.op === "walkAdd"){ mutateQuiet(a.key, w => { const day = w.days[a.d] = {...(w.days[a.d]||{})}; day.log = (day.log||[]).slice(); const it = w.items.find(i => i.day===a.d && i.cat==="walk" && !i.done); const rec = {id:uid(), type:"walk", name:"Прогулка", time:a.time, min:a.min, text:"прогулка по шагам", src:"steps"}; if(it){ it.done = true; rec.plan = it.id; } day.log.push(rec); }); reply = `Записал прогулку: ${a.min} мин с ${a.time}.`; }
   else if(a.op === "walkNo"){ const b = LS.get("walkNo") || {}; b[a.hour] = (b[a.hour]||0) + 1; LS.set("walkNo", b); reply = (b[a.hour] >= 2 ? "Понял, в это время больше не буду спрашивать." : "Понял, не записываю. Если такое повторится в это время ещё раз, перестану спрашивать."); }
   else if(a.op === "rhythmOff"){ settings.rhythm = false; settings.morning = a.m; settings.evening = a.e; persistSettings(); if(NATIVE && settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} reply = `Вернул ${a.m} и ${a.e}. Сам их больше менять не буду.`; }
-  else if(a.op === "setMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const r = (day.log||[]).find(x => x.id === a.id); if(r) r.min = a.min; }); reply = `Исправил: ${fmtDur(a.min)}.`; }
+  else if(a.op === "openMiss"){ tab = "more"; render(); setTimeout(() => { const el = $("missCard"); if(el) el.scrollIntoView({behavior:"smooth", block:"start"}); }, 50); reply = "Открыл список. Подскажите, что это было: «Занятие…» или «Не занятие»."; }
+  else if(a.op === "logQuick"){ const e = {type:a.type, name:a.name, text:a.text || a.name, dayOffset:0}; fillDefaults(e); logFromChat([e]); reply = `Записал: ${lc(a.name)} (${describe(e) || fmtDur(e.min || 0)}).`; }
+  else if(a.op === "okMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; const r = day && (day.log||[]).find(x => x.id === a.id); if(r) delete r.mg; }); normsMemo = null; reply = "Запомнил, это ваша обычная длительность."; }
+  else if(a.op === "setMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const r = (day.log||[]).find(x => x.id === a.id); if(r){ r.min = a.min; delete r.mg; } }); normsMemo = null; reply = `Исправил: ${fmtDur(a.min)}.`; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
     const pend = (m.pending||[])[a.idx]; if(pend){ const wasFz = pend.fuzzy; pend.type = a.type; pend.changed = true; pend.wasUnknown = true; pend.fuzzy = false; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend); dropMiss(pend.text);
@@ -946,6 +949,36 @@ function runAction(msgId, i){
 }
 
 // ---------- writing to journal and plan ----------
+/* ---------- свои нормы: сколько человек обычно тратит на занятие (медиана названных им минут) ---------- */
+let normsMemo = null, normsAt = 0;
+function personalNorms(){
+  if(normsMemo && Date.now() - normsAt < 30000) return normsMemo;
+  const by = {};
+  for(const k of LS.keys()) if(k.startsWith("w:")){
+    const w = LS.get(k); if(!w) continue;
+    for(const day of Object.values(w.days || {})) for(const r of (day && day.log) || []){
+      if(!r.min || r.mg || r.stepsOnly || r.src === "steps" || !r.type || !r.name) continue;
+      (by[r.type + "|" + r.name] = by[r.type + "|" + r.name] || []).push(+r.min);
+    }
+  }
+  const out = {};
+  for(const [key, arr] of Object.entries(by)){
+    if(arr.length < 3) continue;
+    arr.sort((x, y) => x - y);
+    const med = arr[Math.floor(arr.length / 2)], near = arr.filter(m => Math.abs(m - med) <= Math.max(10, med * 0.35)).length;
+    if(near >= Math.ceil(arr.length * 0.6)) out[key] = Math.round(med / 5) * 5 || med;     // норма только если названные минуты кучкуются
+  }
+  normsMemo = out; normsAt = Date.now(); return out;
+}
+// подставить свою норму вместо каталожной, если минуты не названы
+(function(){
+  const base = RITM.parse;
+  RITM.parse = function(t){
+    const r = base(t);
+    try{ const N = personalNorms(); for(const e of r) if(e.minGuess && e.type && e.name && N[e.type + "|" + e.name]){ e.min = N[e.type + "|" + e.name]; e.minNorm = true; } }catch(err){}
+    return r;
+  };
+})();
 function logFromChat(entries){
   const linked = [], groups = {}, ids = []; let lk = null, ld = 0;
   for(const e of entries){ const off = e.dayOffset || 0; (groups[off] = groups[off] || []).push(e); }
@@ -957,6 +990,7 @@ function logFromChat(entries){
         if((e.changed || e.wasUnknown) && !e.noLearn) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
         const rec = {id:uid(), type:e.type, name:e.name, time:e.time || (TYPES[e.type].unit === "min" || +off ? "" : nowHM()), text:e.text, src:"chat"};
         for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived","sets","reps","fuzzyWord","kcal","p","f","c"]) if(e[f] != null) rec[f] = e[f];
+        if(e.minGuess) rec.mg = 1;
         if(rec.stepsOnly) day.stepsManual = rec.steps;
         if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
           const it = w.items.find(i => i.day===d && i.cat===rec.type && !i.done);
@@ -967,6 +1001,7 @@ function logFromChat(entries){
     });
     lk = k; ld = d;
   }
+  normsMemo = null;
   if(ids.length) rememberLastLog(lk, ld, ids);
   if(rvState) rvState = getReview(getWeek(curKey()), todayI());
   return linked;
@@ -1011,6 +1046,43 @@ function addPlanFromChat(e, date){
 
 const pendingIssueDates = [];
 // ---------- understanding a message ----------
+/* ---------- продолжение прошлой фразы: «ещё час», «ещё стакан», «то же самое вчера» ---------- */
+function durOf(s){
+  let m = /(\d+(?:[.,]\d+)?) ?(час\w*|ч) /.exec(s); if(m) return Math.round(parseFloat(m[1].replace(",", ".")) * 60);
+  m = /(\d+) ?(мин\w*) /.exec(s); if(m) return +m[1];
+  if(/ полтора часа /.test(s)) return 90; if(/ (полчаса|пол часа) /.test(s)) return 30; if(/ два часа /.test(s)) return 120; if(/ три часа /.test(s)) return 180; if(/ час /.test(s)) return 60;
+  return null;
+}
+function lastRecord(maxAgeMs){
+  const L = LS.get("lastLog"); if(!L || !L.ids || !L.ids.length || Date.now() - L.at > maxAgeMs) return null;
+  const rec = ((getWeek(L.key).days[L.day] || {}).log || []).find(r => r.id === L.ids[L.ids.length - 1]);
+  return rec ? {key:L.key, d:L.day, rec} : null;
+}
+function followUp(text, s, pre){
+  if(/\d{1,2}:\d{2}/.test(s)) return false;
+  const typed = pre.filter(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
+  // «ещё час», «и ещё полчаса», «плюс 20 минут»: добавить к последней записи
+  if(/^ (и )?(еще|плюс|добавь|добавить|потом еще|и потом еще) /.test(s)){
+    const L = lastRecord(4*3600*1000), dur = durOf(s);
+    if(L && dur && L.rec.min && (!typed.length || typed.every(e => e.type === L.rec.type))){
+      mutateQuiet(L.key, w => { const r = ((w.days[L.d] || {}).log || []).find(x => x.id === L.rec.id); if(r){ r.min = (r.min || 0) + dur; delete r.mg; } });
+      normsMemo = null; bot(`Добавил ещё ${fmtDur(dur)}: ${lc(L.rec.name)} теперь ${fmtDur(L.rec.min + dur)}.`); return true;
+    }
+  }
+  // «ещё стакан», «ещё одну», «ещё кофе»: повторить последнюю запись; «то же самое», «то же вчера»: тоже
+  const again = /^ (и )?(еще|опять|снова) (один|одну|одно|раз|стакан\w*|чашк\w*|кружк\w*|бутылк\w*|порци\w*|штуку|кусок|кусочек) ?$/.test(s) || /^ (и )?(то же|тоже|то же самое|тоже самое|как раньше|повторил|повторила|повтори|опять то же|снова то же)( вчера| позавчера| сегодня)? $/.test(s) || (/^ (и )?(еще|опять|снова) /.test(s) && typed.length === 1 && !durOf(s) && /^ (и )?(еще|опять|снова) (стакан|чашк|кружк|бутылк|порци|кусок)/.test(s));
+  if(again){
+    const L = lastRecord(3*3600*1000); if(!L) return false;
+    const off = / позавчера /.test(s) ? -2 : / вчера /.test(s) ? -1 : 0, r = L.rec;
+    const e = {type:r.type, name:r.name, text, dayOffset:off, time:""};
+    for(const f of ["min","km","ml","mg","g","srv","kcal","p","f","c","dose","steps"]) if(r[f] != null) e[f] = r[f];
+    if(!TYPES[e.type] || TYPES[e.type].unit === "event" || r.stepsOnly) return false;
+    fillDefaults(e); logFromChat([e]); const L2 = LS.get("lastLog");
+    bot(`Записал ещё раз: ${lc(r.name)}${describe(e) ? " (" + describe(e) + ")" : ""}${off === -1 ? " — вчера" : off === -2 ? " — позавчера" : ""}.`, L2 ? [act("Это лишнее, убрать", {op:"unlogIds", key:L2.key, d:L2.day, ids:L2.ids}), act("Всё верно", {op:"keep"})] : null);
+    return true;
+  }
+  return false;
+}
 function respondRules(text){
   const s = nrm(text);
   lastUserText = text; parserCtx();
@@ -1021,6 +1093,7 @@ function respondRules(text){
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
+  if(followUp(text, s, pre)) return;
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
   // «вернулся с работы», «пришёл домой», «я дома» — это не занятие, а смена обстановки: не записываем «работа 1ч»
   if(!/\d/.test(s) && / (вернул(ся|ась)|пришел|пришла|приехал|приехала|добрал(ся|ась)|доехал|доехала|я дома|уже дома|дома|еду домой|иду домой|закончил(а)? (работу|работать|рабочий день)|освободил(ся|ась)|ушел с работы|ушла с работы) /.test(s)
@@ -1032,12 +1105,17 @@ function respondRules(text){
     return;
   }
   if(contextReply(text, s, A, pre)) return;
-  // «смотрю», «листаю» без названия: приложение само видит, что открыто на телефоне, и записывает по истории использования
+  // «смотрю», «слушаю» без названия: сначала смотрим, что видно по телефону, иначе спрашиваем одной кнопкой
   if(!/\d/.test(s) && / (смотрю|смотрел[аи]?|листаю|листал[аи]?|кручу|залип\w*|сижу в телефоне|сидел[аи]? в телефоне) $/.test(s)){
     const g = usageGuess();
     if(g){ lastUserText = text; const e = {type:g.type, name:g.name, text, dayOffset:0, min:g.min}; fillDefaults(e); logFromChat([e]); const L = LS.get("lastLog");
       bot(`Вижу по телефону: сегодня ${g.name} ${fmtDur(g.min)}. Записал.`, L ? [act("Это не то, убрать", {op:"unlogIds", key:L.key, d:L.day, ids:L.ids}), act("Всё верно", {op:"keep"})] : null); return; }
-    if(phoneDay(dateOf(curKey(), todayI()))){ ruleMiss = false; return bot("Новых минут в видео и соцсетях по телефону пока не вижу. Если расскажете, что именно смотрите, запишу."); }
+    ruleMiss = false;
+    return bot("Что смотрите?", [["video","Ютуб","Ютуб"],["series","Сериал","Сериал"],["series","Фильм","Фильм"],["series","Трансляция","Матч или трансляция"],["feeds","Лента","Соцсети"]].map(([t, n, l]) => act(l, {op:"logQuick", type:t, name:n, text})).concat([act("Не надо записывать", {op:"keep"})]));
+  }
+  if(!/\d/.test(s) && / (слушаю|слушал[аи]?) $/.test(s)){
+    ruleMiss = false;
+    return bot("Что слушаете?", [["learning","Подкаст","Подкаст"],["relax","Музыка","Музыку"],["reading","Аудиокнига","Аудиокнигу"]].map(([t, n, l]) => act(l, {op:"logQuick", type:t, name:n, text})).concat([act("Не надо записывать", {op:"keep"})]));
   }
   // «еду на работу», «жена приготовила ужин», «заказал пиццу»: не запись о деле (если нет цифр и явного времени)
   if(A.notMine && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ ruleMiss = false; return bot(chattyReply(null)); }
@@ -1144,8 +1222,8 @@ function respondRules(text){
       const times = g.items.map(e=>e.time).filter(Boolean); return `${lc(g.name)} ×${g.items.length}${times.length ? " (в "+times.join(", ")+")" : ""}`; }).join(", ");
     const comments = [...new Set(past.map(commentFor).filter(Boolean))].slice(0,2).join(" ");
     // длительность не названа, подставлено обычное значение: спрашиваем, а не молчим
-    { const L0 = LS.get("lastLog"), ix = past.findIndex(e => e.type && TYPES[e.type].unit === "min" && !e.stepsOnly && e.min && !/\d|час|полчас|минут|\bмин\b/.test(String(e.text || text).toLowerCase()));
-      if(L0 && ix >= 0 && L0.ids.length === past.length && !(past.length > 1)) askMin = {key:L0.key, d:L0.day, id:L0.ids[ix], min:past[ix].min, name:past[ix].name}; }
+    { const L0 = LS.get("lastLog"), ix = past.findIndex(e => e.type && TYPES[e.type].unit === "min" && !e.stepsOnly && e.min && e.minGuess);
+      if(L0 && ix >= 0 && L0.ids.length === past.length && !(past.length > 1)) askMin = {key:L0.key, d:L0.day, id:L0.ids[ix], min:past[ix].min, name:past[ix].name, norm:!!past[ix].minNorm}; }
     out.push(`Записал: ${desc}.` + (linked.length ? ` Отметил в плане: ${linked.map(i=>"«"+i.t+"»").join(", ")}.` : "") + (comments ? " " + comments : ""));
     // did something else instead of the plan?
     const ti = todayI(), w = getWeek(curKey());
@@ -1189,7 +1267,7 @@ function respondRules(text){
   if(out.length){
     if(askMin && !future.length){
       const alts = [15, 30, 45, 60, 90, 120].filter(m => m !== askMin.min).slice(0, 4);
-      bot(out.join("\n") + ` Длительность вы не назвали, поставил обычные ${fmtDur(askMin.min)}.`, [act("Верно", {op:"keep"}), ...alts.map(m => act(fmtDur(m), {op:"setMin", key:askMin.key, d:askMin.d, id:askMin.id, min:m}))]);
+      bot(out.join("\n") + (askMin.norm ? ` Длительность не названа, поставил вашу обычную: ${fmtDur(askMin.min)}.` : ` Длительность вы не назвали, поставил обычные ${fmtDur(askMin.min)}.`), [act("Верно", {op:"okMin", key:askMin.key, d:askMin.d, id:askMin.id}), ...alts.map(m => act(fmtDur(m), {op:"setMin", key:askMin.key, d:askMin.d, id:askMin.id, min:m}))]);
     } else bot(out.join("\n"));
   }
   if(pendingIssueDates.length){ postIssues(pendingIssueDates.splice(0), 2); }
@@ -1894,15 +1972,20 @@ function compare(days, cond, val, minN){
   const A = [], B = [];
   for(const x of days){ const c = cond(x), v = val(x); if(c == null || v == null) continue; (c ? A : B).push(v); }
   if(A.length < (minN||3) || B.length < (minN||3)) return null;
-  return {a:mean(A), b:mean(B), nA:A.length, nB:B.length, diff:mean(A) - mean(B)};
+  const sd = (arr, m) => Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, arr.length - 1));
+  const ma = mean(A), mb = mean(B), se = Math.sqrt(sd(A, ma) ** 2 / A.length + sd(B, mb) ** 2 / B.length);
+  return {a:ma, b:mb, nA:A.length, nB:B.length, diff:ma - mb, t: se > 0 ? Math.abs(ma - mb) / se : 9};
 }
+// насколько можно верить выводу: размер выборки и разброс (статистика Уэлча)
+const confNote = r => !r || r.t == null ? "" : (r.t >= 2.5 && Math.min(r.nA, r.nB) >= 6 ? " Это устойчиво." : r.t >= 1.7 ? " Скорее всего так." : " Пока это лишь намёк, данных мало.");
 function personalInsights(){
   const days = history(42), next = i => days[i+1];
   const pairs = days.map((x, i) => ({x, y: next(i)})).filter(p => p.y);
   const out = [];
-  const add = (score, text, kind) => out.push({score, text, kind});
+  let r = null;
+  const add = (score, text, kind) => { if(r && r.t != null && r.t < 1.2) return; out.push({score: r && r.t != null ? score * Math.min(1.5, 0.6 + r.t / 4) : score, text: text + confNote(r), kind}); };
   // кофеин после 14:30 → сон этой ночью
-  let r = compare(pairs, p => p.x.lateCaf, p => p.y.sleepMin);
+  r = compare(pairs, p => p.x.lateCaf, p => p.y.sleepMin);
   if(r && r.diff <= -20) add(-r.diff, `В дни, когда ты пьёшь кофеин после 14:30, спишь в среднем на ${fmtDur(Math.round(-r.diff))} меньше (${r.nA} таких дней).`, "caffeine");
   r = compare(pairs, p => p.x.lateCaf, p => p.y.bedM);
   if(r && r.diff >= 20) add(r.diff, `После позднего кофе ты засыпаешь в среднем на ${fmtDur(Math.round(r.diff))} позже.`, "caffeine");
@@ -1922,6 +2005,7 @@ function personalInsights(){
     if(r && r.diff >= 0.5) add(r.diff*40, nd.src === "data" ? `Твоя норма сна по самочувствию — около ${hh}: после таких ночей энергия выше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла (${r.nA} и ${r.nB} дней).` : `После ночей от ${hh} твоя энергия выше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
     r = compare(days, x => x.sleepMin == null ? null : x.sleepMin >= nd.min - 15, x => x.mood);
     if(r && r.diff >= 0.5) add(r.diff*40, `Когда спишь от ${hh}, настроение лучше в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "sleep");
+    r = null;
     if(nd.src === "default" && nd.flat) add(10, "По твоим данным сон сам по себе пока мало меняет самочувствие, поэтому норму в 7 часов не навязываю. Продолжай отмечать энергию.", "sleep"); }
   // движение → энергия, настроение, сон
   r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.energy);
@@ -1940,6 +2024,7 @@ function personalInsights(){
   r = compare(days, x => x.water == null ? null : x.water >= settings.waterGoal * 0.8, x => x.energy);
   if(r && r.diff >= 0.5) add(r.diff*40, `Когда ты пьёшь достаточно воды, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "water");
   // режим: разброс времени отбоя → энергия
+  r = null;
   const beds = days.filter(x => x.bedM != null).map(x => x.bedM);
   if(beds.length >= 5){ const avg = mean(beds), sd = Math.sqrt(mean(beds.map(b => (b-avg)**2))); if(sd >= 50) add(sd/2, `Время отбоя у тебя гуляет примерно на ±${fmtDur(Math.round(sd))}. Ровный режим — один из самых простых способов высыпаться.`, "rhythm"); }
   return out.sort((a,b) => b.score - a.score);
@@ -2077,6 +2162,15 @@ function maybeWeeklyReport(){
   const h = new Date().getHours(), ck = curKey();
   if(todayI() === 6 && h >= 18 && LS.get("reportPosted") !== ck){ LS.set("reportPosted", ck); postWeeklyReport(); return true; }
   return false;
+}
+// раз в неделю (суббота и воскресенье) напоминаю разобрать фразы, на которых споткнулся
+function maybeMissReview(){
+  const ck = curKey(), list = LS.get("misses") || [];
+  if(todayI() < 5 || list.length < 3 || LS.get("missPosted") === ck) return false;
+  LS.set("missPosted", ck);
+  const ex = list.slice(-3).reverse().map(x => "«" + (x.text.length > 40 ? x.text.slice(0, 40) + "…" : x.text) + "»").join(", ");
+  bot(`На этой неделе я не понял ${list.length} ${plural(list.length, "фразу", "фразы", "фраз")}, например ${ex}. Разберём? Это займёт минуту, и дальше я пойму такие фразы сам.`, [act("Разобрать", {op:"openMiss"}), act("Позже", {op:"keep"})]);
+  return true;
 }
 /* ---------- message entry point ---------- */
 let ruleMiss = false;
@@ -3068,7 +3162,7 @@ window.__ritmNative = {
       LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} try{ applyRhythm(); }catch(e){} render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(tab === "chat" && !maybeWeeklyReport() && !morningBrief()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(!maybeWeeklyReport() && !maybeMissReview() && !morningBrief() && tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -3114,7 +3208,7 @@ document.addEventListener("visibilitychange", () => { if(!document.hidden){ dism
 
 render(); renderBackupNote(); setTimeout(maybeAutoBackup, 3000);
 pullNative();
-if(tab === "chat" && getChat().length) { if(!maybeWeeklyReport() && !morningBrief()) askRoutine(); render(); }
+if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !morningBrief() && tab === "chat") askRoutine(); render(); }
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
@@ -3129,7 +3223,7 @@ document.addEventListener("click", e => {
   }
   const c = e.target.closest && e.target.closest("[data-lmin]"); if(c){
     const ck = curKey(), ti = todayI(), id = c.dataset.lid, m = +c.dataset.lmin;
-    mutateQuiet(ck, w => { const day = w.days[ti]; const r = day && (day.log || []).find(x => x.id === id); if(r) r.min = m; });
+    mutateQuiet(ck, w => { const day = w.days[ti]; const r = day && (day.log || []).find(x => x.id === id); if(r){ r.min = m; delete r.mg; } });
     closeSheet(); toast("Исправил: " + fmtDur(m)); render();
   }
 });
