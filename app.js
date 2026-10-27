@@ -173,7 +173,7 @@ if(!LS.get("started")){
 }
 
 /* ---------- view state ---------- */
-let tab = "chat";
+let tab = ((LS.get("chat") || []).length >= 6) ? "today" : "chat";   // главный экран «Сегодня»; чат — для поправок (новичку сначала чат)
 let weekStart = mondayOf(new Date());
 const viewKey = () => iso(weekStart);
 function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key < ck ? 7 : -1); } // index of "today" inside a week
@@ -333,6 +333,7 @@ function renderToday(){
   renderBody(ck, ti);
   renderScreenCard(ck, ti);
   renderJournal();
+  renderFocus(ck, ti);
   const rvDone = !!((w.days[ti]||{}).review||{}).done, hr = new Date().getHours();
   $("reviewCta").hidden = !(hr >= 17 || rvDone);
   $("reviewCta").innerHTML = rvDone
@@ -518,13 +519,20 @@ function renderStats(){
   if(NATIVE) for(const x of weekScreenInsights(ck, ti)) ins.push(x);
   if(NATIVE){ const ns = nudgeStats(new Date(ck+"T00:00:00").getTime(), Date.now()+1); if(ns.n) ins.push([ns.ignored > ns.obeyed ? "warn" : "ok", `За неделю я ${ns.n} ${plural(ns.n,"раз","раза","раз")} просил сделать перерыв: послушался ${ns.obeyed}, по работе ${ns.exempt}, проигнорировал ${ns.ignored}` + (ns.promisedIgnored ? ` (из них ${ns.promisedIgnored} — после обещания выключить)` : "") + "."]); }
   renderPatterns();
-  $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + ins.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("");
+  // главное сверху: сначала то, что требует внимания; остальное по кнопке
+  const rank = {warn:0, sun:1, ok:2, info:3}, sorted = ins.map((x, i) => [x, i]).sort((p, q) => (rank[p[0][0]] ?? 3) - (rank[q[0][0]] ?? 3) || p[1] - q[1]).map(x => x[0]);
+  const more = !!LS.get("statsMore"), shown = more ? sorted : sorted.slice(0, 3);
+  $("insights").innerHTML = `<h2>Что видно по неделе</h2>` + shown.map(([k,t]) => `<div class="insight"><span class="dot ${k==="warn"?"warn":k==="sun"?"sun":""}"></span><span>${t}</span></div>`).join("")
+    + (sorted.length > 3 ? `<div class="tools"><button class="btn" id="statsMore">${more ? "Только главное" : "Показать все (" + sorted.length + ")"}</button></div>` : "");
+  if($("statsMore")) $("statsMore").onclick = () => { LS.set("statsMore", !more); renderStats(); };
+  $("patternsCard").hidden = !more;
 }
 
 function renderMore(){
   $("subtitle").textContent = "Цели, уведомления, копия";
   renderReminders(); renderHealthCard(); renderActs(); renderMisses();
   $("nativeRem").hidden = !NATIVE; $("remCard").hidden = !!NATIVE;
+  renderRhythm();
   if(NATIVE){ $("nMorning").value = settings.morning; $("nEvening").value = settings.evening; $("nToggle").textContent = settings.notify ? "Выключить уведомления" : "Включить уведомления"; $("nToggle").classList.toggle("primary", !settings.notify); $("nTest").hidden = !settings.notify; $("nTestReview").hidden = !settings.notify;
     const ub = usualBedtime(); $("nBed").value = settings.bedtime;
     $("nWatch").innerHTML = [[0,"Выкл"],[30,"Строго"],[40,"Обычно"],[60,"Мягко"]].map(([v,l]) => `<button class="${(settings.watchMin ?? 40)===v?"on":""}" data-watch="${v}">${l}</button>`).join("");
@@ -913,6 +921,8 @@ function runAction(msgId, i){
   else if(a.op === "unlogIds"){ let n = 0; mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const before = (day.log||[]).length; day.log = (day.log||[]).filter(r => !a.ids.includes(r.id)); n = before - day.log.length; }); reply = n ? "Убрал запись о еде." : "Записей уже нет."; }
   else if(a.op === "walkAdd"){ mutateQuiet(a.key, w => { const day = w.days[a.d] = {...(w.days[a.d]||{})}; day.log = (day.log||[]).slice(); const it = w.items.find(i => i.day===a.d && i.cat==="walk" && !i.done); const rec = {id:uid(), type:"walk", name:"Прогулка", time:a.time, min:a.min, text:"прогулка по шагам", src:"steps"}; if(it){ it.done = true; rec.plan = it.id; } day.log.push(rec); }); reply = `Записал прогулку: ${a.min} мин с ${a.time}.`; }
   else if(a.op === "walkNo"){ const b = LS.get("walkNo") || {}; b[a.hour] = (b[a.hour]||0) + 1; LS.set("walkNo", b); reply = (b[a.hour] >= 2 ? "Понял, в это время больше не буду спрашивать." : "Понял, не записываю. Если такое повторится в это время ещё раз, перестану спрашивать."); }
+  else if(a.op === "rhythmOff"){ settings.rhythm = false; settings.morning = a.m; settings.evening = a.e; persistSettings(); if(NATIVE && settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} reply = `Вернул ${a.m} и ${a.e}. Сам их больше менять не буду.`; }
+  else if(a.op === "setMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const r = (day.log||[]).find(x => x.id === a.id); if(r) r.min = a.min; }); reply = `Исправил: ${fmtDur(a.min)}.`; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
     const pend = (m.pending||[])[a.idx]; if(pend){ const wasFz = pend.fuzzy; pend.type = a.type; pend.changed = true; pend.wasUnknown = true; pend.fuzzy = false; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend); dropMiss(pend.text);
@@ -1126,13 +1136,16 @@ function respondRules(text){
     past.push({type:"meal", name:"Обед: " + text.trim().slice(0,60), time:nowHM(), srv:1, text});
     for(const u of unknown.splice(0)) void u;
   }
-  const out = [];
+  const out = []; let askMin = null;
   if(past.length){
     const linked = logFromChat(past);
     const groups = []; for(const e of past){ const g = groups.find(x => x.name === e.name && x.type === e.type); if(g) g.items.push(e); else groups.push({name:e.name, type:e.type, items:[e]}); }
     const desc = groups.map(g => { if(g.items.length === 1){ const e = g.items[0]; return `${lc(e.name)}${describe(e) ? " ("+describe(e)+")" : ""}${e.dayOffset === -1 ? " — вчера" : e.dayOffset === -2 ? " — позавчера" : ""}`; }
       const times = g.items.map(e=>e.time).filter(Boolean); return `${lc(g.name)} ×${g.items.length}${times.length ? " (в "+times.join(", ")+")" : ""}`; }).join(", ");
     const comments = [...new Set(past.map(commentFor).filter(Boolean))].slice(0,2).join(" ");
+    // длительность не названа, подставлено обычное значение: спрашиваем, а не молчим
+    { const L0 = LS.get("lastLog"), ix = past.findIndex(e => e.type && TYPES[e.type].unit === "min" && !e.stepsOnly && e.min && !/\d|час|полчас|минут|\bмин\b/.test(String(e.text || text).toLowerCase()));
+      if(L0 && ix >= 0 && L0.ids.length === past.length && !(past.length > 1)) askMin = {key:L0.key, d:L0.day, id:L0.ids[ix], min:past[ix].min, name:past[ix].name}; }
     out.push(`Записал: ${desc}.` + (linked.length ? ` Отметил в плане: ${linked.map(i=>"«"+i.t+"»").join(", ")}.` : "") + (comments ? " " + comments : ""));
     // did something else instead of the plan?
     const ti = todayI(), w = getWeek(curKey());
@@ -1173,7 +1186,12 @@ function respondRules(text){
     out.push(line);
     pendingIssueDates.push(date);
   }
-  if(out.length) bot(out.join("\n"));
+  if(out.length){
+    if(askMin && !future.length){
+      const alts = [15, 30, 45, 60, 90, 120].filter(m => m !== askMin.min).slice(0, 4);
+      bot(out.join("\n") + ` Длительность вы не назвали, поставил обычные ${fmtDur(askMin.min)}.`, [act("Верно", {op:"keep"}), ...alts.map(m => act(fmtDur(m), {op:"setMin", key:askMin.key, d:askMin.d, id:askMin.id, min:m}))]);
+    } else bot(out.join("\n"));
+  }
   if(pendingIssueDates.length){ postIssues(pendingIssueDates.splice(0), 2); }
   // разговорная фраза («ну я пока не знаю», «мы только начали») — не занятие, не спрашиваем тип
   const chatty = unknown.filter(u => isChatty(u, A));
@@ -2337,6 +2355,72 @@ const KNOWN_APPS = {
 const CAT_MAP = {0:"gaming", 1:"music", 2:"video", 3:"other", 4:"feeds", 5:"feeds", 6:"maps", 7:"work"};
 const appGroup = a => (LS.get("appTypes")||{})[a.p] || KNOWN_APPS[a.p] || CAT_MAP[a.c] || "other";
 
+
+/* ---------- привычные часы: утренний и вечерний сигнал идут за реальным подъёмом и отбоем ---------- */
+const r5 = m => Math.round(m / 5) * 5;
+function rhythmTimes(){
+  let n = 0; const t = new Date(); for(let i=0;i<14;i++) if(sleepFor(iso(addDays(t,-i)))) n++;
+  if(n < 5) return null;
+  const wake = toMinHM(wakeTime()), bed = toMinHM(usualBedtime().hm);
+  const bedN = bed < 12*60 ? bed + 1440 : bed;                         // отбой после полуночи
+  const morning = Math.max(6*60 + 30, Math.min(10*60, r5(wake + 45)));
+  const evening = Math.max(19*60, Math.min(22*60 + 30, r5(bedN - 150)));
+  return {morning: fromMin(morning), evening: fromMin(evening), wake: wakeTime(), bed: usualBedtime().hm};
+}
+function renderRhythm(){
+  const b = $("rhythmToggle"); if(!b) return; const on = settings.rhythm !== false, r = rhythmTimes();
+  b.textContent = "Подстраивать под мой ритм: " + (on ? "включено" : "выключено"); b.classList.toggle("primary", on);
+  $("rhythmNote").textContent = r ? `По данным сна: подъём около ${r.wake}, отбой около ${r.bed}. Утро ${r.morning}, вечер ${r.evening}.` : "Пока мало данных о сне. Нужно хотя бы пять ночей.";
+}
+$("rhythmToggle").onclick = () => { settings.rhythm = settings.rhythm === false; persistSettings(); LS.set("rhythmDay", ""); if(settings.rhythm !== false) applyRhythm(); renderRhythm(); };
+function applyRhythm(){
+  if(settings.rhythm === false) return;
+  const day = new Date().toDateString(); if(LS.get("rhythmDay") === day) return;
+  const r = rhythmTimes(); if(!r) return;
+  LS.set("rhythmDay", day);
+  const was = {m:settings.morning, e:settings.evening};
+  const far = (x, y) => Math.abs(toMinHM(x) - toMinHM(y)) >= 20;
+  if(!far(r.morning, was.m) && !far(r.evening, was.e)) return;
+  if(far(r.morning, was.m)) settings.morning = r.morning;
+  if(far(r.evening, was.e)) settings.evening = r.evening;
+  persistSettings();
+  if(NATIVE && settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){}
+  bot(`Подстроил сигналы под ваш ритм: вы встаёте около ${r.wake}, ложитесь около ${r.bed}. Утренний план теперь в ${settings.morning}, вечерний в ${settings.evening}.`,
+    [act("Оставить как было", {op:"rhythmOff", m:was.m, e:was.e}), act("Хорошо", {op:"keep"})]);
+  render();
+}
+
+/* ---------- «Главное»: два-три показателя, которые человек выбрал сам; остальное по запросу ---------- */
+const FOCUS_ALL = {sleep:"Сон", steps:"Шаги", screen:"Экран", water:"Вода", goals:"Цели недели"};
+const focusList = () => { const f = (settings.focus || (NATIVE ? ["sleep","steps","screen"] : ["goals","water"])).filter(k => FOCUS_ALL[k]); return f.length ? f.slice(0, 3) : ["sleep","steps","screen"]; };
+function focusTile(k, ck, ti){
+  const ds = dateOf(ck, ti), w = getWeek(ck);
+  const tile = (v, label, frac, cls) => `<div class="metric ${cls||""}"><span class="mv">${v}</span><span class="mk">${label}</span>${frac != null ? `<div class="bar"><div class="dn" style="width:${Math.max(0, Math.min(100, frac*100))}%;background:var(--c-walk)"></div></div>` : ""}</div>`;
+  if(k === "sleep"){ const s = sleepFor(ds); return s ? tile(fmtDur(s.min), "сон прошлой ночью", s.min/480) : tile("—", "сон: данных нет"); }
+  if(k === "steps"){ const st = stepsFor(ds); return st != null ? tile(fmtNum(st), "шагов из " + fmtNum(settings.stepsGoal), st/settings.stepsGoal) : tile("—", "шагов пока нет"); }
+  if(k === "screen"){ const pd = health && health.usage ? phoneDay(ds) : null; return pd ? tile(fmtDur(pd.ent), "развлечений из " + fmtDur(settings.screenLimit), pd.ent/settings.screenLimit) : tile("—", "экран: нет доступа"); }
+  if(k === "water"){ const L = intakeOf((w.days[ti]||{}).log); return tile(L.water + " мл", "воды из " + settings.waterGoal, L.water/settings.waterGoal); }
+  if(k === "goals"){ const gs = goalState(w, ti); let g = 0, d = 0; for(const c of goalCats()){ g += settings.goals[c] || 0; d += Math.min(settings.goals[c] || 0, (gs[c] && gs[c].done) || 0); } return tile(d + " из " + g, "целей недели", g ? d/g : null); }
+  return "";
+}
+function renderFocus(ck, ti){
+  const card = $("focusCard"); if(!card) return;
+  const more = !!LS.get("moreMetrics");
+  card.innerHTML = `<div class="metrics">${focusList().map(k => focusTile(k, ck, ti)).join("")}</div>
+    <div class="tools"><button class="btn" id="focusMore">${more ? "Скрыть остальное" : "Все показатели"}</button><button class="btn" id="focusEdit">Что показывать</button></div>`;
+  for(const id of ["bodyCard","screenCard"]) { const el = $(id); if(el && !more) el.hidden = true; }
+  $("focusMore").onclick = () => { LS.set("moreMetrics", !more); render(); };
+  $("focusEdit").onclick = () => openSheet(`<h2>Что показывать главным</h2><p class="note">Выберите до трёх. Остальное откроется кнопкой «Все показатели».</p>
+    <div class="chips" id="focusPick">${Object.entries(FOCUS_ALL).map(([k, n]) => `<button type="button" class="chip ${focusList().includes(k) ? "on" : ""}" data-fk="${k}">${n}</button>`).join("")}</div>
+    <div class="tools"><button class="btn primary" id="focusOk">Готово</button></div>`);
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-fk]"); if(!b) return;
+  let f = focusList().slice(); const k = b.dataset.fk;
+  if(f.includes(k)) f = f.filter(x => x !== k); else if(f.length < 3) f.push(k); else return toast("Не больше трёх");
+  if(!f.length) return; settings.focus = f; persistSettings(); b.classList.toggle("on", f.includes(k));
+});
+document.addEventListener("click", e => { if(e.target.id === "focusOk"){ closeSheet(); render(); } });
 /* ---------- «Заметил за день»: приложение само собирает день по шагам и экрану, человек подтверждает одной кнопкой ---------- */
 const noticedMem = () => LS.get("noticed") || {};
 function noticedList(){
@@ -2544,7 +2628,7 @@ function journalHtml(ctx){
     const shown = logShowAll || log.length <= 6 ? log : log.slice(-6);
     h += `<div class="loglist"><span class="label">Записано сегодня</span>` + shown.map(e => `<div class="lrow">
       <span class="ldot" style="background:var(${(CATS[e.type]||CATS.other).c})"></span>
-      <span class="lt">${esc(e.name)}<small>${esc(describe(e))}${e.plan ? " · из плана" : ""}</small></span>
+      <span class="lt" ${e.min ? `data-ledit="${e.id}" style="cursor:pointer"` : ""}>${esc(e.name)}<small>${esc(describe(e))}${e.plan ? " · из плана" : ""}${e.min ? " · изменить" : ""}</small></span>
       <button class="x" data-ldel="${e.id}" aria-label="Удалить">×</button></div>`).join("") +
       (log.length > 6 && !logShowAll ? `<button class="btn" data-lall="1">Показать все ${log.length}</button>` : "") + `</div>`;
   }
@@ -2981,7 +3065,7 @@ window.__ritmNative = {
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
       health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, bgGranted:!!d.bgGranted, usage:!!d.usage, at:d.at};
-      LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} render();
+      LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} try{ applyRhythm(); }catch(e){} render();
     }catch(e){}
   },
   onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(tab === "chat" && !maybeWeeklyReport() && !morningBrief()) askRoutine(); if(!checkOpen()) render(); scrollChat(); },
@@ -3014,7 +3098,7 @@ if(NATIVE){
   $("nWatch").onclick = e => { const b = e.target.closest("[data-watch]"); if(!b) return; settings.watchMin = +b.dataset.watch; persistSettings(); render(); toast("Сохранено"); };
   $("nTestWatch").onclick = () => { syncWatch(); try{ NATIVE.testWatch(); toast("Проверил. Если есть повод, придёт уведомление"); }catch(e){} };
   $("nBed").onchange = () => { if($("nBed").value){ setBedtime($("nBed").value); if(postIssues(restOfWeek(), 3)) toast("Время отбоя сохранено. В чате предложил поправить план"); else toast("Время отбоя сохранено"); render(); } };
-  const saveTimes = () => { settings.morning = $("nMorning").value || settings.morning; settings.evening = $("nEvening").value || settings.evening; persistSettings(); if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Время сохранено"); };
+  const saveTimes = () => { settings.rhythm = false; settings.morning = $("nMorning").value || settings.morning; settings.evening = $("nEvening").value || settings.evening; persistSettings(); if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Время сохранено"); };
   $("nMorning").onchange = saveTimes; $("nEvening").onchange = saveTimes;
   try{ NATIVE.refreshHealth(); }catch(e){}
   if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){}
@@ -3036,4 +3120,18 @@ $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $(
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 // крючок для автотестов (без влияния на работу)
 window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts};
+// поправка записи одним касанием: сколько на самом деле
+document.addEventListener("click", e => {
+  const t = e.target.closest && e.target.closest("[data-ledit]"); if(t){
+    const ck = curKey(), ti = todayI(), rec = ((getWeek(ck).days[ti] || {}).log || []).find(x => x.id === t.dataset.ledit); if(!rec) return;
+    openSheet(`<h2>${esc(rec.name)}: сколько на самом деле?</h2><div class="chips">${[10,15,20,30,45,60,90,120].map(m => `<button type="button" class="chip ${rec.min === m ? "on" : ""}" data-lmin="${m}" data-lid="${rec.id}">${fmtDur(m)}</button>`).join("")}</div>
+      <div class="tools"><button class="btn" data-ldel="${rec.id}">Удалить запись</button></div>`); return;
+  }
+  const c = e.target.closest && e.target.closest("[data-lmin]"); if(c){
+    const ck = curKey(), ti = todayI(), id = c.dataset.lid, m = +c.dataset.lmin;
+    mutateQuiet(ck, w => { const day = w.days[ti]; const r = day && (day.log || []).find(x => x.id === id); if(r) r.min = m; });
+    closeSheet(); toast("Исправил: " + fmtDur(m)); render();
+  }
+});
 })();
+
