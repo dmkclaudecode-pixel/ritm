@@ -1097,6 +1097,18 @@ function respondRules(text){
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
   if(followUp(text, s, pre)) return;
+  // «а вода из кофе не считается?» — вопрос о правилах подсчёта
+  if(/ (считается|считаются|засчитывается|учитывается|учитываешь|считаешь|идет в счет|входит в норму) /.test(s) && / (кофе|чай|чая|напит\S*|сок|суп\S*|кофеин\S*) /.test(s) && / (вод\S*|жидкост\S*|норм\S*|воды) /.test(s)){
+    const L0 = intakeOf((getWeek(curKey()).days[todayI()]||{}).log);
+    return bot(`Считается: кофе и чай — это тоже жидкость, EFSA включает все напитки в дневную норму воды. Я засчитываю объём напитка (если не указан, одна порция — 200 мл). Сегодня жидкости ${L0.water} из ${settings.waterGoal} мл${L0.waterCaf ? `, из них ${L0.waterCaf} мл — кофе и чай` : ""}. Но кофеин слегка мочегонный, поэтому чистая вода всё равно нужна, особенно если кофе больше трёх чашек.`);
+  }
+  // вопрос с отрицанием («не считается?», «разве не…?») — не запись
+  if(A.question && /\?/.test(text) && pre.length && pre.every(e => e.neg)){
+    const tps0 = A.topics.filter(t => t !== "plan");
+    if(tps0.length && answerTopic(tps0)) return;
+    ruleMiss = true; noteMiss(text, "question");
+    return bot("Это похоже на вопрос, поэтому я ничего не записал. Я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экраны. Если это было занятие, напиши без вопроса.");
+  }
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
   // «вернулся с работы», «пришёл домой», «я дома» — это не занятие, а смена обстановки: не записываем «работа 1ч»
   if(!/\d/.test(s) && / (вернул(ся|ась)|пришел|пришла|приехал|приехала|добрал(ся|ась)|доехал|доехала|я дома|уже дома|дома|еду домой|иду домой|закончил(а)? (работу|работать|рабочий день)|освободил(ся|ась)|ушел с работы|ушла с работы) /.test(s)
@@ -1905,7 +1917,7 @@ function answerTopic(topics){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), L = intakeOf((w.days[ti]||{}).log), ds = dateOf(ck, ti);
   const out = [];
   for(const t of topics){
-    if(t === "water"){ const left = Math.max(0, settings.waterGoal - L.water); out.push(left ? `Воды сегодня ${L.water} из ${settings.waterGoal} мл. Осталось около ${left} мл — это примерно ${Math.ceil(left/250)} ${plural(Math.ceil(left/250),"стакан","стакана","стаканов")}.` : `Воды сегодня ${L.water} мл — норма выполнена!`); }
+    if(t === "water"){ const left = Math.max(0, settings.waterGoal - L.water); out.push(left ? `Жидкости сегодня ${L.water} из ${settings.waterGoal} мл${L.waterCaf ? ` (из них ${L.waterCaf} мл — кофе и чай)` : ""}. Осталось около ${left} мл — это примерно ${Math.ceil(left/250)} ${plural(Math.ceil(left/250),"стакан","стакана","стаканов")}.` : `Воды сегодня ${L.water} мл — норма выполнена!`); }
     if(t === "caffeine") out.push(L.mg ? `Кофеина сегодня около ${L.mg} мг${L.lastCaf ? ", последний в " + L.lastCaf : ""}. ${L.mg > settings.caffeineMax ? "Это больше нормы, дальше лучше без кофе." : "В пределах нормы до " + settings.caffeineMax + " мг."}` : "Сегодня кофеина не записано.");
     if(t === "protein") out.push(`Белка сегодня ${L.protein} из ${settings.proteinGoal} г.` + (L.protein < settings.proteinGoal*0.5 && new Date().getHours() >= 15 ? " Добавь что-то белковое на ужин: мясо, рыбу, творог или яйца." : ""));
     if(t === "steps"){ const st = stepsFor(ds); out.push(st != null ? `Шагов сегодня ${fmtNum(st)} из ${fmtNum(settings.stepsGoal)}.` : "Шаги пока не видны. Подключи Health Connect в «Ещё» или напиши, например, «8000 шагов»."); }
@@ -2776,10 +2788,12 @@ function describe(e){
   return p.join(" · ");
 }
 function intakeOf(log){
-  const s = {kcal:0, fat:0, carb:0, water:0, mg:0, protein:0, alcohol:0, sweets:0, lastCaf:"", screen:0, lateScreen:0, move:0, groups:new Set()};
+  const s = {kcal:0, fat:0, carb:0, water:0, waterCaf:0, mg:0, protein:0, alcohol:0, sweets:0, lastCaf:"", screen:0, lateScreen:0, move:0, groups:new Set()};
   for(const e of log||[]){
     if(e.type === "water") s.water += e.ml||0;
-    if(e.type === "caffeine"){ s.mg += e.mg||0; if(e.time && e.time > s.lastCaf) s.lastCaf = e.time; }
+    if(e.type === "caffeine"){ s.mg += e.mg||0; if(e.time && e.time > s.lastCaf) s.lastCaf = e.time;
+      // кофе и чай тоже жидкость: считаем объём напитка (таблетки и капсулы не в счёт)
+      if(!/таблет|капсул|пилюл|предтрен|гель|жеват/i.test(e.name||"")){ const ml = e.ml != null ? e.ml : 200 * (e.srv||1); s.water += ml; s.waterCaf = (s.waterCaf||0) + ml; } }
     if(e.type === "protein") s.protein += e.g||0;
     if(e.kcal != null){ s.kcal += e.kcal; s.fat += e.f||0; s.carb += e.c||0; if(e.type !== "protein") s.protein += Math.round(e.p||0); }
     if(e.type === "alcohol") s.alcohol += e.srv||1;
