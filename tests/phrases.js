@@ -295,6 +295,9 @@ const PARSE = [
   ["не пошёл в зал", [{type:"strength", neg:true}]],
   ["собирался на пробежку, не получилось", [{type:"run", neg:true}]],
   ["хотел 40 минут, а бегал 20", [{type:"run"}]],
+  ["Запиши два кофе по 250мл и два скупа протеина с 0.4л воды", [{type:"caffeine", srv:2, mg:180}, {type:"protein", g:50}, {type:"water", ml:400}]],
+  ["три капучино по 300 мл", [{type:"caffeine", srv:3, mg:270}]],
+  ["протеин с 300 мл воды", [{type:"protein"}, {type:"water", ml:300}]],
 ];
 
 const NLU = [

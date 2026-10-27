@@ -213,6 +213,8 @@ function parseQty(s){
     const n = toNum(m[1]); const u = UNITS.find(x => new RegExp("^(?:"+x[0]+")$").test(m[2]));
     if(u && n != null) out.push({n, unit:u[1], mul:u[2]});
   }
+  // «два кофе по 250 мл»: число штук при указанном объёме порции
+  if(out.length){ const ea = new RegExp("(?:^|\\s)" + NUM + "\\s+(?:[а-яё]+\\s+){0,2}по\\s+\\d").exec(s); if(ea && toNum(ea[1]) != null) out.push({n:toNum(ea[1]), unit:"each", mul:1}); }
   // голое число без единицы: «2 кофе», «три яйца»
   if(!out.length){ const b = new RegExp("(?:^|\\s)" + NUM + "(?=\\s|$)").exec(s); if(b) out.push({n:toNum(b[1]), unit:"bare", mul:1}); }
   return out;
@@ -246,7 +248,7 @@ function buildEntry(act, clause, times, qty){
     out.minGuess = min == null;
   } else if(t.unit === "ml"){
     let ml = null; const qml = q("ml"), qg = q("glass"), qc = q("cup"), qb = q("bottle"), bare = q("bare");
-    if(qml) ml = qml.n * qml.mul; else if(qg) ml = qg.n * 250; else if(qc) ml = qc.n * 300; else if(qb) ml = qb.n * 500;
+    if(qml) ml = qml.n * qml.mul * (q("each") ? q("each").n : 1); else if(qg) ml = qg.n * 250; else if(qc) ml = qc.n * 300; else if(qb) ml = qb.n * 500;
     else if(bare) ml = bare.n >= 50 ? bare.n : bare.n * (e.ml || 250);
     out.ml = Math.round(ml != null ? ml : (e.ml || 250));
   } else if(t.unit === "g"){
@@ -258,9 +260,10 @@ function buildEntry(act, clause, times, qty){
   } else {
     const qq = q("srv") || q("cup") || q("glass") || q("can") || q("bottle") || (act.type !== "supplements" || !q("g") ? q("bare") : null) || q("times");
     out.srv = qq ? qq.n : 1;
+    if(q("each")) out.srv = q("each").n;
     if(act.type === "caffeine") out.mg = Math.round((e.mg || 90) * out.srv);
     const qgr = q("g"); if(qgr && act.type === "supplements") out.dose = qgr.n + " г";
-    const qml = q("ml"); if(qml) out.ml = qml.n * qml.mul;
+    const qml = q("ml"); if(qml) out.ml = qml.n * qml.mul * (q("each") ? q("each").n : 1);
   }
   return out;
 }
@@ -347,7 +350,11 @@ function parse(text){
     if(e.type === "sleep" && !e.time){ prev = null; continue; }
     out.push(e);
     // «протеин с водой», «таблетку запил водой» — плюс вода
-    if(!negated && act.type !== "water" && /(?:^|\s)(с|со|на|запил[а-я]*)\s+вод/.test(s)){
+    if(!negated && act.type !== "water" && /(?:^|\s)(?:с|со|на|в|запил[а-я]*|разбавил[а-я]*)\s+(\d+(?:[.,]\d+)?)\s*(л|литр[а-я]*|мл|миллилитр[а-я]*)\s+вод/.test(s)){
+      const mm = /(?:^|\s)(?:с|со|на|в|запил[а-я]*|разбавил[а-я]*)\s+(\d+(?:[.,]\d+)?)\s*(л|литр[а-я]*|мл|миллилитр[а-я]*)\s+вод/.exec(s);
+      const v = parseFloat(mm[1].replace(",", ".")), ml = /^л/.test(mm[2]) ? v * 1000 : v;
+      out.push({type:"water", name:"Вода", time:e.time, ml:Math.round(ml), text:raw, derived:true, ...(offset ? {dayOffset:offset} : {})});
+    } else if(!negated && act.type !== "water" && /(?:^|\s)(с|со|на|запил[а-я]*)\s+вод/.test(s)){
       const shakes = act.type === "protein" ? 1 : 0;
       const extra = act.type === "protein" ? 300 + Math.max(0, (e.srv||1) - 1) * 100 : 200;
       out.push({type:"water", name:"Вода", time:e.time, ml:shakes ? extra : 200, text:raw, derived:true, ...(offset ? {dayOffset:offset} : {})});
