@@ -341,6 +341,11 @@ const NLU = [
   ["ок", {small:["yes"]}],
   ["нет", {small:["no"]}],
   // поправки
+  ["нет, это была ходьба", {corr:{op:"type", type:"walk"}}],
+  ["на самом деле йога", {corr:{op:"type", type:"mobility"}}],
+  ["20 минут, а не 40", {corr:{op:"amount", n:20}}],
+  ["не 40, а 20 минут", {corr:{op:"amount", n:20}}],
+  ["3 км, а не 5", {corr:{op:"amount", n:3}}],
   ["удали последнее", {corr:{op:"undo"}}],
   ["отмени последнюю запись", {corr:{op:"undo"}}],
   ["это ошибка", {corr:{op:"undo"}}],

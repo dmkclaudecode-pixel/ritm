@@ -923,6 +923,8 @@ function runAction(msgId, i){
   else if(a.op === "walkNo"){ const b = LS.get("walkNo") || {}; b[a.hour] = (b[a.hour]||0) + 1; LS.set("walkNo", b); reply = (b[a.hour] >= 2 ? "Понял, в это время больше не буду спрашивать." : "Понял, не записываю. Если такое повторится в это время ещё раз, перестану спрашивать."); }
   else if(a.op === "rhythmOff"){ settings.rhythm = false; settings.morning = a.m; settings.evening = a.e; persistSettings(); if(NATIVE && settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} reply = `Вернул ${a.m} и ${a.e}. Сам их больше менять не буду.`; }
   else if(a.op === "openMiss"){ tab = "more"; render(); setTimeout(() => { const el = $("missCard"); if(el) el.scrollIntoView({behavior:"smooth", block:"start"}); }, 50); reply = "Открыл список. Подскажите, что это было: «Занятие…» или «Не занятие»."; }
+  else if(a.op === "habitNo"){ const hn = LS.get("habitNo") || {}; hn[a.type] = (hn[a.type] || 0) + 1; LS.set("habitNo", hn); reply = hn[a.type] >= 3 ? "Понял, про это больше не спрашиваю." : "Хорошо, не записываю."; }
+  else if(a.op === "habitYes"){ const hn = LS.get("habitNo") || {}; hn[a.type] = 0; LS.set("habitNo", hn); const e = {type:a.type, name:a.name, text:a.name, dayOffset:0, time:a.time}; fillDefaults(e); logFromChat([e]); reply = `Записал: ${lc(a.name)} в ${a.time}.`; }
   else if(a.op === "logQuick"){ const e = {type:a.type, name:a.name, text:a.text || a.name, dayOffset:0}; fillDefaults(e); logFromChat([e]); reply = `Записал: ${lc(a.name)} (${describe(e) || fmtDur(e.min || 0)}).`; }
   else if(a.op === "okMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; const r = day && (day.log||[]).find(x => x.id === a.id); if(r) delete r.mg; }); normsMemo = null; reply = "Запомнил, это ваша обычная длительность."; }
   else if(a.op === "setMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const r = (day.log||[]).find(x => x.id === a.id); if(r){ r.min = a.min; delete r.mg; } }); normsMemo = null; reply = `Исправил: ${fmtDur(a.min)}.`; }
@@ -1968,18 +1970,38 @@ const afterStart = (key, dow) => addDays(new Date(key+"T00:00:00"), dow).getTime
 function history(n){ const out = [], t = new Date(); t.setHours(0,0,0,0); for(let i = n; i >= 0; i--) out.push(dayRecord(addDays(t, -i))); return out; }
 const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
 // сравнение «в дни, когда X» против «остальные дни» с поправкой на малую выборку
-function compare(days, cond, val, minN){
-  const A = [], B = [];
-  for(const x of days){ const c = cond(x), v = val(x); if(c == null || v == null) continue; (c ? A : B).push(v); }
+function compare(days, cond, val, minN, by){
+  // причинность: из исхода вычитаем средние по день недели (и по доп. факторам), чтобы не путать «сон» с «понедельником»
+  const dowOf = r => r.x ? r.y.dow : r.dow;
+  const factors = [dowOf].concat(by || []);
+  let rows = [];
+  for(const x of days){ const c = cond(x), v = val(x); if(c == null || v == null) continue; rows.push({c, v, x}); }
+  if(rows.length >= 21){
+    for(const f of factors){
+      const g = {};
+      for(const r of rows){ const k = f(r.x); if(k == null) continue; (g[k] = g[k] || []).push(r.v); }
+      const mg = {}; for(const k in g) if(g[k].length >= 3) mg[k] = mean(g[k]);
+      const all = mean(rows.map(r => r.v));
+      rows = rows.map(r => { const k = f(r.x); return k != null && mg[k] != null ? {...r, v: r.v - mg[k] + all} : r; });
+    }
+  }
+  const A = rows.filter(r => r.c).map(r => r.v), B = rows.filter(r => !r.c).map(r => r.v);
   if(A.length < (minN||3) || B.length < (minN||3)) return null;
   const sd = (arr, m) => Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, arr.length - 1));
   const ma = mean(A), mb = mean(B), se = Math.sqrt(sd(A, ma) ** 2 / A.length + sd(B, mb) ** 2 / B.length);
-  return {a:ma, b:mb, nA:A.length, nB:B.length, diff:ma - mb, t: se > 0 ? Math.abs(ma - mb) / se : 9};
+  return {a:ma, b:mb, nA:A.length, nB:B.length, diff:ma - mb, t: Math.abs(ma - mb) < 1e-9 ? 0 : se > 1e-9 ? Math.abs(ma - mb) / se : 9, adj: rows.length >= 21 && !!(by && by.length)};
 }
 // насколько можно верить выводу: размер выборки и разброс (статистика Уэлча)
-const confNote = r => !r || r.t == null ? "" : (r.t >= 2.5 && Math.min(r.nA, r.nB) >= 6 ? " Это устойчиво." : r.t >= 1.7 ? " Скорее всего так." : " Пока это лишь намёк, данных мало.");
+const confNote = r => !r || r.t == null ? "" : (r.adj ? " Поправку на сон учёл." : "") + (r.back ? " Возможна и обратная связь: " + r.back + "." : "") + (r.t >= 2.5 && Math.min(r.nA, r.nB) >= 6 ? " Это устойчиво." : r.t >= 1.7 ? " Скорее всего так." : " Пока это лишь намёк, данных мало.");
+// обратная связь: вчерашнее самочувствие предсказывает сегодняшнее поведение не хуже, чем наоборот
+function reverseNote(days, getY, isHigh, getX, text){
+  const prs = days.map((x, i) => ({x, y: days[i+1]})).filter(p => p.y && getY(p.x) != null && getX(p.y) != null);
+  const r = compare(prs, p => isHigh(getY(p.x)), p => getX(p.y) ? 1 : 0, 4);
+  return r && r.t >= 1.7 && r.diff >= 0.2 ? text : "";
+}
+const SLP = x => x.sleepMin == null ? null : (sleepEnough(x.sleepMin) ? 1 : 0);
 function personalInsights(){
-  const days = history(42), next = i => days[i+1];
+  const days = history(42).filter(x => !x.sick), next = i => days[i+1];
   const pairs = days.map((x, i) => ({x, y: next(i)})).filter(p => p.y);
   const out = [];
   let r = null;
@@ -2008,20 +2030,22 @@ function personalInsights(){
     r = null;
     if(nd.src === "default" && nd.flat) add(10, "По твоим данным сон сам по себе пока мало меняет самочувствие, поэтому норму в 7 часов не навязываю. Продолжай отмечать энергию.", "sleep"); }
   // движение → энергия, настроение, сон
-  r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.energy);
+  r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.energy, 3, [SLP]);
+  if(r) r.back = reverseNote(days, x => x.energy, e => e >= 4, x => x.hasData ? x.moveMin >= 20 : null, "после бодрых дней ты и двигаешься больше");
   if(r && r.diff >= 0.5) add(r.diff*40, `В дни, когда ты двигаешься хотя бы 20 минут, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "move");
-  r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.mood);
+  r = compare(days, x => x.hasData ? x.moveMin >= 20 : null, x => x.mood, 3, [SLP]);
+  if(r) r.back = reverseNote(days, x => x.mood, e => e >= 4, x => x.hasData ? x.moveMin >= 20 : null, "когда настроение хорошее, двигаться тоже проще");
   if(r && r.diff >= 0.5) add(r.diff*40, `Движение поднимает тебе настроение: в среднем на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "move");
   r = compare(pairs, p => p.x.hasData ? p.x.major : null, p => p.y.sleepMin);
   if(r && r.diff >= 20) add(r.diff, `После тренировок ты спишь на ${fmtDur(Math.round(r.diff))} дольше.`, "move");
   // шаги → настроение
-  r = compare(days, x => x.steps == null ? null : x.steps >= settings.stepsGoal, x => x.mood);
+  r = compare(days, x => x.steps == null ? null : x.steps >= settings.stepsGoal, x => x.mood, 3, [SLP]);
   if(r && r.diff >= 0.5) add(r.diff*40, `В дни, когда ты проходишь свою норму шагов, настроение лучше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "steps");
   // много развлечений в телефоне → настроение
   r = compare(days, x => x.screenEnt == null ? null : x.screenEnt > settings.screenLimit, x => x.mood);
   if(r && r.diff <= -0.5) add(-r.diff*40, `В дни, когда развлечений в телефоне больше лимита, настроение ниже на ${(-r.diff).toFixed(1).replace(".", ",")} балла.`, "screen");
   // вода → энергия
-  r = compare(days, x => x.water == null ? null : x.water >= settings.waterGoal * 0.8, x => x.energy);
+  r = compare(days, x => x.water == null ? null : x.water >= settings.waterGoal * 0.8, x => x.energy, 3, [SLP]);
   if(r && r.diff >= 0.5) add(r.diff*40, `Когда ты пьёшь достаточно воды, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "water");
   // режим: разброс времени отбоя → энергия
   r = null;
@@ -2162,6 +2186,84 @@ function maybeWeeklyReport(){
   const h = new Date().getHours(), ck = curKey();
   if(todayI() === 6 && h >= 18 && LS.get("reportPosted") !== ck){ LS.set("reportPosted", ck); postWeeklyReport(); return true; }
   return false;
+}
+// привычные времена: что ты делаешь примерно в одно и то же время (по последним трём неделям)
+const HABIT_TYPES = ["caffeine","protein","walk","run","bike","swim","strength","mobility","reading","learning","supplements"];
+function habitTimes(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const by = {}, names = {}, seenDays = new Set();
+  for(let i = 1; i <= 21; i++){
+    const d = addDays(today, -i), k = dateKeyOf(d), di = dayIdxOf(d), w = getWeek(k), day = (w.days || {})[di] || {};
+    if((day.log || []).length) seenDays.add(i);
+    for(const e of (day.log || [])){ if(!HABIT_TYPES.includes(e.type) || !e.time || e.derived || e.src === "usage" || e.src === "health") continue;
+      (by[e.type] = by[e.type] || {})[i] = (by[e.type][i] || []).concat(toMinHM(e.time)); (names[e.type] = names[e.type] || {})[e.name] = (names[e.type][e.name] || 0) + 1; }
+  }
+  const out = [];
+  if(seenDays.size < 5) return out;
+  for(const [type, perDay] of Object.entries(by)){
+    const pts = []; for(const [i, arr] of Object.entries(perDay)) for(const m of arr) pts.push({i, m});
+    pts.sort((a, b) => a.m - b.m);
+    let best = null;
+    for(const p of pts){ const grp = pts.filter(q => Math.abs(q.m - p.m) <= 40); const days = new Set(grp.map(q => q.i));
+      if(days.size >= 4 && days.size / seenDays.size >= 0.3 && (!best || days.size > best.n)) best = {n:days.size, m:Math.round(mean(grp.map(q => q.m)) / 5) * 5}; }
+    if(best) out.push({type, name: Object.entries(names[type] || {}).sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || (CATS[type] ? CATS[type].n : type), m:best.m, n:best.n, of:seenDays.size});
+  }
+  return out;
+}
+function maybeHabit(){
+  if(document.hidden) return false;
+  const now = new Date(), nm = now.getHours() * 60 + now.getMinutes(), ck = curKey(), ti = todayI();
+  const posted = LS.get("habitPosted") || {}, today = dateKeyOf(now) + ":" + ti, st = posted.day === today ? posted : {day:today, types:[]};
+  const hn = LS.get("habitNo") || {}, log = ((getWeek(ck).days[ti] || {}).log) || [];
+  for(const h of habitTimes()){
+    if(st.types.includes(h.type) || (hn[h.type] || 0) >= 3) continue;
+    if(nm < h.m + 15 || nm > h.m + 120) continue;
+    if(log.some(e => e.type === h.type && (!e.time || Math.abs(toMinHM(e.time) - h.m) <= 120))) continue;
+    st.types.push(h.type); LS.set("habitPosted", st);
+    const label = ({caffeine:"пьёшь кофе или чай", protein:"принимаешь белок", walk:"гуляешь", run:"бегаешь", bike:"катаешься на велосипеде", swim:"плаваешь", strength:"тренируешься", mobility:"делаешь зарядку или растяжку", reading:"читаешь", learning:"учишься", supplements:"принимаешь добавки"})[h.type] || "занимаешься этим";
+    const hm = pad(Math.floor(h.m / 60)) + ":" + pad(h.m % 60);
+    bot(`Обычно в ${hm} ты ${label} (${h.n} из ${h.of} последних дней с записями). Сегодня было? Запишу в один тап.`,
+      [act("Да, записать", {op:"habitYes", type:h.type, name:h.name, time:hm}), act("Сегодня нет", {op:"habitNo", type:h.type})]);
+    return true;
+  }
+  return false;
+}
+setInterval(() => { try{ maybeHabit(); }catch(e){} }, 5 * 60 * 1000);
+// прогноз недели: по темпу первых дней видно, хватит ли движения, шагов и сна, пока ещё можно успеть
+function weekForecast(){
+  const ck = curKey(), ti = todayI(), w = getWeek(ck), left = 6 - ti, out = [];
+  if(ti < 2 || ti > 5) return out;
+  // 1. аэробная нагрузка против нормы ВОЗ
+  const aero = aeroMinutes(w), pace = aero.done / (ti + 1) * 7;
+  const reach = aero.plan;            // сделано + запланировано до конца недели
+  if(aero.done < AERO_GOAL && reach < AERO_GOAL * 0.85 && pace < AERO_GOAL * 0.85){
+    const need = Math.max(10, Math.ceil((AERO_GOAL - aero.done) / Math.max(1, left) / 5) * 5);
+    out.push({kind:"aero", text:`Пока у тебя ${aero.done} минут активности из ${AERO_GOAL} (норма ВОЗ на неделю). В таком темпе выйдет около ${Math.round(pace)}. Чтобы успеть, нужно примерно по ${need} минут в день до воскресенья.`});
+  }
+  // 2. сон: долг за последние ночи
+  const recent = history(ti).filter(x => x.past && x.sleepMin != null).slice(-4);
+  if(recent.length >= 3){ const need = sleepNeed().min, avg = mean(recent.map(x => x.sleepMin));
+    if(avg < need - 30) out.push({kind:"sleep", text:`За последние ${recent.length} ночи ты спишь в среднем ${fmtDur(Math.round(avg))} при норме около ${fmtDur(need)}. Долг сна копится: сегодня лучше лечь пораньше.`}); }
+  // 3. шаги: темп за неделю
+  const sd = history(ti).filter(x => x.past && x.steps != null && x.steps > 0);
+  if(sd.length >= 3 && settings.stepsGoal){ const avg = mean(sd.map(x => x.steps));
+    if(avg < settings.stepsGoal * 0.7) out.push({kind:"steps", text:`В среднем ты проходишь ${Math.round(avg).toLocaleString("ru-RU")} шагов в день при цели ${settings.stepsGoal.toLocaleString("ru-RU")}. Короткая прогулка после обеда закрыла бы разницу.`}); }
+  // 4. завтрашний пункт, который ты обычно пропускаешь
+  const tm = ti + 1;
+  if(tm <= 6){ const sp = skipPatterns().find(g => g.dow === tm && w.items.some(i => i.day === tm && i.cat === g.cat && !i.done));
+    if(sp) out.push({kind:"skip", text:`Завтра в плане ${CATS[sp.cat].full.toLowerCase()}. ${sp.text} Хочешь перенести на удобное время?`}); }
+  return out;
+}
+function maybeForecast(){
+  const ck = curKey(), h = new Date().getHours();
+  if(h < 9 || h >= 21 || dataDays() < 4) return false;
+  const posted = LS.get("forecastPosted") || {}, st = posted.key === ck ? posted : {key:ck, kinds:[]};
+  const fresh = weekForecast().filter(f => !st.kinds.includes(f.kind));
+  if(!fresh.length) return false;
+  const f = fresh[0];
+  st.kinds.push(f.kind); LS.set("forecastPosted", st);
+  bot(f.text, [act("Что в плане?", {op:"showPlan"}), act("Понял", {op:"keep"})]);
+  return true;
 }
 // раз в неделю (суббота и воскресенье) напоминаю разобрать фразы, на которых споткнулся
 function maybeMissReview(){
@@ -3162,7 +3264,7 @@ window.__ritmNative = {
       LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} try{ applyRhythm(); }catch(e){} render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(!maybeWeeklyReport() && !maybeMissReview() && !morningBrief() && tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -3208,12 +3310,12 @@ document.addEventListener("visibilitychange", () => { if(!document.hidden){ dism
 
 render(); renderBackupNote(); setTimeout(maybeAutoBackup, 3000);
 pullNative();
-if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !morningBrief() && tab === "chat") askRoutine(); render(); }
+if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); render(); }
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 // крючок для автотестов (без влияния на работу)
-window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts};
+window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
 // поправка записи одним касанием: сколько на самом деле
 document.addEventListener("click", e => {
   const t = e.target.closest && e.target.closest("[data-ledit]"); if(t){
