@@ -1020,6 +1020,13 @@ function respondRules(text){
     return;
   }
   if(contextReply(text, s, A, pre)) return;
+  // «смотрю», «листаю» без названия: приложение само видит, что открыто на телефоне, и записывает по истории использования
+  if(!/\d/.test(s) && / (смотрю|смотрел[аи]?|листаю|листал[аи]?|кручу|залип\w*|сижу в телефоне|сидел[аи]? в телефоне) $/.test(s)){
+    const g = usageGuess();
+    if(g){ lastUserText = text; const e = {type:g.type, name:g.name, text, dayOffset:0, min:g.min}; fillDefaults(e); logFromChat([e]); const L = LS.get("lastLog");
+      bot(`Вижу по телефону: сегодня ${g.name} ${fmtDur(g.min)}. Записал.`, L ? [act("Это не то, убрать", {op:"unlogIds", key:L.key, d:L.day, ids:L.ids}), act("Всё верно", {op:"keep"})] : null); return; }
+    if(phoneDay(dateOf(curKey(), todayI()))){ ruleMiss = false; return bot("Новых минут в видео и соцсетях по телефону пока не вижу. Если расскажете, что именно смотрите, запишу."); }
+  }
   // «еду на работу», «жена приготовила ужин», «заказал пиццу»: не запись о деле (если нет цифр и явного времени)
   if(A.notMine && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ ruleMiss = false; return bot(chattyReply(null)); }
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
@@ -2327,6 +2334,20 @@ const KNOWN_APPS = {
 };
 const CAT_MAP = {0:"gaming", 1:"music", 2:"video", 3:"other", 4:"feeds", 5:"feeds", 6:"maps", 7:"work"};
 const appGroup = a => (LS.get("appTypes")||{})[a.p] || KNOWN_APPS[a.p] || CAT_MAP[a.c] || "other";
+/* что человек делает в телефоне сегодня: берём самое долгое приложение с экраном, минус уже записанное */
+function usageGuess(){
+  const pd = phoneDay(dateOf(curKey(), todayI())); if(!pd) return null;
+  const done = LS.get("usageLogged") || {}, day = dateOf(curKey(), todayI()), got = done[day] || {};
+  let best = null;
+  for(const a of pd.apps){
+    if(!["video","series","gaming","feeds"].includes(a.grp)) continue;
+    const m = a.m - (got[a.p] || 0);
+    if(m >= 5 && (!best || m > best.min)) best = {type:a.grp, name:a.l, min:Math.round(m), p:a.p, total:a.m};
+  }
+  if(!best) return null;
+  got[best.p] = best.total; const keep = {}; keep[day] = got; LS.set("usageLogged", keep);
+  return best;
+}
 const appsFor = ds => (health.apps && health.apps[ds]) || null;
 const offHour = () => { const [h,m] = settings.screensOff.split(":").map(Number); return h + m/60; };
 function phoneDay(ds){
