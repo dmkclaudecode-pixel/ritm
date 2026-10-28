@@ -1,4 +1,4 @@
-const CACHE = "ritm-v79";
+const CACHE = "ritm-v80";
 const SHELL = ["./", "index.html", "styles.css", "core.js", "js/main.js", "js/base.js", "js/plan.js", "js/render.js", "js/chat.js", "js/parse.js", "js/morning.js", "js/checkins.js", "js/insights.js", "js/routine.js", "js/nudges.js", "js/daily.js", "js/native.js", "app.css", "catalog.js", "catalog2.js", "catalog3.js", "food.js", "food2.js", "parser.js", "nlu.js", "engine.js", "mood.js", "dialog.js", "followup.js", "llm.js", "retrieve.js", "talk.js", "embed.js", "onto.js", "trainlog.js", "data/emb.bin", "data/emb_vocab.txt", "data/onto.json", "data/resp_index.json", "data/mood_lex.json", "data/mood_nb.json", "lexicon.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-192.png", "icons/maskable-512.png", "icons/favicon-64.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

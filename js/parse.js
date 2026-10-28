@@ -53,6 +53,30 @@ const DLG = new RITM.dialog.Context(14);
 let lastMD = null, lastText = "", chatUntil = 0;
 // живой ответ: если включена облачная модель, отвечает она (с запасом на правила), иначе сразу правила
 const LLM_ACTS = new Set(["clarify", "short", "topic", "event", "mood", "question", "ack", "advice", "vague"]);
+// сначала слушает облачная модель: она решает, это разговор или команда. Правила остаются исполнителем и запасным путём.
+const QUICK = /^ (что|как) (сегодня|завтра|неделя|у меня|по плану|дела)| (отмени|отмена|удали|верно|не так) /;
+function llmFirst(text){
+  const L = RITM.llm;
+  if(inCommand || !L || !L.enabled() || text.trim().split(/\s+/).length < 3 || QUICK.test(nrm(text))) return false;
+  const lb = getChat().filter(m => m.who === "bot").slice(-1)[0];
+  if(lb && lb.acts && lb.acts.length && Date.now() - lb.at < 10*60000) return false;   // бот ждёт ответа кнопкой
+  const feed = getChat().slice(-12).map(m => ({role: m.who === "me" ? "user" : "bot", text: m.text})), cb = ctxBot();
+  if(cb.explicit && cb.m && cb.m.who === "bot") feed.splice(Math.max(0, feed.length - 1), 0, {role: "bot", text: cb.m.text});   // ответ на выбранное сообщение
+  const refresh = () => { try{ window.dispatchEvent(new Event("ritm:chat")); }catch(e){ /* не в браузере */ } };
+  L.chat(feed, text).then(a => {
+    if(a && a.doText){
+      const before = getChat().length, keep = DLG.turns.length; inCommand = true;
+      try{ respondRules(a.doText, true); }catch(e){ console.error(e); }
+      inCommand = false; DLG.turns.length = Math.min(DLG.turns.length, keep);
+      const added = getChat().slice(before).filter(m => m.who === "bot");
+      if(added.length){ DLG.push("bot", added[added.length - 1].text, {asked: false, act: "log"}); refresh(); return; }
+    }
+    if(a && a.say){ DLG.push("bot", a.say, {asked: /\?\s*$/.test(a.say), act: "llm"}); bot(a.say); refresh(); return; }
+    try{ respondRules(text, true); }catch(e){ console.error(e); }
+    refresh();
+  });
+  return true;
+}
 let inCommand = false;
 function deliver(text, x, hint){
   const L = RITM.llm;
@@ -80,21 +104,22 @@ function moodReply(MD, A, s, pre){
   if(!only || /\d/.test(s) || pre.some(e => e.time) || MD.intensity < .35 || A.words > 14 || A.question) return false;
   const x = RITM.talk.reply({text: lastText, mood: MD, ctx: DLG}); deliver(lastText, x); return true;
 }
-export function respondRules(text){
+export function respondRules(text, skipLlm){
   const s = nrm(text);
   __set_lastUserText(text); parserCtx();
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
   const MD = RITM.mood.analyze(text); RITM.mood.track(MD); lastMD = MD; lastText = text;
   if(RITM.talk) RITM.talk.learnFacts(text);
-  { const tp = RITM.talk ? RITM.talk.topicOf(text) : null; DLG.push("user", text, {mood: MD, topic: tp ? tp.k : undefined}); }
-  if(RITM.trainlog) RITM.trainlog.record(text, {mood: MD.dominant, mi: MD.intensity});
+  if(!skipLlm){ const tp = RITM.talk ? RITM.talk.topicOf(text) : null; DLG.push("user", text, {mood: MD, topic: tp ? tp.k : undefined}); }
+  if(RITM.trainlog && !skipLlm) RITM.trainlog.record(text, {mood: MD.dominant, mi: MD.intensity});
   { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
     const cb = ctxBot();
     if(cb.m && cb.m.kind === "city" && cb.m.chosen == null && (cb.explicit || Date.now() - cb.m.at < 3*3600*1000) && text.trim().split(/\s+/).length <= 4 && !/\?/.test(text)){
       const arr = getChat(), mm = arr.find(x => x.id === cb.m.id); if(mm){ mm.chosen = -1; saveChat(arr); }
       setCityByName(text); return; } }
   if(routineAnswer(text)) return;
+  if(!skipLlm && llmFirst(text)) return;
   if(A.correction && (LS.get("lastLog") || explicitLog() || LS.get("lastPlanAdd") || A.correction.op === "undoCtx") || (A.correction && A.correction.op === "what")) return handleCorrection(A.correction);
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
