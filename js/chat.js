@@ -233,7 +233,7 @@ export function runAction(msgId, i){
       if(wasFz && pend.fuzzyWord) RITM.remember(pend.fuzzyWord, a.type, a.keepName ? pend.name : null);
       if(wasFz && a.keepName){ if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else { const ln = logFromChat([pend]); if(ln.length) reply = `Отметил в плане: ${ln.map(i=>"«"+i.t+"»").join(", ")}. `; }
         reply = `Записал${pend.future ? " в план" : ""}: ${lc(pend.name)}. ` + (reply||"") + "Запомнил, как ты это пишешь." + (pend.future ? "" : " " + (commentFor(pend)||"")); }
-      else { if(wasFz){ const nm = (RITM.core(pend.text||"") || String(pend.text||"")).trim(); pend.name = nm.charAt(0).toUpperCase() + nm.slice(1, 50); }
+      else { if(wasFz){ const nm = (RITM.coreText(pend.text||"") || String(pend.text||"")).trim(); pend.name = nm.charAt(0).toUpperCase() + nm.slice(1, 50); }
         if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else logFromChat([pend]); reply = `Запомнил: «${pend.name}» — это ${CATS[a.type].full.toLowerCase()}.` + (pend.future ? "" : " " + (commentFor(pend)||"")); } }
   }
   else if(a.op === "typechoose"){

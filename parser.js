@@ -427,5 +427,5 @@ function remember(text, type, name){
   const L = learned(); L[c] = {type, name}; try{ localStorage.setItem("ritm:learned", JSON.stringify(L)); }catch(e){}
 }
 
-R.parse = parse; R.guessType = guessType; R.remember = remember; R.forget = forget; R.core = core; R.findActivity = findActivity; R.norm = norm; R.pre = pre; R.dist = dist;
+R.parse = parse; R.guessType = guessType; R.remember = remember; R.forget = forget; R.coreText = core; R.findActivity = findActivity; R.norm = norm; R.pre = pre; R.dist = dist;
 })();

@@ -49,11 +49,19 @@ function followUp(text, s, pre){
   }
   return false;
 }
+const DLG = new RITM.dialog.Context(14);
+// сильная эмоция без дела: отвечаем по настроению с учётом контекста беседы
+function moodReply(MD, A, s, pre){
+  const only = pre.every(e => e.unknown || !e.type || e.fuzzy || (e.minGuess && MD.intensity >= .7 && A.words <= 6));
+  if(!only || /\d/.test(s) || pre.some(e => e.time) || MD.intensity < .35 || A.words > 14 || A.question) return false;
+  const r = RITM.dialog.compose({mood: MD}, DLG); DLG.push("bot", r, {asked: /\?$/.test(r)}); bot(r); return true;
+}
 export function respondRules(text){
   const s = nrm(text);
   __set_lastUserText(text); parserCtx();
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
+  const MD = RITM.mood.analyze(text); RITM.mood.track(MD); DLG.push("user", text, {mood: MD});
   { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
     const cb = ctxBot();
     if(cb.m && cb.m.kind === "city" && cb.m.chosen == null && (cb.explicit || Date.now() - cb.m.at < 3*3600*1000) && text.trim().split(/\s+/).length <= 4 && !/\?/.test(text)){
@@ -64,6 +72,7 @@ export function respondRules(text){
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
+  if(!A.states.length && moodReply(MD, A, s, pre)) return;
   if(workBreakReply(text, s, pre)) return;
   if(nudgeChatReply(text, s, pre)) return;
   if(followUp(text, s, pre)) return;
@@ -103,7 +112,7 @@ export function respondRules(text){
     return bot("Что слушаете?", [["learning","Подкаст","Подкаст"],["relax","Музыка","Музыку"],["reading","Аудиокнига","Аудиокнигу"]].map(([t, n, l]) => act(l, {op:"logQuick", type:t, name:n, text})).concat([act("Не надо записывать", {op:"keep"})]));
   }
   // «еду на работу», «жена приготовила ужин», «заказал пиццу»: не запись о деле (если нет цифр и явного времени)
-  if(A.notMine && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ __set_ruleMiss(false); return bot(chattyReply(null)); }
+  if(A.notMine && !A.states.length && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ __set_ruleMiss(false); return bot(chattyReply(null)); }
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
   if(A.meta === "tooEarly" && !hasSureAct){
     settings.statsHold = Math.max(settings.statsHold || 0, startedAt() + 14*86400000); persistSettings();
@@ -140,7 +149,7 @@ export function respondRules(text){
   if(foodStatement(text, s, pre)) return;
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
-  if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; }
+  if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; if(!hasAct && moodReply(MD, A, s, pre)) return; }
   if(A.question && !hasAct && !pre.some(e=>e.type)){ __set_ruleMiss(true); noteMiss(text, "question"); return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
@@ -273,7 +282,7 @@ export function respondRules(text){
   unknown.forEach((u, idx) => {
     noteMiss(u.text || u.name, "unknown");
     // варианты кнопок: сначала то, что подсказывает смысловой движок, потом самые частые типы
-    const eng = (RITM.engine ? RITM.engine.classify(RITM.core(u.text || u.name || "") || (u.text || u.name || ""), t => !["sleep","other","intimacy"].includes(t)) : []).filter(x => x.p >= 0.08).slice(0, 3).map(x => x.type);
+    const eng = (RITM.engine ? RITM.engine.classify(RITM.coreText(u.text || u.name || "") || (u.text || u.name || ""), t => !["sleep","other","intimacy"].includes(t)) : []).filter(x => x.p >= 0.08).slice(0, 3).map(x => x.type);
     const guesses = Array.from(new Set((/(развею|развея|размя|разомн|потян|подвиг|передохн|перерыв|пауз|встану|глаз)/.test(nrm(u.text || u.name || "")) ? ["pause"] : []).concat(eng, ["walk","strength","sport","hobby","relax","meal","work","other"]))).filter(t => TYPES[t]);
     const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
       guesses.slice(0,6).map(t => act(CATS[t].n, {op:"type", idx:0, type:t})).concat([act("Другое…", {op:"typechoose", idx:0}), act("Это не занятие", {op:"notact", idx:0})]),

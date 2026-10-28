@@ -345,7 +345,7 @@ export function missClick(ds){
   if(ds.missdel != null){ LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== ds.missdel)); renderMisses(); return true; }
   if(ds.missnot != null){ RITM.forget(ds.missnot); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== ds.missnot)); renderMisses(); toast("Запомнил: это не занятие"); return true; }
   if(ds.missact != null){ const text = ds.missact;
-    chooseType(`Что такое «${text.slice(0, 40)}»?`, RITM.guessType(text), t => { const nm = (RITM.core(text) || text).trim(); RITM.remember(text, t, nm.charAt(0).toUpperCase() + nm.slice(1, 50));
+    chooseType(`Что такое «${text.slice(0, 40)}»?`, RITM.guessType(text), t => { const nm = (RITM.coreText(text) || text).trim(); RITM.remember(text, t, nm.charAt(0).toUpperCase() + nm.slice(1, 50));
       LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== text)); renderMisses(); toast(`Запомнил: ${CATS[t].full.toLowerCase()}`); });
     return true; }
   return false;
