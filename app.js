@@ -179,19 +179,33 @@ const viewKey = () => iso(weekStart);
 function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key < ck ? 7 : -1); } // index of "today" inside a week
 
 /* ---------- analysis ---------- */
-// минимальная длительность, с которой занятие засчитывается в цель недели (короче — пишется в журнал, но цель не закрывает)
-const MIN_COUNT = {strength:15, walk:10, run:10, bike:10, swim:15, cardio:10, mobility:10, sport:20, social:10, outing:30, nature:30, unplug:30};
-const minCount = c => MIN_COUNT[c] || 5;
+// Цели считаются в процентах по минутам: цель = число занятий × обычная длительность.
+// Одно занятие засчитывается не больше, чем на 1,5 нормы (чтобы марафон не перекрыл всю неделю).
+const CREDIT_CAP = 1.5;
+const sessDef = c => (TYPES[c] || TYPES.other).def || 30;
+const roundMin = m => m >= 20 ? Math.round(m/5)*5 : Math.round(m);
 function goalState(w, ti){
-  const out = {};
+  const out = {}, linked = {};
+  for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(e.plan) linked[e.plan] = (linked[e.plan]||0) + (e.min||0);
   for(const c of goalCats()){
-    const goal = settings.goals[c]||0; let done=0, future=0, missed=0, plan=0;
-    for(const it of w.items){ if(it.cat!==c) continue; plan++; if(it.done) done++; else if(it.day >= ti) future++; else missed++; }
-    for(const [d, day] of Object.entries(w.days||{})) for(const e of (day.log||[])) if(e.type===c && !e.plan && (e.min||0) >= minCount(c)){ done++; plan++; }
-    out[c] = {goal, done, future, missed, plan, deficit: Math.max(0, goal - done - future)};
+    const goal = settings.goals[c]||0, def = sessDef(c), cap = def*CREDIT_CAP;
+    let doneMin=0, futureMin=0, missed=0, plan=0, items=0;
+    for(const it of w.items){ if(it.cat!==c) continue; plan++;
+      const dm = defaultMin(it);
+      if(it.done){ doneMin += Math.min(cap, linked[it.id] != null && linked[it.id] > 0 ? linked[it.id] : dm); }
+      else if(it.day >= ti) futureMin += Math.min(cap, dm);
+      else missed++;
+    }
+    for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(e.type===c && !e.plan && !e.neg && (e.min||0) > 0){ doneMin += Math.min(cap, e.min); }
+    const goalMin = goal*def, leftMin = Math.max(0, goalMin - doneMin - futureMin);
+    const done = doneMin/def, deficit = goal && leftMin >= Math.max(5, def*0.2) ? leftMin/def : 0;
+    out[c] = {goal, done: Math.round(done*10)/10, future: futureMin/def, missed, plan: (doneMin+futureMin)/def, deficit, doneMin: Math.round(doneMin), goalMin, futureMin: Math.round(futureMin), leftMin: Math.round(leftMin),
+      pct: goalMin ? Math.round(doneMin/goalMin*100) : 0, pctPlan: goalMin ? Math.round((doneMin+futureMin)/goalMin*100) : 0};
   }
   return out;
 }
+const gLeft = g => "~" + roundMin(g.leftMin) + " мин";
+const gTxt = g => `${g.pct}% (${g.doneMin} из ${g.goalMin} мин)`;
 // аэробная нагрузка за неделю: ВОЗ рекомендует 150–300 минут умеренной (или 75–150 интенсивной)
 const AERO = new Set(["walk","run","bike","swim","cardio","sport"]), AERO_GOAL = 150;
 function aeroMinutes(w){
@@ -261,7 +275,7 @@ function suggestionsToday(){
     if(!idea) continue;
     let why;
     if(x.whyOver) why = x.whyOver;
-    else if(x.g.deficit > 0) why = `До цели недели не хватает ${x.g.deficit} ${plural(x.g.deficit,"раза","раз","раз")}: ${CATS[x.c].n.toLowerCase()} ${x.g.done}/${x.g.goal}`;
+    else if(x.g.deficit > 0) why = `До цели недели не хватает ${gLeft(x.g)}: ${CATS[x.c].n.toLowerCase()} ${x.g.pct}% (${x.g.doneMin} из ${x.g.goalMin} мин)`;
     else if(x.since >= 3 && x.since < 99) why = `Уже ${x.since} ${plural(x.since,"день","дня","дней")} без ${CATS[x.c].g}`;
     else if(x.since === 99) why = `Ещё не было на этой неделе: ${CATS[x.c].n.toLowerCase()}`;
     else why = "Для разнообразия: что-то новое";
@@ -412,7 +426,7 @@ function buildSnapshot(){
   for(let d=0; d<7; d++){
     const its = w.items.filter(i=>i.day===d).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
     const undone = its.filter(i=>!i.done);
-    const gs = goalState(w, d), miss = goalCats().filter(c=>gs[c].deficit>0).map(c=>CATS[c].n.toLowerCase()+" ×"+gs[c].deficit);
+    const gs = goalState(w, d), miss = goalCats().filter(c=>gs[c].deficit>0).map(c=>CATS[c].n.toLowerCase()+" "+gLeft(gs[c]));
     const list = its.slice(0,4).map(i=>(i.time? i.time+" ":"")+i.t).join("; ");
     days[dateOf(ck,d)] = {
       morning: its.length ? {title:`Сегодня ${its.length} ${plural(its.length,"дело","дела","дел")}`, text: list + (its.length>4 ? " и ещё "+(its.length-4) : "") + ". И 15 минут дневного света до обеда."}
@@ -454,7 +468,7 @@ function renderWeek(){
   let gh;
   if(ti === 7) gh = `<h2>Неделя прошла</h2><p class="note">Итоги этой недели — во вкладке «Итоги», когда она текущая. Можно скопировать её план на новую неделю во вкладке «Ещё».</p>`;
   else if(!w.items.length) gh = `<h2>Неделя пустая</h2><p class="note">Приложение может само составить план по вашим целям, с разными занятиями.</p><div class="tools"><button class="btn primary" data-autofill="1">Составить план за меня</button><button class="btn" data-act="tpl">По шаблону</button></div>`;
-  else if(missing.length || aeroNeed > 0) gh = `<h2>Не хватает до целей</h2><p class="note">${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).concat(aeroNeed > 0 ? [`аэробной нагрузки ещё ~${aeroNeed} мин (норма ВОЗ ${AERO_GOAL})`] : []).join(", ")}</p><div class="tools"><button class="btn primary" data-autofill="1">Добавить недостающее</button></div><p class="note">Приложение раскидает занятия по самым свободным дням и подберёт разные идеи.</p>`;
+  else if(missing.length || aeroNeed > 0) gh = `<h2>Не хватает до целей</h2><p class="note">${missing.map(c => `${CATS[c].n.toLowerCase()} ещё ${gLeft(gs[c])}`).concat(aeroNeed > 0 ? [`аэробной нагрузки ещё ~${aeroNeed} мин (норма ВОЗ ${AERO_GOAL})`] : []).join(", ")}</p><div class="tools"><button class="btn primary" data-autofill="1">Добавить недостающее</button></div><p class="note">Приложение раскидает занятия по самым свободным дням и подберёт разные идеи.</p>`;
   else gh = `<p class="okline"><b>✓ Все цели недели в плане.</b> Чтобы перенести дело, нажмите на него.</p>`;
   $("weekGaps").innerHTML = gh;
   $("days").innerHTML = DFULL.map((name,d) => {
@@ -469,15 +483,16 @@ function renderStats(){
   $("subtitle").textContent = "Эта неделя";
   $("goalsCard").innerHTML = `<div class="bhead"><h2>Цели недели</h2><span class="note num">${w.items.filter(i=>i.done).length} сделано</span></div><div class="goals">` + goalCats().filter(c=>settings.goals[c]).map(c => {
     const g = gs[c], col = `var(${CATS[c].c})`;
-    return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.done}/${g.goal}</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.plan/g.goal*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.done/g.goal*100)}%;background:${col}"></div></div></div>`;
+    return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.pct}% · ${g.doneMin} из ${g.goalMin} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.pctPlan)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.pct)}%;background:${col}"></div></div></div>`;
   }).join("") + (() => { const a = aeroMinutes(w), col = "var(" + CATS.walk.c + ")";
     return `<div class="goal"><div class="gh"><span>Аэробика</span><span class="num">${a.done}/${AERO_GOAL} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,a.plan/AERO_GOAL*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,a.done/AERO_GOAL*100)}%;background:${col}"></div></div></div>`; })()
     + `</div><p class="note">Яркая часть полосы — сделано, бледная — запланировано. Аэробная нагрузка — ходьба, плавание, бег, велосипед и спорт; норма ВОЗ — от 150 минут в неделю.</p>`;
 
   const ins = [];
   const missing = goalCats().filter(c => gs[c].deficit > 0);
-  if(missing.length) ins.push(["warn", `Не хватает до целей: ${missing.map(c => `${CATS[c].n.toLowerCase()} ×${gs[c].deficit}`).join(", ")}. Во вкладке «Неделя» можно добавить это одной кнопкой.`]);
+  if(missing.length) ins.push(["warn", `Не хватает до целей: ${missing.map(c => `${CATS[c].n.toLowerCase()} ещё ${gLeft(gs[c])}`).join(", ")}. Во вкладке «Неделя» можно добавить это одной кнопкой.`]);
   { const a = aeroMinutes(w); if(ti < 6 && a.plan < AERO_GOAL) ins.push(["warn", `В плане ${a.plan} мин аэробной нагрузки (ходьба, плавание, бег и т. п.). Норма ВОЗ — от ${AERO_GOAL} минут в неделю, лучше до 300. Добавьте прогулку: 30 минут быстрым шагом — это уже ${Math.round(30/AERO_GOAL*100)}% нормы.`]); }
+  for(const t of breakLines(w, ti)) ins.push(["sun", t]);
   const missed = goalCats().reduce((s,c)=>s+gs[c].missed,0);
   if(missed) ins.push(["sun", `Пропущено ${missed} ${plural(missed,"дело","дела","дел")}. Не страшно: переносите их на свободные дни, а не отменяйте.`]);
   const elapsed = ti+1; let sleep=0, sleepN=0, light=0; const eM=[], eR=[], mood=[];
@@ -901,9 +916,45 @@ function todayStatsText(){
   const done = w.items.filter(i=>i.day===ti && i.done).length, all = w.items.filter(i=>i.day===ti).length;
   return `Сегодня сделано ${done} из ${all} по плану. ` + parts.join(", ") + ".";
 }
+
+/* ---------- микро-перерывы ---------- */
+// ответ на рабочий чек-ин («Если сидишь давно — 2 минуты разминки помогут»): «пойду развеюсь» = микро-перерыв
+const BREAK_WORDS = / (разомн\S*|размя\S*|потян\S*|пройд\S*|прогуляюсь|отдохн\S*|подвигаюсь|разве\S*|встану|встал\S*|встаю|схожу|сделаю разминку|разминк\S*|передохн\S*|перерыв\S*|пауз\S*) /;
+function workBreakReply(text, s, pre){
+  const cb = ctxBot(), m = cb.m;
+  if(!m || m.who !== "bot") return false;
+  const isCheck = m.kind === "work" || /разминк|потянись|размяться|встань на минуту|пауз/.test(m.text || "");
+  if(!isCheck || !(cb.explicit || Date.now() - (m.at||0) < 2*3600*1000)) return false;
+  if(pre.some(e => e.type && e.type !== "pause" && TYPES[e.type].unit !== "event" && !e.fuzzy)) return false;
+  if(/\?/.test(text) || !BREAK_WORDS.test(s)) return false;
+  const e0 = pre.find(e => e.type === "pause") || RITM.parse("микро-перерыв")[0];
+  const e = {...e0, text, dayOffset:0, tags: RITM.tagsOf(text, "pause")}; delete e.future; fillDefaults(e); logFromChat([e]);
+  bot(`Записал микро-перерыв (${describe(e) || "3 мин"}). ` + (commentFor(e) || ""));
+  return true;
+}
+// статистика перерывов: сколько раз за рабочий день вставал и какие теги встречаются
+function breakStats(w, ti){
+  let total = 0, wd = 0, wdBreaks = 0; const tags = {};
+  for(let d = 0; d <= Math.min(ti, 6); d++){
+    const lg = ((w.days||{})[d]||{}).log || [], br = lg.filter(x => x.type === "pause");
+    total += br.length; if(d < 5 && (lg.length || d < ti)){ wd++; wdBreaks += br.length; }
+    for(const x of lg) for(const t of (x.tags || [])) tags[t] = (tags[t]||0) + 1;
+  }
+  const top = Object.entries(tags).sort((a,b) => b[1]-a[1]).filter(x => x[1] >= 2).slice(0, 3);
+  return {total, perWorkday: wd ? wdBreaks/wd : 0, wd, top};
+}
+function breakLines(w, ti){
+  const b = breakStats(w, ti), out = [];
+  if(b.wd >= 2 && b.total){ const p = Math.round(b.perWorkday*10)/10;
+    out.push(p >= 4 ? `Микро-перерывов в рабочий день в среднем ${String(p).replace(".",",")}: отличная привычка не сидеть часами.` : `Микро-перерывов в рабочий день в среднем ${String(p).replace(".",",")}. Врачи советуют вставать каждые 30–60 минут, хватит и пары минут.`); }
+  else if(b.wd >= 3 && !b.total) out.push("Микро-перерывов на этой неделе не было. Раз в час встать и потянуться на 2–3 минуты — это уже польза для спины и глаз.");
+  if(b.top.length) out.push(b.top.map(([t,n]) => `${t} ${n} ${plural(n,"раз","раза","раз")}`).join(", ") + " за неделю (теги записей).");
+  return out;
+}
+
 function weekText(){
   const w = getWeek(curKey()), gs = goalState(w, todayI());
-  const rows = goalCats().map(c => `${CATS[c].full}: ${gs[c].done} из ${gs[c].goal}` + (gs[c].deficit ? ` (не хватает ${gs[c].deficit})` : ""));
+  const rows = goalCats().map(c => `${CATS[c].full}: ${gTxt(gs[c])}` + (gs[c].deficit ? ` (осталось ${gLeft(gs[c])})` : ""));
   return "Неделя по целям:\n" + rows.join("\n");
 }
 function commentFor(e){
@@ -921,8 +972,10 @@ function commentFor(e){
   if(e.type === "meal") return "Приятного аппетита!";
   if(e.type === "sleep") return e.event === "wake" ? "Доброе утро! Хорошего дня." : "Спокойной ночи!";
   if(TYPES[e.type] && TYPES[e.type].g === "screen") return (L.screen > settings.screenLimit) ? `Развлекательных экранов уже ${fmtDur(L.screen)} при лимите ${fmtDur(settings.screenLimit)}. Может, прогуляемся 15 минут?` : "";
+  if(e.type === "pause"){ const n = ((w.days[ti]||{}).log||[]).filter(x => x.type === "pause").length;
+    return n >= 4 ? `Уже ${n} микро-перерывов сегодня, голове и спине спасибо.` : n >= 2 ? `Микро-перерыв №${n} за сегодня. Так держать!` : pick(["Хорошо, что встал: пара минут движения уже помогает.","Отлично, короткая пауза помогает голове и спине."]); }
   if(goalCats().includes(e.type)){ const g = goalState(w, ti)[e.type];
-    const tail = g.done === g.goal ? pick([" Цель недели закрыта!"," Норма на неделю выполнена!"," План на неделю по этому пункту готов."]) : g.done > g.goal ? pick([" Уже сверх цели!"," Перевыполнение!"]) : ` ${CATS[e.type].full}: ${g.done} из ${g.goal} на этой неделе.`;
+    const tail = g.pct >= 130 ? pick([" Уже сверх цели!"," Перевыполнение!"]) : g.pct >= 100 ? pick([" Цель недели закрыта!"," Норма на неделю выполнена!"]) : ` ${CATS[e.type].full}: ${g.pct}% недели (${g.doneMin} из ${g.goalMin} мин), осталось ~${roundMin(Math.max(0, g.goalMin - g.doneMin))} мин.`;
     return praise() + tail; }
   if(CATS[e.type] && CATS[e.type].move) return praise();
   return "";
@@ -981,7 +1034,9 @@ function runAction(msgId, i){
   }
   else if(a.op === "typechoose"){
     const pend = (m.pending||[])[a.idx];
-    chooseType(`Что такое «${pend ? pend.name : ""}»?`, null, t => { m.acts.push(act(CATS[t].n, {op:"type", idx:a.idx, type:t})); m.chosen = null; saveChat(getChat().map(x=>x.id===m.id?m:x)); runAction(m.id, m.acts.length-1); });
+    chooseType(`Что такое «${pend ? pend.name : ""}»?`, null, list => { const t = list[0], extra = list.slice(1);
+      if(pend && extra.length) pend.tags = Array.from(new Set((pend.tags||[]).concat(extra.map(x => CATS[x].n.toLowerCase())))).slice(0, 5);
+      m.acts.push(act(CATS[t].n, {op:"type", idx:a.idx, type:t})); m.chosen = null; saveChat(getChat().map(x=>x.id===m.id?m:x)); runAction(m.id, m.acts.length-1); }, true);
     m.chosen = null; saveChat(arr); return;
   }
   else if(a.op === "review"){ openReview(); return; }
@@ -1033,7 +1088,7 @@ function logFromChat(entries){
       for(const e of list){
         if((e.changed || e.wasUnknown) && !e.noLearn) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
         const rec = {id:uid(), type:e.type, name:e.name, time:e.time || (TYPES[e.type].unit === "min" || +off ? "" : nowHM()), text:e.text, src:"chat"};
-        for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived","sets","reps","fuzzyWord","kcal","p","f","c"]) if(e[f] != null) rec[f] = e[f];
+        for(const f of ["min","km","ml","mg","g","srv","tags","steps","stepsOnly","event","dose","derived","sets","reps","fuzzyWord","kcal","p","f","c"]) if(e[f] != null) rec[f] = e[f];
         if(e.minGuess) rec.mg = 1;
         if(rec.stepsOnly) day.stepsManual = rec.steps;
         if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
@@ -1119,7 +1174,7 @@ function followUp(text, s, pre){
     const L = lastRecord(3*3600*1000); if(!L) return false;
     const off = / позавчера /.test(s) ? -2 : / вчера /.test(s) ? -1 : 0, r = L.rec;
     const e = {type:r.type, name:r.name, text, dayOffset:off, time:""};
-    for(const f of ["min","km","ml","mg","g","srv","kcal","p","f","c","dose","steps"]) if(r[f] != null) e[f] = r[f];
+    for(const f of ["min","km","ml","mg","g","srv","tags","kcal","p","f","c","dose","steps"]) if(r[f] != null) e[f] = r[f];
     if(!TYPES[e.type] || TYPES[e.type].unit === "event" || r.stepsOnly) return false;
     fillDefaults(e); logFromChat([e]); const L2 = LS.get("lastLog");
     bot(`Записал ещё раз: ${lc(r.name)}${describe(e) ? " (" + describe(e) + ")" : ""}${off === -1 ? " — вчера" : off === -2 ? " — позавчера" : ""}.`, L2 ? [act("Это лишнее, убрать", {op:"unlogIds", key:L2.key, d:L2.day, ids:L2.ids}), act("Всё верно", {op:"keep"})] : null);
@@ -1142,6 +1197,7 @@ function respondRules(text){
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
+  if(workBreakReply(text, s, pre)) return;
   if(nudgeChatReply(text, s, pre)) return;
   if(followUp(text, s, pre)) return;
   // «а вода из кофе не считается?» — вопрос о правилах подсчёта
@@ -1349,7 +1405,7 @@ function respondRules(text){
   }
   unknown.forEach((u, idx) => {
     noteMiss(u.text || u.name, "unknown");
-    const guesses = ["walk","strength","sport","hobby","relax","meal","work","other"].filter(t => TYPES[t]);
+    const guesses = (/(развею|развея|размя|разомн|потян|подвиг|передохн|перерыв|пауз|встану|глаз)/.test(nrm(u.text || u.name || "")) ? ["pause"] : []).concat(["walk","strength","sport","hobby","relax","meal","work","other"]).filter(t => TYPES[t]);
     const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
       guesses.slice(0,6).map(t => act(CATS[t].n, {op:"type", idx:0, type:t})).concat([act("Другое…", {op:"typechoose", idx:0}), act("Это не занятие", {op:"notact", idx:0})]),
       {pending:[{...u, future: isFutureClause(u.text, text, u), date: (dayFromText(u.text) || msgDay || new Date()).getTime()}]});
@@ -2378,8 +2434,9 @@ function weeklyReport(){
   if(a.screen != null) L.push(`Развлечения в телефоне: ${fmtDur(Math.round(a.screen))} в день${b.screen != null && Math.abs(a.screen-b.screen) >= 10 ? ` (${a.screen < b.screen ? "меньше" : "больше"} на ${fmtDur(Math.round(Math.abs(a.screen-b.screen)))})` : ""}.`);
   if(a.steps != null) L.push(`Шагов в среднем ${fmtNum(Math.round(a.steps))} в день (ориентир ${fmtNum(settings.stepsGoal)}).`);
   { const ae = aeroMinutes(getWeek(ck)); L.push(`Аэробная нагрузка: ${ae.done} из ${AERO_GOAL} минут нормы ВОЗ.`); }
-  const good = goalCats().filter(c => gs[c].done >= gs[c].goal).map(c => CATS[c].full.toLowerCase());
-  const miss = goalCats().filter(c => gs[c].done < gs[c].goal).map(c => `${CATS[c].full.toLowerCase()} ${gs[c].done}/${gs[c].goal}`);
+  for(const t of breakLines(getWeek(ck), 6)) L.push(t);
+  const good = goalCats().filter(c => gs[c].pct >= 100).map(c => CATS[c].full.toLowerCase());
+  const miss = goalCats().filter(c => gs[c].pct < 100).map(c => `${CATS[c].full.toLowerCase()} ${gs[c].pct}% (${gs[c].doneMin} из ${gs[c].goalMin} мин)`);
   if(good.length) L.push(`Получилось: ${good.join(", ")}.`);
   if(miss.length) L.push(`Не дотянул: ${miss.join(", ")}.`);
   const st = streaks(); if(st.length) L.push(`Серии: ${st.join("; ")}.`);
@@ -2416,8 +2473,8 @@ function goalSuggestions(){
   const w1 = wk(1), w2 = wk(2);
   for(const c of goalCats()){
     const g = settings.goals[c], a = w1[c] ? w1[c].done : 0, b = w2[c] ? w2[c].done : 0;
-    if(a >= g + 1 && b >= g + 1 && g < 7) out.push({c, to:g+1, text:`${CATS[c].full}: две недели подряд ты делаешь больше цели (${b} и ${a} при цели ${g}). Поднять цель до ${g+1}?`});
-    else if(a <= g - 2 && b <= g - 2 && g > 1) out.push({c, to:g-1, text:`${CATS[c].full}: две недели подряд получается ${b} и ${a} при цели ${g}. Может, сделать цель реалистичнее — ${g-1}? Лучше стабильно, чем идеально.`});
+    if(a >= g + 1 && b >= g + 1 && g < 7) out.push({c, to:g+1, text:`${CATS[c].full}: две недели подряд ты делаешь больше цели (${Math.round(b)} и ${Math.round(a)} занятий по норме при цели ${g}). Поднять цель до ${g+1}?`});
+    else if(a <= g - 2 && b <= g - 2 && g > 1) out.push({c, to:g-1, text:`${CATS[c].full}: две недели подряд получается ${Math.round(b)} и ${Math.round(a)} занятий по норме при цели ${g}. Может, сделать цель реалистичнее — ${g-1}? Лучше стабильно, чем идеально.`});
   }
   return out;
 }
@@ -2993,7 +3050,7 @@ function focusTile(k, ck, ti){
   if(k === "steps"){ const st = stepsFor(ds); return st != null ? tile(fmtNum(st), "шагов из " + fmtNum(settings.stepsGoal), st/settings.stepsGoal) : tile("—", "шагов пока нет"); }
   if(k === "screen"){ const pd = health && health.usage ? phoneDay(ds) : null; return pd ? tile(fmtDur(pd.ent), "развлечений из " + fmtDur(settings.screenLimit), pd.ent/settings.screenLimit) : tile("—", "экран: нет доступа"); }
   if(k === "water"){ const L = intakeOf((w.days[ti]||{}).log); return tile(L.water + " мл", "воды из " + settings.waterGoal, L.water/settings.waterGoal); }
-  if(k === "goals"){ const gs = goalState(w, ti); let g = 0, d = 0; for(const c of goalCats()){ g += settings.goals[c] || 0; d += Math.min(settings.goals[c] || 0, (gs[c] && gs[c].done) || 0); } return tile(d + " из " + g, "целей недели", g ? d/g : null); }
+  if(k === "goals"){ const gs = goalState(w, ti); let g = 0, d = 0; for(const c of goalCats()){ if(!gs[c]) continue; g += gs[c].goalMin; d += Math.min(gs[c].goalMin, gs[c].doneMin); } return tile(g ? Math.round(d/g*100) + "%" : "—", "целей недели", g ? d/g : null); }
   return "";
 }
 function renderFocus(ck, ti){
@@ -3146,10 +3203,19 @@ function typeChipsHtml(cur, filter){
   for(const [k,t] of Object.entries(TYPES)){ if(filter && !filter(k)) continue; (groups[t.g] = groups[t.g]||[]).push(k); }
   return Object.entries(groups).map(([g, ks]) => `<div class="tgroup"><span class="label">${RITM.GROUPS[g].n}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${cur===k?"on":""}" data-cat="${k}"><i style="background:var(${CATS[k].c})"></i>${CATS[k].n}</button>`).join("")}</div></div>`).join("");
 }
-function chooseType(title, cur, cb){
-  openSheet(`<h2>${esc(title)}</h2><div id="tcPick">${typeChipsHtml(cur)}</div><div class="tools"><button class="btn" id="tcCancel">Отмена</button></div>`);
-  $("tcPick").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; closeSheet(); cb(b.dataset.cat); };
-  $("tcCancel").onclick = closeSheet;
+function chooseType(title, cur, cb, multi){
+  if(!multi){
+    openSheet(`<h2>${esc(title)}</h2><div id="tcPick">${typeChipsHtml(cur)}</div><div class="tools"><button class="btn" id="tcCancel">Отмена</button></div>`);
+    $("tcPick").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; closeSheet(); cb(b.dataset.cat); };
+    $("tcCancel").onclick = closeSheet; return; }
+  // несколько категорий: первая выбранная — основная, остальные становятся тегами
+  const sel = cur ? [cur] : [];
+  openSheet(`<h2>${esc(title)}</h2><p class="note">Можно выбрать несколько: первая — основная, остальные будут тегами.</p><div id="tcPick">${typeChipsHtml(cur)}</div><div class="tools"><button class="btn primary" id="tcDone" disabled>Готово</button><button class="btn" id="tcCancel">Отмена</button></div>`);
+  const paint = () => { document.querySelectorAll("#tcPick [data-cat]").forEach(b => { const i = sel.indexOf(b.dataset.cat); b.classList.toggle("on", i >= 0); b.dataset.ord = i === 0 ? "★" : i > 0 ? String(i+1) : ""; });
+    $("tcDone").disabled = !sel.length; $("tcDone").textContent = sel.length > 1 ? `Готово: ${CATS[sel[0]].n} + ещё ${sel.length-1}` : "Готово"; };
+  $("tcPick").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; const k = b.dataset.cat, i = sel.indexOf(k); if(i >= 0) sel.splice(i, 1); else sel.push(k); paint(); };
+  $("tcDone").onclick = () => { if(!sel.length) return; closeSheet(); cb(sel.slice()); };
+  $("tcCancel").onclick = closeSheet; paint();
 }
 function describe(e){
   const p = [];
@@ -3257,7 +3323,7 @@ function saveLogDraft(){
     for(const e of items){
       if(e.changed || e.wasUnknown) RITM.remember(e.text, e.type, e.wasUnknown ? e.name : null);
       const rec = {id:uid(), type:e.type, name:e.name, time:e.time||"", text:e.text};
-      for(const f of ["min","km","ml","mg","g","srv","steps","stepsOnly","event","dose","derived"]) if(e[f] != null) rec[f] = e[f];
+      for(const f of ["min","km","ml","mg","g","srv","tags","steps","stepsOnly","event","dose","derived"]) if(e[f] != null) rec[f] = e[f];
       if(rec.stepsOnly) day.stepsManual = rec.steps;
       if(TYPES[rec.type].unit === "min" && !rec.stepsOnly){
         const it = w.items.find(i => i.day===d && i.cat===rec.type && !i.done);

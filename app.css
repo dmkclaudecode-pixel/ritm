@@ -195,3 +195,5 @@ label.tog{display:flex}
 .ritual .rmain li b{min-width:44px;color:var(--muted);font-weight:600}
 .ritual .rmain li.first span{font-weight:600}
 .ritual .tools{margin-top:10px}
+
+.chip[data-ord]:not([data-ord=""])::after{content:attr(data-ord);margin-left:6px;font-size:.7rem;font-weight:700;opacity:.8}

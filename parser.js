@@ -26,11 +26,24 @@ const NUM = "(\\d+(?:[.,]\\d+)?|" + Object.keys(NUMW).sort((a,b)=>b.length-a.len
 const toNum = s => s == null ? null : (NUMW[s] != null ? NUMW[s] : parseFloat(String(s).replace(",", ".")));
 const isNumTok = t => /^\d/.test(t) || NUMW[t] != null;
 
+// теги занятия: у записи одна основная категория, а особенности (глаза, растяжка, шаги, улица) — теги
+const TAG_DEFS = [["глаза", /глаз|поморга/], ["растяжка", /растяж|потян|размя|разомн|разминк|стретч/], ["шаги", /шаг|прошел|прошёл|пройд|прогул|ходьб|ног[иа]? размя/], ["улица", /улиц|на воздух|двор|на балкон|парк|скверик/], ["шея", /\bшею|шеи\b|шея\b/], ["вода", /попил воды|стакан воды/]];
+function tagsOf(text, type){
+  const s = String(text || "").toLowerCase().replace(/ё/g, "е"), out = [];
+  for(const [tag, re] of TAG_DEFS) if(re.test(s) && !out.includes(tag)) out.push(tag);
+  // тег, совпадающий с основной категорией, не нужен
+  if(out.includes("глаза")) out.splice(out.indexOf("растяжка") >= 0 ? out.indexOf("растяжка") : out.length, out.includes("растяжка") ? 1 : 0);
+  return out.filter(t => !((t === "растяжка" && type === "mobility") || (t === "шаги" && ["walk","run"].includes(type)) || t === "вода")).slice(0, 4);
+}
+if(typeof window !== "undefined") window.RITM = Object.assign(window.RITM || {}, {tagsOf});
+
 // единицы: ключ → [тип единицы, множитель]
 const UNITS = [
   ["минут|минуты|минуту|минутк[а-я]*|мин|м(?=\\s|$)", "min", 1],
   ["часа|часов|час|ч(?=\\s|$)", "min", 60],
   ["километра|километров|километр|км|кило(?=\\s|$)", "km", 1],
+  ["дорожки|дорожек|дорожку|дорожка|бассейна|бассейнов|длины|длин", "lap", 1],
+  ["метров|метра|метр", "meter", 1],
   ["шагов|шага|шаг", "steps", 1],
   ["миллилитров|мл", "ml", 1],
   ["литра|литров|литр|литрушк[а-я]*|л(?=\\s|$)", "ml", 1000],
@@ -226,6 +239,7 @@ function buildEntry(act, clause, times, qty){
   if(!name){ const c = core(clause), w0 = (c.split(" ")[0]||""); name = c && c.length > 2 && c.includes(" ") && !/(л|ла|ли|лся|лась|ть|ться)$/.test(w0) ? cap(c).slice(0,40) : (t.short || t.n); }
   if(act.type === "water" && (e.n === "Стакан воды" || e.n === "Бутылка воды" || !e.n)) name = "Вода";
   const out = {type:act.type, name, time:times.time || "", text:clause.trim()};
+  { const tg = tagsOf(clause + " " + name, act.type); if(tg.length) out.tags = tg; }
   if(times.approx) out.approx = true;
   if(act.fuzzy) out.fuzzy = true;
   const q = k => qty.find(x=>x.unit===k);
@@ -238,14 +252,23 @@ function buildEntry(act, clause, times, qty){
     let min = times.dur;
     const qm = q("min"), qk = q("km"), qs = q("steps"), qset = q("sets"), qp = q("pages"), qe = q("episodes"), qt = q("times");
     if(qm) min = qm.n * qm.mul;
+    if(act.type === "swim"){   // плавание: дорожка бассейна = 50 м, «200 м» — метры, а не минуты
+      const ql = q("lap"), qmt = q("meter"); let km = null, meters = false;
+      if(ql) km = ql.n * 0.05; else if(qmt) km = qmt.n / 1000; else if(qk) km = qk.n;
+      else if(qm && qm.mul === 1 && /\d\s*м(?![а-яa-z])/i.test(clause) && !/мин/i.test(clause) && qm.n >= 25){ km = qm.n / 1000; meters = true; }
+      else if(min == null && /дорожк/i.test(clause)) km = 0.05;
+      if(km != null){ out.km = Math.round(km*1000)/1000; if(meters || min == null || (ql || qmt || qk) && !qm) min = Math.max(1, Math.round(km * (t.kmMin || 27))); }
+    } else
     if(qk){ out.km = qk.n; if(min == null) min = Math.round(qk.n * (t.kmMin || 12)); }
-    if(qs){ out.steps = Math.round(qs.n); if(min == null && !qk){ out.stepsOnly = true; out.name = "Шаги"; out.min = 0; return out; } }
+    if(qs && act.type === "pause") out.steps = Math.round(qs.n);
+    else if(qs){ out.steps = Math.round(qs.n); if(min == null && !qk){ out.stepsOnly = true; out.name = "Шаги"; out.min = 0; return out; } }
     if(qset && min == null){ min = qset.n * 3; out.sets = qset.n; }
     if(qt && act.type === "strength" && min == null){ out.reps = qt.n; }
     if(qp && min == null) min = Math.round(qp.n * 1.5);
     if(qe && min == null) min = Math.round(qe.n * 45);
     out.min = min != null ? Math.round(min) : (e.m || t.def);
     out.minGuess = min == null;
+    if(act.type === "pause") out.minGuess = false;
   } else if(t.unit === "ml"){
     let ml = null; const qml = q("ml"), qg = q("glass"), qc = q("cup"), qb = q("bottle"), bare = q("bare");
     if(qml) ml = qml.n * qml.mul * (q("each") ? q("each").n : 1); else if(qg) ml = qg.n * 250; else if(qc) ml = qc.n * 300; else if(qb) ml = qb.n * 500;
