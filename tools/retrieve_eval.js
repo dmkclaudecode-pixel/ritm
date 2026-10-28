@@ -24,7 +24,7 @@ for(const d of tests){
     const gb = d.turns[i + 1], prevB = d.turns[i - 1] && d.turns[i - 1].who === "B" ? d.turns[i - 1] : null;
     const rule = T.reply({text: t.text, mood, ctx, rnd});
     const r = Rt.pick({text: t.text, history: users.slice(0, -1), botq: prevB && /\?\s*$/.test(prevB.text) ? prevB.text : null, kind: prevB ? F.qKind(prevB.text) : null, ak: F.answerKind(t.text), topic: (T.topicOf(users.join(" ")) || {}).k, mood, said: []}, 0);
-    if(gb && gb.who === "B" && !ACTION.test(gb.text)) rows.push({u: t.text, prev: prevB && prevB.text, gold: gb.text, rule: rule.text, ret: r && (r.text || r.best), score: r ? r.score : 0, c: r && r.c, margin: r ? r.margin : 0, from: r && r.from});
+    if(gb && gb.who === "B" && !ACTION.test(gb.text)) rows.push({u: t.text, prev: prevB && prevB.text, gold: gb.text, rule: rule.text, ret: r && (r.text || r.best), score: r ? r.score : 0, p: r ? r.p : 0, gact: gb && gb.act, ract: rule.act, ract2: r && r.act, rasked: rule.asked, c: r && r.c, margin: r ? r.margin : 0, from: r && r.from});
     ctx.push("bot", gb && gb.who === "B" ? gb.text : rule.text, {asked: gb && gb.who === "B" ? /\?\s*$/.test(gb.text) : rule.asked, act: gb ? gb.act : rule.act});
   }
 }
@@ -38,3 +38,9 @@ for(const th of [.35, .45, .5, .55, .6, .65, .7]){
 if(process.argv.includes("-p")){ const n = +process.argv[process.argv.indexOf("-p") + 1] || 30; rows.slice(0, n).forEach(r => console.log(`\nБ: ${r.prev || "-"}\n У: ${r.u}\n ЭТАЛОН: ${r.gold}\n ПРАВИЛА: ${r.rule}\n ПОДБОР (${r.score}): ${r.ret}`)); }
 
 if(process.argv.includes("-c")){ const good = new Set([0,4,6,8,16,17,23,24,25,27]); rows.slice(0, 28).forEach((r, i) => console.log((good.has(i) ? "OK  " : "BAD ") + i + " lex=" + r.c.lex.toFixed(2) + " sem=" + r.c.sem.toFixed(2) + " qq=" + r.c.qq.toFixed(2) + " score=" + r.score + " m=" + r.margin + (r.prev ? " Q" : "  "))); }
+
+{ const sig = (a, t) => (a || "?") + "|" + (/\?\s*$/.test(t || "") ? "q" : "s");
+  const okR = rows.map(r => sig(r.ract, r.rule) === sig(r.gact, r.gold)), okT = rows.map(r => r.ret && sig(r.ract2, r.ret) === sig(r.gact, r.gold));
+  console.log(`\nпопадание в (акт, вопрос/не вопрос): правила ${okR.filter(Boolean).length}/${rows.length}, подбор без порога ${okT.filter(Boolean).length}/${rows.length}`);
+  for(const th of [.2, .3, .4, .5, .6, .7]){ const use = rows.map(r => r.p >= th), n = use.filter(Boolean).length, good = rows.filter((r, i) => use[i] && okT[i]).length, mix = rows.filter((r, i) => use[i] ? okT[i] : okR[i]).length;
+    console.log(`p>=${th}: подбор в ${n} случаях, верно ${good}${n ? " (" + Math.round(100 * good / n) + "%)" : ""}; правила на остальных верно ${rows.filter((r, i) => !use[i] && okR[i]).length}/${rows.length - n}; смесь ${mix}/${rows.length}`); } }

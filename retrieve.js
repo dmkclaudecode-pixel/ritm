@@ -8,7 +8,7 @@ const STOP = new Set("это как что так вот или для при п
 const norm = w => String(w).toLowerCase().replace(/ё/g, "е");
 const toks = t => (String(t).toLowerCase().replace(/ё/g, "е").match(/[а-я]{3,}|\d+/g) || []).filter(w => !STOP.has(w));
 const stemOf = w => /^\d/.test(w) ? w : (R.engine ? R.engine.stem(w) : w.slice(0, 5));
-let IDX = [], IDF = new Map(), ready = false;
+let IDX = [], IDF = new Map(), ready = false, GATE = null;
 
 function bag(words){ const m = new Map(); for(const w of words){ const s = stemOf(w); m.set(s, (m.get(s) || 0) + 1); } return m; }
 function meanVec(words){
@@ -27,23 +27,27 @@ function prep(e){ e.ub = bag(e.u); e.bb = bag(e.b || []); e.uv = meanVec(e.u); e
 function load(index){
   IDX = (index.items || []).map(e => prep(Object.assign({}, e))); const df = new Map();
   for(const e of IDX) for(const k of new Set([...e.ub.keys(), ...e.bb.keys()])) df.set(k, (df.get(k) || 0) + 1);
-  IDF = new Map(); for(const [k, c] of df) IDF.set(k, Math.log(1 + IDX.length / c)); ready = true;
+  IDF = new Map(); for(const [k, c] of df) IDF.set(k, Math.log(1 + IDX.length / c)); GATE = index.gate || null; ready = true;
 }
 // q: {text, history[], botq, kind, ak, topic, mood, said[]}
-function pick(q, th){
-  if(!ready) return null; th = th == null ? .6 : th;
+function pick(q, th, opt){
+  if(!ready) return null; th = th == null ? .5 : th; opt = opt || {};
   const uw = toks(q.text), allw = new Set((q.history || []).concat([q.text]).flatMap(toks).map(stemOf));
   const qb = bag(uw), qbq = bag(toks(q.botq || "")), qv = meanVec(uw), qbv = meanVec(toks(q.botq || ""));
   const val = (q.mood && q.mood.valence) || 0, dom = q.mood && q.mood.dominant;
   let best = null, bs = -1, second = -1, bc = null;
   for(const e of IDX){
     if(q.said && q.said.includes(e.reply)) continue;
+    if(opt.exclude != null && e.d === opt.exclude) continue;
     let bad = false; for(const k of e.echoSet) if(!allw.has(k)){ bad = true; break; } if(bad) continue;
     const lex = cosBag(qb, e.ub), sem = dot(qv, e.uv), qq = q.botq ? Math.max(cosBag(qbq, e.bb), dot(qbv, e.bv) * .8) : (e.b && e.b.length ? 0 : .6);
     const s = .22 * lex + .22 * Math.max(0, sem) + .26 * qq + .08 * (q.kind && q.kind === e.kind ? 1 : 0) + .04 * (q.ak && q.ak === e.ak ? 1 : 0) + .1 * (1 - Math.min(1, Math.abs(val - (e.val || 0)))) + .04 * (dom && dom === e.dom ? 1 : 0) + .04 * (q.topic && q.topic === e.topic ? 1 : 0);
     if(s > bs){ second = bs; bs = s; best = e; bc = {lex, sem, qq}; } else if(s > second) second = s;
   }
-  return best && bs >= th ? {text: best.reply, score: +bs.toFixed(3), margin: +(bs - second).toFixed(3), act: best.act || null, c: bc, from: best.u.join(" ")} : (best ? {text: null, score: +bs.toFixed(3), best: best.reply, c: bc} : null);
+  if(!best) return null;
+  const x = [bc.lex, Math.max(0, bc.sem), bc.qq, q.kind && q.kind === best.kind ? 1 : 0, q.ak && q.ak === best.ak ? 1 : 0, 1 - Math.min(1, Math.abs(val - (best.val || 0))), dom && dom === best.dom ? 1 : 0, q.topic && q.topic === best.topic ? 1 : 0, bs - Math.max(second, 0), q.botq ? 1 : 0, Math.min(1, best.reply.split(" ").length / 25), Math.min(1, uw.length / 10), bs, 1];
+  const p = GATE ? 1 / (1 + Math.exp(-GATE.w.reduce((a, w, i) => a + w * (x[i] || 0), 0))) : bs;
+  return {text: p >= th ? best.reply : null, best: best.reply, score: +bs.toFixed(3), p: +p.toFixed(3), margin: +(bs - second).toFixed(3), act: best.act || null, x, c: bc, from: best.u.join(" ")};
 }
 R.retrieve = {load, pick, toks, stemOf, size: () => IDX.length};
 if(typeof module !== "undefined" && module.exports) module.exports = R.retrieve;
