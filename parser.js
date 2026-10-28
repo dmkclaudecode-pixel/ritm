@@ -26,6 +26,8 @@ const NUM = "(\\d+(?:[.,]\\d+)?|" + Object.keys(NUMW).sort((a,b)=>b.length-a.len
 const toNum = s => s == null ? null : (NUMW[s] != null ? NUMW[s] : parseFloat(String(s).replace(",", ".")));
 const isNumTok = t => /^\d/.test(t) || NUMW[t] != null;
 
+const COMPANY_TYPES = {caffeine:["за кофе", 20], meal:["за едой", 45], sweets:["за десертом", 20], alcohol:["за бокалом", 90]};
+const COMPANY_RE = /(?:^|\s)(?:с|со)\s+(?:коллег\S*|друг\S*|подруг\S*|подруж\S*|мам\S*|пап\S*|жен\S*|муж\S*|девушк\S*|парн\S*|родител\S*|сестр\S*|брат\S*|сын\S*|доч\S*|одногруппник\S*|одноклассник\S*|соседк\S*|сосед\S*|партнер\S*|бабушк\S*|дедушк\S*|начальник\S*|команд\S*|ребят\S*|знаком\S*|колле\S*)|(?:^|\s)(?:у друга|у подруги|к друзьям|в гости|вместе|вдвоем|компанией)(?:\s|$)/;
 // теги занятия: у записи одна основная категория, а особенности (глаза, растяжка, шаги, улица) — теги
 const TAG_DEFS = [["глаза", /глаз|поморга/], ["растяжка", /растяж|потян|размя|разомн|разминк|стретч/], ["шаги", /шаг|прошел|прошёл|пройд|прогул|ходьб|ног[иа]? размя/], ["улица", /улиц|на воздух|двор|на балкон|парк|скверик/], ["шея", /\bшею|шеи\b|шея\b/], ["вода", /попил воды|стакан воды/]];
 function tagsOf(text, type){
@@ -381,6 +383,11 @@ function parse(text){
       const shakes = act.type === "protein" ? 1 : 0;
       const extra = act.type === "protein" ? 300 + Math.max(0, (e.srv||1) - 1) * 100 : 200;
       out.push({type:"water", name:"Вода", time:e.time, ml:shakes ? extra : 200, text:raw, derived:true, ...(offset ? {dayOffset:offset} : {})});
+    }
+    // «попили кофе с коллегой», «пообедали с друзьями»: это ещё и общение (в цели «общение»), плюс сам напиток или еда
+    if(!negated && COMPANY_TYPES[act.type] && COMPANY_RE.test(s)){
+      const qmn = qty.find(x=>x.unit==="min"), m = qmn ? qmn.n * qmn.mul : (times.dur != null ? times.dur : COMPANY_TYPES[act.type][1]);
+      out.push({type:"social", name:"Общение " + COMPANY_TYPES[act.type][0], time:e.time, min:Math.round(m), text:raw, derived:true, minGuess:false, ...(offset ? {dayOffset:offset} : {})});
     }
     prev = {act, clause:raw, qty, offset};
   }
