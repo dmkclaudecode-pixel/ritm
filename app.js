@@ -181,40 +181,14 @@ function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key <
 /* ---------- analysis ---------- */
 // Цели считаются в процентах по минутам: цель = число занятий × обычная длительность.
 // Одно занятие засчитывается не больше, чем на 1,5 нормы (чтобы марафон не перекрыл всю неделю).
-const CREDIT_CAP = 1.5;
+const {CREDIT_CAP, roundMin} = RITM.core;
 const sessDef = c => (TYPES[c] || TYPES.other).def || 30;
-const roundMin = m => m >= 20 ? Math.round(m/5)*5 : Math.round(m);
-function goalState(w, ti){
-  const out = {}, linked = {};
-  for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(e.plan) linked[e.plan] = (linked[e.plan]||0) + (e.min||0);
-  for(const c of goalCats()){
-    const goal = settings.goals[c]||0, def = sessDef(c), cap = def*CREDIT_CAP;
-    let doneMin=0, futureMin=0, missed=0, plan=0, items=0;
-    for(const it of w.items){ if(it.cat!==c) continue; plan++;
-      const dm = defaultMin(it);
-      if(it.done){ doneMin += Math.min(cap, linked[it.id] != null && linked[it.id] > 0 ? linked[it.id] : dm); }
-      else if(it.day >= ti) futureMin += Math.min(cap, dm);
-      else missed++;
-    }
-    for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(e.type===c && !e.plan && !e.neg && (e.min||0) > 0){ doneMin += Math.min(cap, e.min); }
-    const goalMin = goal*def, leftMin = Math.max(0, goalMin - doneMin - futureMin);
-    const done = doneMin/def, deficit = goal && leftMin >= Math.max(5, def*0.2) ? leftMin/def : 0;
-    out[c] = {goal, done: Math.round(done*10)/10, future: futureMin/def, missed, plan: (doneMin+futureMin)/def, deficit, doneMin: Math.round(doneMin), goalMin, futureMin: Math.round(futureMin), leftMin: Math.round(leftMin),
-      pct: goalMin ? Math.round(doneMin/goalMin*100) : 0, pctPlan: goalMin ? Math.round((doneMin+futureMin)/goalMin*100) : 0};
-  }
-  return out;
-}
+const goalState = (w, ti) => RITM.core.goalState(w, ti, {goals:settings.goals, cats:goalCats(), def:sessDef, defaultMin});
 const gLeft = g => "~" + roundMin(g.leftMin) + " мин";
 const gTxt = g => `${g.pct}% (${g.doneMin} из ${g.goalMin} мин)`;
 // аэробная нагрузка за неделю: ВОЗ рекомендует 150–300 минут умеренной (или 75–150 интенсивной)
-const AERO = new Set(["walk","run","bike","swim","cardio","sport"]), AERO_GOAL = 150;
-function aeroMinutes(w){
-  const linked = {}; let done = 0, plan = 0;
-  for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(e.plan) linked[e.plan] = e.min || 0;
-  for(const it of w.items){ if(!AERO.has(it.cat)) continue; const m = it.done && linked[it.id] ? linked[it.id] : defaultMin(it); plan += m; if(it.done) done += m; }
-  for(const day of Object.values(w.days||{})) for(const e of (day.log||[])) if(AERO.has(e.type) && !e.plan && (e.min||0) >= 5){ done += e.min; plan += e.min; }
-  return {done, plan};
-}
+const {AERO, AERO_GOAL} = RITM.core;
+const aeroMinutes = w => RITM.core.aeroMinutes(w, defaultMin);
 function daysSinceDone(cat){
   const ck = curKey(), ti = todayI(), cw = getWeek(ck), pw = getWeek(iso(addDays(mondayOf(new Date()),-7)));
   let best = 99;
@@ -933,16 +907,7 @@ function workBreakReply(text, s, pre){
   return true;
 }
 // статистика перерывов: сколько раз за рабочий день вставал и какие теги встречаются
-function breakStats(w, ti){
-  let total = 0, wd = 0, wdBreaks = 0; const tags = {};
-  for(let d = 0; d <= Math.min(ti, 6); d++){
-    const lg = ((w.days||{})[d]||{}).log || [], br = lg.filter(x => x.type === "pause");
-    total += br.length; if(d < 5 && (lg.length || d < ti)){ wd++; wdBreaks += br.length; }
-    for(const x of lg) for(const t of (x.tags || [])) tags[t] = (tags[t]||0) + 1;
-  }
-  const top = Object.entries(tags).sort((a,b) => b[1]-a[1]).filter(x => x[1] >= 2).slice(0, 3);
-  return {total, perWorkday: wd ? wdBreaks/wd : 0, wd, top};
-}
+const breakStats = (w, ti) => RITM.core.breakStats(w, ti);
 function breakLines(w, ti){
   const b = breakStats(w, ti), out = [];
   if(b.wd >= 2 && b.total){ const p = Math.round(b.perWorkday*10)/10;

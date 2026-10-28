@@ -23,6 +23,9 @@ for(const [t, exp] of NLU){
   if(exp.question != null && a.question !== exp.question) pass = false;
   if(pass) ok++; else { bad++; fails.push(`NLU «${t}»\n   ждали: ${JSON.stringify(exp)}\n   вышло: ${JSON.stringify({crisis:a.crisis, states:a.states, small:a.small, corr:a.correction, topics:a.topics, meta:a.meta})}`); }
 }
+{ const c = require("./core.test.js"); ok += c.ok; bad += c.fails.length; fails.push(...c.fails); }
+{ const vm = require("vm"), fs = require("fs");   // синтаксис всех файлов интерфейса
+  for(const f of ["app.js","core.js","parser.js","nlu.js","catalog.js","catalog2.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
 require("./stress.js"); require("./food.js");
