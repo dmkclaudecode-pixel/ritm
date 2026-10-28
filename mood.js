@@ -126,14 +126,14 @@ function vhits(s, taken){
   }
   return out;
 }
-const VTH = 0.75, NBTH = 0.3;
+const VTH = 0.75, NBTH = 0.3, NBTH_ALONE = 0.3;
 // служебные, временные и бытовые слова не несут эмоции — векторы у них «похожи на всё»
 const STOPV = new Set("после завтра сегодня вчера внутри снаружи сейчас потом всегда никогда иногда утром вечером ночью днём днем тогда сразу опять снова уже ещё еще очень совсем просто почти будто словно кажется вокруг около между через перед сквозь вдруг теперь здесь тут там куда откуда почему зачем когда пока чтобы потому поэтому однако который которая которое которые весь всего всем всех свою свой своя моего моей моим этот этого этой этим такой такая такое такие какой какая какие стою стоять сидеть сижу лежу лежать ходил ходить смены смена работа работы работе дома домой дому".split(" "));
 function analyze(text){
   const raw = String(text || ""), s = norm(raw), st = style(raw), toks = s.trim().split(/\s+/);
   const score = {}; const add = (k, w) => { score[k] = (score[k] || 0) + w; };
   const signals = [];
-  const H = hits(raw); for(const h of xhits(s, H)) H.push(h); { const nb = nbPredict(raw); if(nb && nb.label !== "neutral" && nb.p >= NBTH) H.push({k:nb.label, at:0, len:0, w:"модель", x:Math.min(1.2, .6 + nb.p / 2)}); }
+  const H = hits(raw); for(const h of xhits(s, H)) H.push(h); { const nb = nbPredict(raw); if(nb && nb.label !== "neutral" && nb.p >= (H.length ? NBTH : NBTH_ALONE)) H.push({k:nb.label, at:0, len:0, w:"модель", x:Math.min(1.2, .6 + nb.p / 2)}); }
   if(!H.length) for(const h of vhits(s, H)) H.push(h); H.sort((a, b) => a.at - b.at);
   for(const h of H){
     // слова до совпадения: усилители, ослабители, отрицания (в пределах трёх слов)

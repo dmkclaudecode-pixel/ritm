@@ -95,7 +95,7 @@ function compose(frame, ctx, rnd){
   if(ctx){ const cm = ctx.mood(); if(cm.n >= 3 && cm.trend > .5 && (m.valence || 0) > 0) out = "Заметно, что настроение поднимается. " + out; }
   // вторым предложением — мягкий вопрос, если эмоция сильная и ещё не спрашивали
   const f = m.dominant === "sad" || m.dominant === "anxious" ? T.followup_sad : m.dominant === "tired" ? T.followup_tired : m.dominant === "joy" ? T.followup_joy : null;
-  if(f && (m.intensity || 0) >= .5 && (!ctx || !ctx.last("bot", x => x.meta.asked))) out += " " + pickFresh(ctx, f, rnd);
+  if(f && (m.intensity || 0) >= .5 && (!ctx || !(ctx.last("bot") || {meta: {}}).meta.asked)) out += " " + pickFresh(ctx, f, rnd);
   return fill(out, frame);
 }
 

@@ -70,3 +70,6 @@
 - `onto.js`: добавлены `domain` (food/drink/produce/sport/exercise/hobby — из Wikidata, ConceptNet IsA, RuWordNet), `isa`, `typeHint(слово)`. Данные собирает `node tools/compact_onto.js <папка с recipes/collocations/wikidata/conceptnet/ruwordnet>`.
 - `trainlog.js` — журнал «фраза → разбор → правка пользователя» на устройстве (ключ `ritm:trainlog`, до 3000 записей, входит в резервную копию).
 - Проверки: `tests/fresh/*.js` — свежие наборы (информационно). Правило: набор, по которому подгоняли словарь, больше не считается свежим; для честных цифр пишется новый (последний: `mood_e`).
+
+## Разговор (talk.js)
+`RITM.talk.reply({text, mood, ctx})` → {text, act, asked, topic}. Акты: selfneg, andyou, whatsup, botq, advice, ack, mood (эмпатия через `dialog.compose`), event, topic, clarify, invite, short. Правила тона: без вопроса два хода подряд, тема держится по контексту (`Context.topic`), фразы не повторяются (`Context.said`). Подключение: `js/parse.js` — `direct()` до разбора занятий, `moodReply` для сильной эмоции без дела, `chattyReply` вместо шаблонных «Принято». Тесты: `tests/talk.js` (сценарии из нескольких реплик).

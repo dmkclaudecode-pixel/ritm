@@ -50,18 +50,20 @@ function followUp(text, s, pre){
   return false;
 }
 const DLG = new RITM.dialog.Context(14);
+let lastMD = null, lastText = "";
 // сильная эмоция без дела: отвечаем по настроению с учётом контекста беседы
 function moodReply(MD, A, s, pre){
   const only = pre.every(e => e.unknown || !e.type || e.fuzzy || (e.minGuess && MD.intensity >= .7 && A.words <= 6));
   if(!only || /\d/.test(s) || pre.some(e => e.time) || MD.intensity < .35 || A.words > 14 || A.question) return false;
-  const r = RITM.dialog.compose({mood: MD}, DLG); DLG.push("bot", r, {asked: /\?$/.test(r)}); bot(r); return true;
+  const x = RITM.talk.reply({text: lastText, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked}); bot(x.text); return true;
 }
 export function respondRules(text){
   const s = nrm(text);
   __set_lastUserText(text); parserCtx();
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
-  const MD = RITM.mood.analyze(text); RITM.mood.track(MD); DLG.push("user", text, {mood: MD});
+  const MD = RITM.mood.analyze(text); RITM.mood.track(MD); lastMD = MD; lastText = text;
+  { const tp = RITM.talk ? RITM.talk.topicOf(text) : null; DLG.push("user", text, {mood: MD, topic: tp ? tp.k : undefined}); }
   if(RITM.trainlog) RITM.trainlog.record(text, {mood: MD.dominant, mi: MD.intensity});
   { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
     const cb = ctxBot();
@@ -73,6 +75,7 @@ export function respondRules(text){
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
+  if(RITM.talk && RITM.talk.direct(text)){ const x = RITM.talk.reply({text, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked}); return bot(x.text); }
   if(!A.states.length && moodReply(MD, A, s, pre)) return;
   if(workBreakReply(text, s, pre)) return;
   if(nudgeChatReply(text, s, pre)) return;
@@ -150,7 +153,7 @@ export function respondRules(text){
   if(foodStatement(text, s, pre)) return;
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
-  if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; if(!hasAct && moodReply(MD, A, s, pre)) return; }
+  if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; if(!pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event") && moodReply(MD, A, s, pre)) return; }
   if(A.question && !hasAct && !pre.some(e=>e.type)){ __set_ruleMiss(true); noteMiss(text, "question"); return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
@@ -307,6 +310,7 @@ function isChatty(u, A){
 export const SKIP_OK = ["Ничего страшного, бывает.","Понял, без проблем.","Окей, случается.","Бывает, не страшно.","Жизнь вносит правки, это нормально.","Понял. Один пропуск ничего не ломает.","Окей, не беда."];
 function chattyReply(kind){
   if(kind === "report" || kind === "insight") return "Понял тебя. Ничего не меняю, просто продолжаю наблюдать.";
+  if(RITM.talk && lastMD){ const x = RITM.talk.reply({text: lastText, mood: lastMD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked}); return x.text; }
   return pick(["Понял тебя.","Принято.","Окей, понял.","Ясно.","Услышал.","Понимаю."]) + " " + pick(["Если что-то делал или собираешься — напиши, я запишу.","Будут новости по делам — пиши.","Если захочешь что-то запланировать — я тут."]);
 }
 
