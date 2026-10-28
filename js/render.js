@@ -177,9 +177,9 @@ function renderStats(){
   $("subtitle").textContent = "Эта неделя";
   $("goalsCard").innerHTML = `<div class="bhead"><h2>Цели недели</h2><span class="note num">${w.items.filter(i=>i.done).length} сделано</span></div><div class="goals">` + goalCats().filter(c=>settings.goals[c]).map(c => {
     const g = gs[c], col = `var(${CATS[c].c})`;
-    return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.pct}% · ${g.doneMin} из ${g.goalMin} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.pctPlan)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.pct)}%;background:${col}"></div></div></div>`;
+    return `<div class="goal"><div class="gh"><span>${CATS[c].n}</span><span class="num">${g.pct}%</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,g.pctPlan)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,g.pct)}%;background:${col}"></div></div><div class="gsub">${g.doneMin} из ${g.goalMin} мин${g.pctPlan > g.pct ? " · в плане ещё " + Math.round(g.futureMin) + " мин" : ""}</div></div>`;
   }).join("") + (() => { const a = aeroMinutes(w), col = "var(" + CATS.walk.c + ")";
-    return `<div class="goal"><div class="gh"><span>Аэробика</span><span class="num">${a.done}/${AERO_GOAL} мин</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,a.plan/AERO_GOAL*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,a.done/AERO_GOAL*100)}%;background:${col}"></div></div></div>`; })()
+    return `<div class="goal"><div class="gh"><span>Аэробика</span><span class="num">${Math.round(a.done/AERO_GOAL*100)}%</span></div><div class="bar"><div class="pl" style="width:${Math.min(100,a.plan/AERO_GOAL*100)}%;background:${col}"></div><div class="dn" style="width:${Math.min(100,a.done/AERO_GOAL*100)}%;background:${col}"></div></div><div class="gsub">${a.done} из ${AERO_GOAL} мин</div></div>`; })()
     + `</div><p class="note">Яркая часть полосы — сделано, бледная — запланировано. Аэробная нагрузка — ходьба, плавание, бег, велосипед и спорт; норма ВОЗ — от 150 минут в неделю.</p>`;
 
   const ins = [];

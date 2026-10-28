@@ -50,10 +50,11 @@ h2{font-family:var(--f-display);font-weight:500;font-size:.95rem;margin:0;text-w
 
 /* summary */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
-.goals{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+.goals{display:grid;grid-template-columns:1fr;gap:12px}
 .goal{display:flex;flex-direction:column;gap:5px;min-width:0}
 .goal .gh{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:.85rem}
-.goal .gh span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.goal .gh span:first-child{font-weight:600}
+.goal .gsub{font-size:.78rem;color:var(--muted,#6b7a76)}
 .bar{height:8px;border-radius:4px;background:var(--line);position:relative;overflow:hidden}
 .bar .pl{position:absolute;inset:0 auto 0 0;opacity:.3;border-radius:4px}
 .bar .dn{position:absolute;inset:0 auto 0 0;border-radius:4px}
