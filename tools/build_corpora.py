@@ -128,6 +128,14 @@ def emotions():
                 lab[L] += 1
                 for w in ws: wl[w][L] += 1
     log(f"  CEDR: {sum(lab.values())} меток {dict(lab)}")
+    train_rows = []
+    for name in ("cedr-main-train.csv", "cedr-main-test.csv"):
+        if name not in by: continue
+        for r in csv.DictReader(open(by[name], encoding="utf-8", errors="ignore")):
+            ids = [int(x) for x in re.findall(r"\d", r.get("labels", ""))]
+            ls = [CEDR[i] for i in ids if i in CEDR]
+            if len(ls) == 1: train_rows.append({"t": r.get("text", ""), "l": {"sadness": "sad", "surprise": "surprised"}.get(ls[0], ls[0])})
+            elif not ids and r.get("text"): train_rows.append({"t": r["text"], "l": "neutral"})
     result["emo"] = lift_table(wl, lab, 6, 2.2, skip=("none",))
     # 2. RuSentiment: positive/negative
     wl = collections.defaultdict(collections.Counter); lab = collections.Counter()
@@ -139,6 +147,14 @@ def emotions():
             lab[L] += 1
             for w in set(lem(x)[0] for x in words(r.get("text", "")) if len(x) > 2): wl[w][L] += 1
     log(f"  RuSentiment: {dict(lab)}")
+    for name in ("rusentiment_random_posts.csv", "rusentiment_preselected_posts.csv", "rusentiment_test.csv"):
+        if name not in by: continue
+        for r in csv.DictReader(open(by[name], encoding="utf-8", errors="ignore")):
+            L = r.get("label")
+            if L in ("positive", "negative", "neutral") and r.get("text"): train_rows.append({"t": r["text"], "l": {"positive": "pos", "negative": "neg"}.get(L, L)})
+    with open(os.path.join(OUT, "mood_train.jsonl"), "w", encoding="utf-8") as fo:
+        for r in train_rows: fo.write(json.dumps(r, ensure_ascii=False) + "\n")
+    log(f"  обучающих текстов для классификатора: {len(train_rows)}")
     result["sent"] = lift_table(wl, lab, 10, 1.7, skip=("neutral",))
     # 3. словарь оценок слов (формат неизвестен заранее: пишем в отчёт первые строки и читаем «слово;среднее;…»)
     if "words_all_full_rating.csv" in by:

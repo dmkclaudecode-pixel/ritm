@@ -16,6 +16,11 @@ jobs:
         run: pip install pymorphy3 pymorphy3-dicts-ru huggingface_hub pyarrow
       - name: Собрать статистику
         run: python tools/build_corpora.py corpora
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Обучить классификатор настроения
+        run: node tools/train_mood.js corpora/mood_train.jsonl corpora/mood_nb.json | tee corpora/TRAIN.md
       - name: Положить результат в ветку corpora-data
         if: always()
         run: |
