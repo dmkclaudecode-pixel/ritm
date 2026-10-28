@@ -110,8 +110,8 @@ function lastLogEntries(){
 export function handleCorrection(c){
   const last = lastLogEntries();
   if(c.op === "what") return bot("Что поправить? Например: «не 30, а 45 минут», «это было вчера», «это было в 18:30», «не бег, а ходьба» или «удали последнее».");
-  if(!last) return bot("Не вижу свежих записей, которые можно поправить. Посмотри журнал во вкладке «Сегодня».");
-  const {L} = last, names = last.es.map(e => lc(e.name)).join(", ");
+  if(!last && c.op !== "extra") return bot("Не вижу свежих записей, которые можно поправить. Посмотри журнал во вкладке «Сегодня».");
+  const {L} = last || {L:{key:curKey(), day:todayI(), ids:[]}, es:[]}, names = (last ? last.es : []).map(e => lc(e.name)).join(", ");
   if(c.op === "undo"){
     mutateQuiet(L.key, w => { const day = w.days[L.day] = {...(w.days[L.day]||{})};
       for(const e of (day.log||[]).filter(e => L.ids.includes(e.id))) if(e.fuzzyWord) RITM.forget(e.text, e.fuzzyWord);
@@ -129,6 +129,25 @@ export function handleCorrection(c){
     mutateQuiet(tk, w => { const day = w.days[td] = {...(w.days[td]||{})}; day.log = (day.log||[]).concat(moved); });
     rememberLastLog(tk, td, L.ids);
     return bot(`Перенёс на ${c.offset === -1 ? "вчера" : "позавчера"}: ${names}.`);
+  }
+  if(c.op === "extra"){
+    // лишнее: убираем запись целиком, если она на эту сумму, или вычитаем из неё; ищем среди последних записей
+    const amt = e => c.what === "protein" ? (e.g != null && (e.type === "protein" || e.g > 0) ? e.g : null) : c.what === "water" ? (e.type === "water" ? e.ml : null) : c.what === "caffeine" ? (e.type === "caffeine" ? e.mg : null) : null;
+    let did = [];
+    // сначала записи последнего сообщения, потом остальные за день (новые раньше старых)
+    mutateQuiet(L.key, w => { const day = w.days[L.day]; if(!day) return;
+      const all = (day.log||[]).filter(e => !c.what || (amt(e) != null && amt(e) > 0));
+      const es = all.filter(e => L.ids.includes(e.id)).reverse().concat(all.filter(e => !L.ids.includes(e.id)).reverse());
+      const k = c.what === "protein" ? "g" : c.what === "water" ? "ml" : "mg"; let left = c.n;
+      for(const hit of es){
+        if(left != null && left <= 0.01) break;
+        const have = c.what ? amt(hit) : null, take = left == null ? have : Math.min(have, left);
+        if(c.what && take != null && have > take + 0.5){ hit[k] = Math.round((hit[k] - take)*10)/10; did.push(`${lc(hit.name)}: −${take}, осталось ${hit[k]}`); }
+        else { if(hit.plan){ const it = w.items.find(i=>i.id===hit.plan); if(it) it.done = false; } day.log = day.log.filter(x => x.id !== hit.id); did.push(`убрал «${lc(hit.name)}»`); }
+        if(left == null) break; left -= take;
+      }
+    });
+    return bot(did.length ? `Исправил: ${did.join("; ")}.` : "Не нашёл в последней записи, что убрать. Напиши, например: «убери 25 г белка» сразу после записи, или удали её в журнале на экране «Сегодня».");
   }
   mutateQuiet(L.key, w => { const day = w.days[L.day]; if(!day) return;
     const es = (day.log||[]).filter(e => L.ids.includes(e.id)); const e = es[es.length-1]; if(!e) return;

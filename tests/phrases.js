@@ -322,6 +322,11 @@ const PARSE = [
 ];
 
 const NLU = [
+  ["Убери 50г белка сегодня", {corr:{op:"extra", n:50, what:"protein"}}],
+  ["Удали 50г белка сегодня", {corr:{op:"extra", n:50, what:"protein"}}],
+  ["Ты записал лишние 25г белка", {corr:{op:"extra", n:25, what:"protein"}}],
+  ["убери 25 г белка", {corr:{op:"extra", n:25, what:"protein"}}],
+  ["ты записал лишний кофе", {corr:{op:"extra", what:"caffeine"}}],
   ["Там было два скупа белка", {corr:{op:"amount", n:2, unit:"скупа"}}],
   ["на самом деле три стакана", {corr:{op:"amount", n:3}}],
   ["там было полтора литра", {corr:{op:"amount", n:1.5}}],

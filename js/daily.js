@@ -206,7 +206,7 @@ function journalHtml(ctx){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), log = ((w.days[ti]||{}).log||[]).slice().sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
   const s = intakeOf(log);
   const bar = (v, max, col) => `<div class="bar"><div class="dn" style="width:${Math.min(100, max ? v/max*100 : 0)}%;background:var(${col})"></div></div>`;
-  let h = `<form data-log="${ctx}" class="logform logrow"><label class="sr" for="logInput-${ctx}">Что было? Пишите как удобно</label>
+  let h = ctx === "t" ? "" : `<form data-log="${ctx}" class="logform logrow"><label class="sr" for="logInput-${ctx}">Что было? Пишите как удобно</label>
     <input id="logInput-${ctx}" type="text" enterkeyhint="send" autocomplete="off" placeholder="Что делал? Кофе в 9:30…">
     <button class="btn primary" type="submit">Записать</button></form>`;
   if(logDraft && logDraft.ctx === ctx){
@@ -235,7 +235,7 @@ function journalHtml(ctx){
   }
   return h;
 }
-export function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Записать и отметить</h2><span class="note">вода, кофе, белок, дела</span></div>` + journalHtml("t"); }
+export function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Вода, кофе, белок</h2><span class="note">записывать — во вкладке «Чат»</span></div>` + journalHtml("t"); }
 
 export function fillDefaults(e){
   const t = TYPES[e.type]; if(!t) return e;
