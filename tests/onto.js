@@ -14,12 +14,22 @@ t("масло ← разогреть/смазать", has(O.lookup("масло")
 t("не еда: бег", !O.lookup("бег").isFood && !O.lookup("пробежка").isFood);
 t("вопрос про блюдо", /блюдо/.test((O.askAbout("шарлотка") || {}).text || ""));
 t("вопрос про продукт", /продукт/.test((O.askAbout("яблоко") || {}).text || ""));
-t("нет вопроса про бег", O.askAbout("бег") === null);
+t("нет вопроса про вторник", O.askAbout("вторник") === null);
 t("блюда из яйцо+мука+сахар", O.dishesFrom(["яйцо", "мука", "сахар"]).length >= 1, O.dishesFrom(["яйцо", "мука", "сахар"]).join());
 // обучение: после 2 подтверждений слово становится едой, одна ошибка не ломает
 t("до обучения не еда", !O.lookup("чиабатта").isFood || true);
 O.learn("квазизелень", "food", "дом"); t("1 подтверждение мало", !O.lookup("квазизелень").isFood);
 O.learn("квазизелень", "food", "магазин"); t("2 подтверждения — еда", O.lookup("квазизелень").isFood);
 O.learn("квазизелень", "food", null, -2); t("поправка ослабляет", !O.lookup("квазизелень").isFood);
+t("область: шарлотка — еда", O.lookup("шарлотка").domain === "food" || O.lookup("шарлотка").isFood);
+t("область: плавание — спорт", O.lookup("плавание").domain === "sport");
+t("область: вязание — хобби", O.lookup("вязание").domain === "hobby");
+t("область: кофе — напиток", O.lookup("кофе").domain === "drink");
+t("подсказка типа: пицца → meal", O.typeHint("пицца") === "meal");
+t("подсказка типа: плавание → sport", O.typeHint("плавание") === "sport");
+t("подсказка типа: вязание → hobby", O.typeHint("вязание") === "hobby");
+t("нет подсказки: вторник", O.typeHint("вторник") === null);
+t("isa: борщ — суп", O.lookup("борщ").isa.some(x => /суп/.test(x)), O.lookup("борщ").isa.join());
+t("вопрос про спорт", /спорт/.test((O.askAbout("плавание") || {}).text || ""));
 console.log(`онтология: ${ok} ок, ${bad.length} ошибок; ${JSON.stringify(O.stats())}`); bad.forEach(b => console.log("  ✗ " + b));
 if(bad.length) process.exitCode = 1;
