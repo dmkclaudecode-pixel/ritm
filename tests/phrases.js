@@ -2,6 +2,10 @@
 // PARSE: [фраза, [ожидаемые записи по порядку (проверяются только указанные поля)]]
 // NLU:   [фраза, {states, small, corr, crisis, topics, place}]
 const PARSE = [
+  ["сходили с девушкой в бассейн", [{type:"swim"}, {type:"social", derived:true}]],
+  ["поиграл в доту с друзьями 2 часа", [{type:"gaming", min:120}, {type:"social", min:120}]],
+  ["гуляли с мужем 40 минут", [{type:"walk", min:40}, {type:"social", min:40}]],
+  ["работал с коллегами", [{type:"social"}]],
   // еда и напитки в компании: и напиток, и общение
   ["Сходили попили кофе с коллегой", [{type:"caffeine"}, {type:"social", min:20, derived:true}]],
   ["пообедали с коллегами", [{type:"meal"}, {type:"social", min:45}]],

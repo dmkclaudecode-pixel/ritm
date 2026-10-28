@@ -27,7 +27,9 @@ const toNum = s => s == null ? null : (NUMW[s] != null ? NUMW[s] : parseFloat(St
 const isNumTok = t => /^\d/.test(t) || NUMW[t] != null;
 
 const COMPANY_TYPES = {caffeine:["за кофе", 20], meal:["за едой", 45], sweets:["за десертом", 20], alcohol:["за бокалом", 90]};
-const COMPANY_RE = /(?:^|\s)(?:с|со)\s+(?:коллег\S*|друг\S*|подруг\S*|подруж\S*|мам\S*|пап\S*|жен\S*|муж\S*|девушк\S*|парн\S*|родител\S*|сестр\S*|брат\S*|сын\S*|доч\S*|одногруппник\S*|одноклассник\S*|соседк\S*|сосед\S*|партнер\S*|бабушк\S*|дедушк\S*|начальник\S*|команд\S*|ребят\S*|знаком\S*|колле\S*)|(?:^|\s)(?:у друга|у подруги|к друзьям|в гости|вместе|вдвоем|компанией)(?:\s|$)/;
+// занятия, при которых компания не делает запись «общением»
+const NO_COMPANY = new Set(["social","work","chores","sleep","other","intimacy"]);
+const COMPANY_RE = /(?:^|\s)(?:с|со)\s+(?:коллег\S*|друг\S*|подруг\S*|подруж\S*|мам\S*|пап\S*|жен\S*|муж\S*|девушк\S*|парн\S*|родител\S*|сестр\S*|брат\S*|сын\S*|доч\S*|одногруппник\S*|одноклассник\S*|соседк\S*|сосед\S*|партнер\S*|бабушк\S*|дедушк\S*|начальник\S*|команд\S*|ребят\S*|знаком\S*|колле\S*)|(?:^|\s)(?:у друга|у подруги|к друзьям|в гости|вместе|вдвоем|компанией|всей семьей|всей семьей)(?:\s|$)/;
 // теги занятия: у записи одна основная категория, а особенности (глаза, растяжка, шаги, улица) — теги
 const TAG_DEFS = [["глаза", /глаз|поморга/], ["растяжка", /растяж|потян|размя|разомн|разминк|стретч/], ["шаги", /шаг|прошел|прошёл|пройд|прогул|ходьб|ног[иа]? размя/], ["улица", /улиц|на воздух|двор|на балкон|парк|скверик/], ["шея", /\bшею|шеи\b|шея\b/], ["вода", /попил воды|стакан воды/]];
 function tagsOf(text, type){
@@ -385,9 +387,12 @@ function parse(text){
       out.push({type:"water", name:"Вода", time:e.time, ml:shakes ? extra : 200, text:raw, derived:true, ...(offset ? {dayOffset:offset} : {})});
     }
     // «попили кофе с коллегой», «пообедали с друзьями»: это ещё и общение (в цели «общение»), плюс сам напиток или еда
-    if(!negated && COMPANY_TYPES[act.type] && COMPANY_RE.test(s)){
-      const qmn = qty.find(x=>x.unit==="min"), m = qmn ? qmn.n * qmn.mul : (times.dur != null ? times.dur : COMPANY_TYPES[act.type][1]);
-      out.push({type:"social", name:"Общение " + COMPANY_TYPES[act.type][0], time:e.time, min:Math.round(m), text:raw, derived:true, minGuess:false, ...(offset ? {dayOffset:offset} : {})});
+    if(!negated && !act.fuzzy && COMPANY_RE.test(s)){
+      const ct = COMPANY_TYPES[act.type], T = R.TYPES[act.type];
+      if(ct || (T && T.unit === "min" && !NO_COMPANY.has(act.type))){
+        const qmn = qty.find(x=>x.unit==="min"), m = qmn ? qmn.n * qmn.mul : (times.dur != null ? times.dur : (ct ? ct[1] : e.min || T.def));
+        out.push({type:"social", name: ct ? "Общение " + ct[0] : "Общение (" + String(e.name || T.short || T.n).toLowerCase() + ")", time:e.time, min:Math.max(1, Math.round(m)), text:raw, derived:true, minGuess:false, ...(offset ? {dayOffset:offset} : {})});
+      }
     }
     prev = {act, clause:raw, qty, offset};
   }
