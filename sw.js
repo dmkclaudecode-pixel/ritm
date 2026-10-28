@@ -1,5 +1,5 @@
-const CACHE = "ritm-v62";
-const SHELL = ["./", "index.html", "styles.css", "core.js", "js/main.js", "js/base.js", "js/plan.js", "js/render.js", "js/chat.js", "js/parse.js", "js/morning.js", "js/checkins.js", "js/insights.js", "js/routine.js", "js/nudges.js", "js/daily.js", "js/native.js", "app.css", "catalog.js", "catalog2.js", "catalog3.js", "food.js", "food2.js", "parser.js", "nlu.js", "engine.js", "mood.js", "dialog.js", "onto.js", "data/onto.json", "data/mood_lex.json", "lexicon.js", "manifest.webmanifest",
+const CACHE = "ritm-v63";
+const SHELL = ["./", "index.html", "styles.css", "core.js", "js/main.js", "js/base.js", "js/plan.js", "js/render.js", "js/chat.js", "js/parse.js", "js/morning.js", "js/checkins.js", "js/insights.js", "js/routine.js", "js/nudges.js", "js/daily.js", "js/native.js", "app.css", "catalog.js", "catalog2.js", "catalog3.js", "food.js", "food2.js", "parser.js", "nlu.js", "engine.js", "mood.js", "dialog.js", "embed.js", "onto.js", "data/emb.bin", "data/emb_vocab.txt", "data/onto.json", "data/mood_lex.json", "lexicon.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-192.png", "icons/maskable-512.png", "icons/favicon-64.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

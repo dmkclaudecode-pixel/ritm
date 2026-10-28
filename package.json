@@ -2,6 +2,6 @@
   "name": "rhythm",
   "private": true,
   "type": "commonjs",
-  "scripts": { "test": "node tests/run.js", "lint": "eslint js core.js engine.js lexicon.js mood.js dialog.js onto.js" },
+  "scripts": { "test": "node tests/run.js", "lint": "eslint js core.js engine.js lexicon.js mood.js dialog.js embed.js onto.js" },
   "devDependencies": { "eslint": "^9.0.0", "globals": "^15.0.0" }
 }
