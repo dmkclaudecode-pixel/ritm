@@ -107,19 +107,27 @@ def emotions():
     for f in files:
         try:
             if f.endswith((".csv", ".tsv")):
-                rows = list(csv.DictReader(open(f, encoding="utf-8", errors="ignore"), delimiter="\t" if f.endswith(".tsv") else ","))
+                rows = list(itertools.islice(csv.DictReader(open(f, encoding="utf-8", errors="ignore"), delimiter="\t" if f.endswith(".tsv") else ","), 300000))
             elif f.endswith(".jsonl"): rows = [json.loads(l) for l in open(f, encoding="utf-8") if l.strip()]
             else:
                 j = json.load(open(f, encoding="utf-8")); rows = j if isinstance(j, list) else []
         except Exception as e: log(f"  {os.path.basename(f)}: {e}"); continue
         if not rows or not isinstance(rows[0], dict): continue
-        tk = next((k for k in rows[0] if k.lower() in ("text", "sentence", "comment", "content")), None)
-        lk = next((k for k in rows[0] if k.lower() in ("label", "sentiment", "emotion", "labels", "class")), None)
-        if not tk or not lk: continue
+        keys = [k for k in rows[0] if isinstance(k, str)]
+        log(f"  {os.path.basename(f)}: колонки {keys[:8]}; пример: {str(list(rows[0].values())[:3])[:120]}")
+        tk = next((k for k in keys if k.lower() in ("text", "sentence", "comment", "content", "review")), None)
+        lk = next((k for k in keys if k.lower() in ("label", "sentiment", "emotion", "labels", "class")), None)
+        EMO_COLS = [k for k in keys if k.lower() in ("joy", "sadness", "surprise", "fear", "anger", "no_emotion")]
+        if not tk or not (lk or EMO_COLS): continue
         for r in rows:
-            L = str(r[lk]); 
-            for w in set(lem(x)[0] for x in words(str(r[tk])) if len(x) > 2): wl[w][L] += 1
-            lab[L] += 1; n += 1
+            if lk: L = str(r[lk])
+            else: L = ",".join(k for k in EMO_COLS if str(r.get(k)) in ("1", "1.0", "True")) or "none"
+            if not r.get(tk): continue
+
+            for lb in (L.split(",") if not lk else [L]):
+                for w in set(lem(x)[0] for x in words(str(r[tk])) if len(x) > 2): wl[w][lb] += 1
+                lab[lb] += 1
+            n += 1
     log(f"  текстов: {n}; метки: {dict(lab.most_common(12))}")
     if n:
         tot = sum(lab.values()); out = {}
