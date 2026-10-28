@@ -17,3 +17,4 @@ try{ if(window.RITM && RITM.onto) RITM.onto.load("data/onto.json"); }catch(e){ /
 try{ if(window.RITM && RITM.mood) RITM.mood.loadLex("data/mood_lex.json"); }catch(e){ /* лексикон необязателен */ }
 try{ if(window.RITM && RITM.embed) RITM.embed.load("data/emb.bin", "data/emb_vocab.txt"); }catch(e){ /* векторы необязательны */ }
 try{ if(window.RITM && RITM.mood) RITM.mood.loadModel("data/mood_nb.json"); }catch(e){ /* модель необязательна */ }
+try{ if(window.RITM && RITM.retrieve) RITM.retrieve.loadUrl("data/resp_index.json"); }catch(e){ /* подбор реакции необязателен */ }

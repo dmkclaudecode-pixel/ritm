@@ -157,7 +157,8 @@ function generic(o){
   return {text: out, act: neg ? "mood" : "ack", asked: /\?\s*$/.test(out), intent: "answer", kind};
 }
 const react = o => react0(o) || generic(o);
+const reactSpecific = react0;
 
-R.followup = {qKind, answerKind, hours, options, pickOption, lastQuestion, react};
+R.followup = {qKind, answerKind, hours, options, pickOption, lastQuestion, react, reactSpecific, generic};
 if(typeof module !== "undefined" && module.exports) module.exports = R.followup;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -128,6 +128,14 @@ function ontoAnswer(s, ctx, rnd){
   if((m = FROM_Q.exec(s))){ const ws = m[4].split(/,| и /).map(x => x.trim()).filter(Boolean).map(lastWord); let ds = ws.length > 1 ? O.dishesFrom(ws) : (O.lookup(ws[0]).dishes || []); ds = ds.slice(0, 4); if(ds.length) return `Из этого можно приготовить: ${ds.join(", ")}.`; return "Подходящих блюд не нашёл, попробуй назвать другие продукты."; }
   return null;
 }
+// подбор реакции по смыслу (retrieve.js): включён только если индекс загружен и порог tau < 1
+function retrieved(text, ctx, mood, topic, words){
+  const Rt = R.retrieve; if(!Rt || !Rt.size() || Rt.tau() > 1 || words < 2 || !ctx) return null;
+  const lb = ctx.last("bot"), asked = lb && lb.meta.asked, F = R.followup;
+  const hist = ctx.turns.filter(t => t.role === "user").map(t => t.text).slice(-6, -1);
+  const r = Rt.pick({text, history: hist, botq: asked ? lb.text : null, kind: asked && F ? F.qKind(lb.text) : null, ak: F ? F.answerKind(text) : null, topic, mood, said: ctx.said}, Rt.tau());
+  if(!r || !r.text) return null; ctx.fresh(r.text); return r;
+}
 // главный вход: {text, mood, ctx, rnd} → {text, act, asked, topic}
 function reply(o){
   const text = o.text || "", s = N(text), ctx = o.ctx, mood = o.mood || {}, rnd = o.rnd, D = R.dialog;
@@ -148,7 +156,10 @@ function reply(o){
   if(AND_YOU.test(s)) return done("andyou", pick(["У меня всё ровно: я приложение, усталости не знаю. Мне интереснее, как у тебя.", "Спасибо, что спросил. У меня всё спокойно, а как ты?"], ctx, rnd), true);
   if(WHATUP.test(s) && words <= 5) return done("whatsup", pick(["Спасибо, всё в порядке. Как ты сегодня?", "У меня всё хорошо, я на связи. Как у тебя день?"], ctx, rnd), true);
   if(BOT_Q.test(s) && !WORLD.test(s)) return done("botq", pick(["Я приложение с правилами и небольшой моделью, так что могу ошибаться. Но стараюсь понять, что тебе нужно. А ты что хотел узнать?", "Честно: я не человек и не чувствую, как ты, зато помню твои записи и учусь на них. Что тебя интересует?"], ctx, rnd), true);
-  { const fu = R.followup && R.followup.react({text, ctx, mood, topic, span: o.span, tp: topic ? TOPICS.find(x => x.k === topic) : null, rnd}); if(fu) return Object.assign(done(fu.act, fu.text, fu.asked), {intent: fu.intent}); }
+  const fo = {text, ctx, mood, topic, span: o.span, tp: topic ? TOPICS.find(x => x.k === topic) : null, rnd};
+  { const fu = R.followup && R.followup.reactSpecific(fo); if(fu) return Object.assign(done(fu.act, fu.text, fu.asked), {intent: fu.intent}); }
+  { const rt = retrieved(text, ctx, mood, topic, words); if(rt) return done(rt.act || "ack", rt.text, /\?\s*$/.test(rt.text)); }
+  { const fu = R.followup && R.followup.generic(fo); if(fu) return Object.assign(done(fu.act, fu.text, fu.asked), {intent: fu.intent}); }
   if(ASK_ADVICE.test(s)){
     const adv = {rest: "Начни с малого: стакан воды, десять минут без экрана и ранний отбой. Остальное подождёт.", support: "Давай по шагам. Сначала выдох: вдох на четыре счёта, выдох на шесть. Потом одно маленькое дело, которое точно получится.", activate: "Выбери самое лёгкое дело из плана и дай себе десять минут. Дальше обычно втягиваешься.", channel: "Возьми одну главную задачу и сделай её первой, пока есть запал."};
     return done("advice", adv[EMO_NEED] || "Подскажу, если расскажешь чуть подробнее: что сейчас мешает больше всего?", !adv[EMO_NEED]);

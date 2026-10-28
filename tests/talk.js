@@ -89,4 +89,24 @@ t("не больше 2 вопросов из 4 подряд", many.every((_, i) 
   o = seq([["B", "Что смотрел?"], ["U", "сериал"], ["U", "про врачей"], ["U", "ну так"], ["U", "ага"]]);
   t("подряд вопросов не больше одного", o.every((x, i) => !(i && x.asked && o[i - 1].asked)), JSON.stringify(o.map(x => x.asked)));
 }
+// --- четвёртый блок: подбор реакции (retrieve.js)
+{
+  require("../retrieve.js"); const Rt = RITM.retrieve;
+  const idx = {v: 1, gate: {w: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0], tau: 2}, items: [
+    {u: ["ворочаюсь", "ночью", "просыпался"], b: [], kind: null, ak: "content", topic: "sleep", val: -.4, dom: "tired", reply: "Это изматывает. Давно так?", act: "mood", echo: [], d: 0},
+    {u: ["сдал", "проект", "радуюсь"], b: [], kind: null, ak: "content", topic: "work", val: .6, dom: "joy", reply: "Поздравляю! Проект — это серьёзно.", act: "event", echo: ["проект"], d: 1}]};
+  Rt.load(idx);
+  t("подбор: выключен при tau>1", Rt.tau() > 1);
+  const c0 = new D.Context(); c0.push("user", "опять ночью просыпался", {mood: M.analyze("опять ночью просыпался")});
+  let x0 = T.reply({text: "опять ночью просыпался", mood: M.analyze("опять ночью просыпался"), ctx: c0, rnd: () => .1});
+  t("подбор выключен: ответ из правил", x0.text !== "Это изматывает. Давно так?");
+  idx.gate.tau = .01; Rt.load(idx);
+  const c1 = new D.Context(); c1.push("user", "ворочаюсь ночью просыпался", {mood: M.analyze("ворочаюсь ночью просыпался")});
+  x0 = T.reply({text: "ворочаюсь ночью просыпался", mood: M.analyze("ворочаюсь ночью просыпался"), ctx: c1, rnd: () => .1});
+  t("подбор включён: берёт близкую реплику", x0.text === "Это изматывает. Давно так?" && x0.asked, x0.text);
+  // чужая деталь: «проект» в реплике, а в нашем тексте его нет
+  const r2 = Rt.pick({text: "радуюсь жизни", history: [], mood: {valence: .6, dominant: "joy"}}, 0);
+  t("подбор: нельзя повторять слова, которых нет у нас", r2 && r2.best !== "Поздравляю! Проект — это серьёзно.", JSON.stringify(r2 && r2.best));
+  idx.gate.tau = 2; Rt.load(idx);
+}
 console.log(`разговор (2): ${ok} ок всего, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;

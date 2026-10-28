@@ -26,6 +26,6 @@ for(let it = 0; it < 4000; it++){
   tr.X.forEach((x, i) => { const p = 1 / (1 + Math.exp(-x.reduce((a, v, j) => a + v * w[j], 0))), e = p - tr.Y[i]; x.forEach((v, j) => g[j] += e * v); });
   for(let j = 0; j < D; j++) w[j] -= lr * (g[j] / tr.X.length + l2 * w[j]);
 }
-fs.writeFileSync(path.join(root, "data/resp_gate.json"), JSON.stringify({w: w.map(v => +v.toFixed(4)), n: tr.X.length, base: +(tr.Y.reduce((a, b) => a + b, 0) / tr.Y.length).toFixed(3)}));
+fs.writeFileSync(path.join(root, "data/resp_gate.json"), JSON.stringify({tau: 2, w: w.map(v => +v.toFixed(4)), n: tr.X.length, base: +(tr.Y.reduce((a, b) => a + b, 0) / tr.Y.length).toFixed(3)}));
 console.log(`обучение: ${tr.X.length} примеров, доля верных у лучшего кандидата ${(tr.Y.reduce((a, b) => a + b, 0) / tr.Y.length).toFixed(3)}`);
 console.log("веса:", w.map(v => v.toFixed(2)).join(" "));

@@ -49,6 +49,7 @@ function pick(q, th, opt){
   const p = GATE ? 1 / (1 + Math.exp(-GATE.w.reduce((a, w, i) => a + w * (x[i] || 0), 0))) : bs;
   return {text: p >= th ? best.reply : null, best: best.reply, score: +bs.toFixed(3), p: +p.toFixed(3), margin: +(bs - second).toFixed(3), act: best.act || null, x, c: bc, from: best.u.join(" ")};
 }
-R.retrieve = {load, pick, toks, stemOf, size: () => IDX.length};
+function loadUrl(url){ return fetch(url).then(r => r.json()).then(j => { load(j); return true; }).catch(() => false); }
+R.retrieve = {load, loadUrl, tau: () => (GATE && GATE.tau != null ? GATE.tau : 2), pick, toks, stemOf, size: () => IDX.length};
 if(typeof module !== "undefined" && module.exports) module.exports = R.retrieve;
 })(typeof window !== "undefined" ? window : globalThis);
