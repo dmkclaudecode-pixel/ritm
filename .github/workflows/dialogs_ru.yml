@@ -1,0 +1,59 @@
+name: Диалоги EN→RU (перевод для обучения подбора реакции)
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Лимит предложений на шард (0 = все; для проверки поставь 200)"
+        default: "0"
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install huggingface_hub pandas pyarrow
+      - run: python tools/build_dialogs_ru.py fetch work/fetched
+      - uses: actions/upload-artifact@v4
+        with: {name: fetched, path: work/fetched}
+  translate:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install transformers sentencepiece sacremoses
+      - uses: actions/download-artifact@v4
+        with: {name: fetched, path: work/fetched}
+      - run: LIMIT=${{ github.event.inputs.limit }} python tools/build_dialogs_ru.py translate work/fetched ${{ matrix.shard }} 12 work/tr
+      - uses: actions/upload-artifact@v4
+        with: {name: "tr-${{ matrix.shard }}", path: work/tr}
+  merge:
+    needs: translate
+    if: always() && needs.fetch.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/download-artifact@v4
+        with: {name: fetched, path: work/fetched}
+      - uses: actions/download-artifact@v4
+        with: {pattern: "tr-*", path: work/shards}
+      - run: python tools/build_dialogs_ru.py merge work/fetched work/shards work/out
+      - name: Положить результат в ветку dialogs-ru-data
+        run: |
+          git config user.name "knowledge-bot"; git config user.email "bot@users.noreply.github.com"
+          mkdir -p /tmp/kd && cp -r work/out/. /tmp/kd/
+          git checkout --orphan dialogs-ru-data && git rm -rf . >/dev/null 2>&1 || true
+          cp -r /tmp/kd/. . && git add -A && git commit -m "Диалоги RU (автосборка)" && git push -f origin dialogs-ru-data
