@@ -1,12 +1,12 @@
 // Тесты разговора: сценарии из нескольких реплик. Проверяем акты, тон, отсутствие повторов и «вопрос в каждой реплике».
 global.window = global; global.localStorage = {getItem: () => null, setItem(){}};
-require("../engine.js"); require("../mood.js"); require("../dialog.js"); require("../talk.js");
+require("../engine.js"); require("../mood.js"); require("../dialog.js"); require("../onto.js"); require("../talk.js");
 RITM.mood.extend(require("../data/mood_lex.json")); RITM.mood.useModel(require("../data/mood_nb.json"));
 const M = RITM.mood, D = RITM.dialog, T = RITM.talk; let ok = 0; const bad = [];
 const t = (n, c, i) => { if(c) ok++; else bad.push(n + (i ? " → " + i : "")); };
 function run(lines, rnd){
   const ctx = new D.Context(); let k = 0; const r = rnd || (() => (k = (k * 7 + 3) % 10) / 10), out = [];
-  for(const line of lines){ const mood = M.analyze(line); ctx.push("user", line, {mood, topic: (T.topicOf(line) || {}).k}); const x = T.reply({text: line, mood, ctx, rnd: r}); ctx.push("bot", x.text, {asked: x.asked}); out.push(x); }
+  for(const line of lines){ const mood = M.analyze(line); ctx.push("user", line, {mood, topic: (T.topicOf(line) || {}).k}); const x = T.reply({text: line, mood, ctx, rnd: r}); ctx.push("bot", x.text, {asked: x.asked, act: x.act}); out.push(x); }
   return out;
 }
 let o = run(["привет, у меня был тяжёлый день на работе", "ага", "да уж", "начальник опять завалил задачами"]);
@@ -28,4 +28,34 @@ const many = run(["сегодня на работе всё нормально", 
 const texts = many.map(x => x.text), uniq = new Set(texts).size;
 t("мало повторов в длинной беседе", uniq >= texts.length - 3, uniq + "/" + texts.length);
 t("не больше 2 вопросов из 4 подряд", many.every((_, i) => i < 3 || many.slice(i - 3, i + 1).filter(x => x.asked).length <= 2));
-console.log(`разговор: ${ok} ок, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;
+// --- второй блок: вопросы к боту, определения, мета-вопросы, режим беседы
+{
+  const lines = ["расскажи что-нибудь", "что конкретно ты не понял?"];
+  const o2 = run(["непонятная фраза про штуку", "что конкретно ты не понял?"]);
+  t("мета-вопрос ссылается на прошлую реплику", o2[1].act === "meta" && /непонятная фраза/.test(o2[1].text), o2[1].text);
+  RITM.onto.use(require("../data/onto.json"));
+  const o3 = run(["что такое шарлотка?", "что конкретно ты не понял?"]); t("мета после ответа: «я ответил»", /Я ответил на/.test(o3[1].text), o3[1].text);
+  const o4 = run(["как ты думаешь, будет ли завтра дождь?"]); t("прогноз — не выдумываем", /прогноз/.test(o4[0].text), o4[0].text);
+  let q = run(["что такое шарлотка?"]); t("определение блюда", q[0].act === "define" && /(блюдо|десерт|еда)/.test(q[0].text), q[0].text);
+  q = run(["из чего делают борщ?"]); t("состав блюда", q[0].act === "define" && /(капуст|картофел|свёкл|свекл)/.test(q[0].text), q[0].text);
+  q = run(["что можно приготовить из творога?"]); t("блюда из продукта", q[0].act === "define" && /сырник/.test(q[0].text), q[0].text);
+  q = run(["что такое флимбостер?"]); t("честно про незнакомое", q[0].act === "define" && /нет данных/.test(q[0].text), q[0].text);
+  q = run(["а что можно приготовить из яблок?"]); t("с «а» в начале", q[0].act === "define", q[0].act);
+  q = run(["у меня сегодня странное настроение"]); t("неясное настроение — уточняем, не празднуем", q[0].act === "vague" && !/Отлично|Супер/.test(q[0].text), q[0].text);
+  t("погодный вопрос — не про бота", !T.direct("как ты думаешь, будет ли завтра дождь?"));
+  q = run(["кто победит в чемпионате мира, как считаешь?"]); t("вопрос вне компетенции — честно", /не|нет/.test(q[0].text) && q[0].asked, q[0].text);
+}
+// --- третий блок: темы и память о близких
+{
+  const mem2 = {}; const keep = global.localStorage; global.localStorage = {getItem: k => mem2[k] || null, setItem(k, v){ mem2[k] = v; }};
+  T.learnFacts("У нас кот Барсик, а сын Ваня ходит в садик"); T.learnFacts("я работаю программистом, уже пять лет");
+  t("факты: питомец и родные", T.facts().pets[0].name === "Барсик" && T.facts().rel.some(r => r.name === "Ваня") && /программист/.test(T.facts().job), JSON.stringify(T.facts()));
+  let q = run(["вчера гуляли с котом на улице"]); t("питомец по имени", /Барсик/.test(q[0].text), q[0].text);
+  q = run(["вечером ходили в кино на новый фильм"]); t("кино: тема и реакция", q[0].topic === "cinema" && q[0].asked, q[0].text);
+  q = run(["все выходные собираюсь в горы поехать"]); t("поездка важнее выходных", q[0].topic === "travel", q[0].topic);
+  q = run(["был у стоматолога, сделали пломбу"]); t("врач", q[0].topic === "medical", q[0].topic);
+  q = run(["слушал плейлист любимой группы весь день"]); t("музыка", q[0].topic === "music", q[0].topic);
+  T.TOPICS.forEach(x => { if(!x.q.length) bad.push("пустые вопросы: " + x.k); });
+  global.localStorage = keep;
+}
+console.log(`разговор (2): ${ok} ок всего, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;

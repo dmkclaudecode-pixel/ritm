@@ -108,6 +108,14 @@ function lastLogEntries(){
   return es.length ? {L, w, es} : null;
 }
 export function handleCorrection(c){
+  if(c.op === "undoCtx"){
+    const tgt = ctxBot().m, txt = tgt ? String(tgt.text || "") : "", P = LS.get("lastPlanAdd"), Lg = LS.get("lastLog");
+    const planFresh = P && Date.now() - P.at < 3600*1000, logFresh = Lg && Date.now() - (Lg.at || 0) < 3600*1000;
+    const wantPlan = /Добавил в план|уже в плане/.test(txt) || (!/Записал|Отметил/.test(txt) && planFresh && (!logFresh || (Lg.at || 0) < P.at));
+    if(wantPlan && planFresh){ mutateQuiet(P.key, w => { w.items = w.items.filter(x => x.id !== P.id); }); LS.set("lastPlanAdd", null); return bot(`Убрал «${P.t}» из плана.`); }
+    if(logFresh || lastLogEntries()) c = {op:"undo"};
+    else return bot("Не нашёл, что отменить. Скажи, например: «убери последнюю запись» или «убери тренировку из плана».");
+  }
   const last = lastLogEntries();
   if(c.op === "what") return bot("Что поправить? Например: «не 30, а 45 минут», «это было вчера», «это было в 18:30», «не бег, а ходьба» или «удали последнее».");
   if(!last && c.op !== "extra") return bot("Не вижу свежих записей, которые можно поправить. Посмотри журнал во вкладке «Сегодня».");

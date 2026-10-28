@@ -25,6 +25,7 @@ Context.prototype.last = function(role, pred){
   for(let i = this.turns.length - 1; i >= 0; i--){ const x = this.turns[i]; if((!role || x.role === role) && (!pred || pred(x))) return x; }
   return null;
 };
+Context.prototype.prevUser = function(){ let seen = 0; for(let i = this.turns.length - 1; i >= 0; i--){ if(this.turns[i].role === "user" && ++seen === 2) return this.turns[i]; } return null; };
 Context.prototype.topic = function(){ const x = this.last("user", t => t.meta.topic); return x ? x.meta.topic : null; };
 // настроение беседы: взвешенное по свежести среднее последних реплик пользователя
 Context.prototype.mood = function(){

@@ -165,7 +165,8 @@ function analyze(text){
   if(["joy", "proud", "excited", "love"].includes(dominant)) needs.push("celebrate");
   if(["bored", "lazy"].includes(dominant)) needs.push("activate");
   if(["motivated"].includes(dominant)) needs.push("channel");
-  return {dominant, second, emotions, valence:+v.toFixed(2), arousal:+a.toFixed(2), intensity:+intensity.toFixed(2), label, signals, style:st, needs};
+  const src = signals.length && signals.every(x => x.at === "модель") ? "model" : "rules";   // только модель — уверенность ниже
+  return {dominant, second, emotions, valence:+v.toFixed(2), arousal:+a.toFixed(2), intensity:+intensity.toFixed(2), label, signals, style:st, needs, src};
 }
 
 /* ---- история настроения: тренд по дням и ровная линия «как обычно» ---- */

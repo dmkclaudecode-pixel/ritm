@@ -50,12 +50,14 @@ function followUp(text, s, pre){
   return false;
 }
 const DLG = new RITM.dialog.Context(14);
-let lastMD = null, lastText = "";
+let lastMD = null, lastText = "", chatUntil = 0;
+function talkFallback(text){ const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return bot(x.text); }
+export function startChatMode(){ chatUntil = Date.now() + 20*60000; }
 // сильная эмоция без дела: отвечаем по настроению с учётом контекста беседы
 function moodReply(MD, A, s, pre){
   const only = pre.every(e => e.unknown || !e.type || e.fuzzy || (e.minGuess && MD.intensity >= .7 && A.words <= 6));
   if(!only || /\d/.test(s) || pre.some(e => e.time) || MD.intensity < .35 || A.words > 14 || A.question) return false;
-  const x = RITM.talk.reply({text: lastText, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked}); bot(x.text); return true;
+  const x = RITM.talk.reply({text: lastText, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act}); bot(x.text); return true;
 }
 export function respondRules(text){
   const s = nrm(text);
@@ -63,6 +65,7 @@ export function respondRules(text){
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
   const MD = RITM.mood.analyze(text); RITM.mood.track(MD); lastMD = MD; lastText = text;
+  if(RITM.talk) RITM.talk.learnFacts(text);
   { const tp = RITM.talk ? RITM.talk.topicOf(text) : null; DLG.push("user", text, {mood: MD, topic: tp ? tp.k : undefined}); }
   if(RITM.trainlog) RITM.trainlog.record(text, {mood: MD.dominant, mi: MD.intensity});
   { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
@@ -71,11 +74,16 @@ export function respondRules(text){
       const arr = getChat(), mm = arr.find(x => x.id === cb.m.id); if(mm){ mm.chosen = -1; saveChat(arr); }
       setCityByName(text); return; } }
   if(routineAnswer(text)) return;
-  if(A.correction && (LS.get("lastLog") || explicitLog()) || (A.correction && A.correction.op === "what")) return handleCorrection(A.correction);
+  if(A.correction && (LS.get("lastLog") || explicitLog() || LS.get("lastPlanAdd") || A.correction.op === "undoCtx") || (A.correction && A.correction.op === "what")) return handleCorrection(A.correction);
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
-  if(RITM.talk && RITM.talk.direct(text)){ const x = RITM.talk.reply({text, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked}); return bot(x.text); }
+  { const inChat = Date.now() < chatUntil, soft = !/\d/.test(s) && pre.every(e => !e.type || e.fuzzy || e.unknown || e.sem);
+    if(RITM.talk && (RITM.talk.direct(text) || (inChat && soft && !A.states.length))){
+      const x = RITM.talk.reply({text, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act});
+      if(x.act === "invite" || inChat) chatUntil = Date.now() + 20*60000;
+      return bot(x.text);
+    } }
   if(!A.states.length && moodReply(MD, A, s, pre)) return;
   if(workBreakReply(text, s, pre)) return;
   if(nudgeChatReply(text, s, pre)) return;
@@ -90,7 +98,7 @@ export function respondRules(text){
     const tps0 = A.topics.filter(t => t !== "plan");
     if(tps0.length && answerTopic(tps0)) return;
     __set_ruleMiss(true); noteMiss(text, "question");
-    return bot("Это похоже на вопрос, поэтому я ничего не записал. Я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экраны. Если это было занятие, напиши без вопроса.");
+    return talkFallback(text);
   }
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
   // «вернулся с работы», «пришёл домой», «я дома» — это не занятие, а смена обстановки: не записываем «работа 1ч»
@@ -154,7 +162,7 @@ export function respondRules(text){
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
   if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; if(!pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event") && moodReply(MD, A, s, pre)) return; }
-  if(A.question && !hasAct && !pre.some(e=>e.type)){ __set_ruleMiss(true); noteMiss(text, "question"); return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
+  if(A.question && !hasAct && !pre.some(e=>e.type)){ __set_ruleMiss(true); noteMiss(text, "question"); return talkFallback(text); }
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
   const entries = RITM.parse(text);
@@ -242,6 +250,7 @@ export function respondRules(text){
   for(const e of future){
     const date = new Date(e.date), key = dateKeyOf(date), d = dayIdxOf(date);
     const res = addPlanFromChat(e, date);
+    if(res.added) LS.set("lastPlanAdd", {key, id: res.added.id, t: res.added.t, at: Date.now()});
     const when = whenWord(date) + (e.time ? " в " + e.time : "");
     let line = res.updated ? `«${res.updated.t}» уже в плане, поставил ${when}.` : `Добавил в план: ${lc(e.name)} ${when}.`;
     const w = getWeek(key);
@@ -310,7 +319,7 @@ function isChatty(u, A){
 export const SKIP_OK = ["Ничего страшного, бывает.","Понял, без проблем.","Окей, случается.","Бывает, не страшно.","Жизнь вносит правки, это нормально.","Понял. Один пропуск ничего не ломает.","Окей, не беда."];
 function chattyReply(kind){
   if(kind === "report" || kind === "insight") return "Понял тебя. Ничего не меняю, просто продолжаю наблюдать.";
-  if(RITM.talk && lastMD){ const x = RITM.talk.reply({text: lastText, mood: lastMD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked}); return x.text; }
+  if(RITM.talk && lastMD){ const x = RITM.talk.reply({text: lastText, mood: lastMD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return x.text; }
   return pick(["Понял тебя.","Принято.","Окей, понял.","Ясно.","Услышал.","Понимаю."]) + " " + pick(["Если что-то делал или собираешься — напиши, я запишу.","Будут новости по делам — пиши.","Если захочешь что-то запланировать — я тут."]);
 }
 
