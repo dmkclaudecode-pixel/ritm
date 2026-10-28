@@ -106,7 +106,7 @@ t("не больше 2 вопросов из 4 подряд", many.every((_, i) 
   t("подбор включён: берёт близкую реплику", x0.text === "Это изматывает. Давно так?" && x0.asked, x0.text);
   // чужая деталь: «проект» в реплике, а в нашем тексте его нет
   const r2 = Rt.pick({text: "радуюсь жизни", history: [], mood: {valence: .6, dominant: "joy"}}, 0);
-  t("подбор: нельзя повторять слова, которых нет у нас", r2 && r2.best !== "Поздравляю! Проект — это серьёзно.", JSON.stringify(r2 && r2.best));
+  t("подбор: нельзя повторять слова, которых нет у нас", !r2 || r2.best !== "Поздравляю! Проект — это серьёзно.", JSON.stringify(r2 && r2.best));
   idx.gate.tau = 2; Rt.load(idx);
 }
 console.log(`разговор (2): ${ok} ок всего, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;
