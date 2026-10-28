@@ -23,6 +23,8 @@ const EMO = {
   guilty:   {v:-.5, a:.1,  w:"виноват виновата стыдно стыд сожалею жалею что подвёл подвела подвел подвела сорвался сорвалась облажался облажалась проср косяк$ накосячил накосячила"},
   motivated:{v:.6,  a:.6,  w:"мотивирован мотивация есть настрой настроен на готов к решил начать хочу начать буду заниматься возьмусь возьмусь за сегодня точно с понедельника начну"},
   lazy:     {v:-.2, a:-.6, w:"лень$ ленюсь лениво не могу собраться не хочу ничего прокрастин откладываю не в настроении мотивации нет"},
+  pos:      {v:.6,  a:.1,  w:""},
+  neg:      {v:-.6, a:.2,  w:""},
   pain:     {v:-.6, a:.3,  w:"болит болят болезн ноет ноют мигрень тошнит ломит ломота температур заболел заболела простыл простыла кашляю насморк"}
 };
 const INTENS = /^(очень|сильно|пипец|капец|жутко|безумно|дико|ужасно|максимально|крайне|невероятно|чертовски|адски|охренеть|реально|супер|ультра|так|такой|такая|такое|совсем|вообще|абсолютно|полностью|просто|прям|прямо|аж|до чёртиков|до жути)$/;
@@ -54,15 +56,29 @@ function style(raw){
   const smileP = (t.match(/\){2,}|:\)|:-\)|\^\^|=\)/g) || []).length, smileN = (t.match(/\({2,}|:\(|:-\(|;\(|=\(/g) || []).length;
   return {caps, excl, stretch, dots, smileP, smileN, boost: 1 + 0.25 * caps + 0.15 * Math.min(excl, 2) + 0.2 * stretch};
 }
+let XL = {};                                   // выученный лексикон: основа слова → [эмоция, вес] (data/mood_lex.json)
+const stemOf = w => (R.engine && R.engine.stem) ? R.engine.stem(w) : w;
+function extend(lex){ XL = Object.assign(XL, lex || {}); }
+function loadLex(url){ return fetch(url).then(r => r.json()).then(j => { extend(j); return true; }).catch(() => false); }
+function xhits(s, taken){
+  const out = []; let pos = 0;
+  for(const tk of s.trim().split(/\s+/)){
+    const at = s.indexOf(tk, pos); pos = at + tk.length;
+    if(tk.length < 4 || taken.some(h => at < h.at + h.len && at + tk.length > h.at)) continue;
+    const e = XL[stemOf(tk.replace(/[^а-яa-z]/g, ""))]; if(e) out.push({k:e[0], at, len:tk.length, w:tk, x:e[1]});
+  }
+  return out;
+}
 function analyze(text){
   const raw = String(text || ""), s = norm(raw), st = style(raw), toks = s.trim().split(/\s+/);
   const score = {}; const add = (k, w) => { score[k] = (score[k] || 0) + w; };
   const signals = [];
-  for(const h of hits(raw)){
+  const H = hits(raw); for(const h of xhits(s, H)) H.push(h); H.sort((a, b) => a.at - b.at);
+  for(const h of H){
     // слова до совпадения: усилители, ослабители, отрицания (в пределах трёх слов)
     const before = s.slice(0, h.at).split(/[,.;:!?\u2014]/).pop().trim().split(/\s+/).slice(-3); let mult = 1, neg = false;
     for(const b of before){ if(INTENS.test(b)) mult *= 1.5; else if(DIMIN.test(b)) mult *= 0.6; else if(NEG.test(b)) neg = !neg; }
-    let k = h.k, w = mult;
+    let k = h.k, w = mult * (h.x || 1);
     if(neg){ const flip = POSNEG[k] || NEGNEG[k]; if(flip){ k = flip; w *= .7; } else { w *= .3; } }
     // «но …» после противопоставления важнее, чем то, что было до него
     const afterBut = /(?:^| )(но|а вот|зато|однако)(?: |$)/.test(s.slice(0, h.at)); if(afterBut) w *= 1.4;
@@ -82,6 +98,7 @@ function analyze(text){
   const dominant = entries[0][0], second = entries[1] && entries[1][1] / total > .3 ? entries[1][0] : null;
   const label = v > .25 ? "positive" : v < -.25 ? "negative" : "mixed";
   const needs = [];
+  if(dominant === "neg") needs.push("support"); if(dominant === "pos") needs.push("celebrate");
   if(["sad", "anxious", "stressed", "anger", "fear", "guilty"].includes(dominant)) needs.push("support");
   if(["tired", "pain"].includes(dominant)) needs.push("rest");
   if(["joy", "proud", "excited", "love"].includes(dominant)) needs.push("celebrate");
@@ -109,6 +126,6 @@ function summary(now){
   const w = avg(week), b = avg(base);
   return {today: avg(today), week: w, base: b, trend: w != null && b != null ? +(w - b).toFixed(2) : null, slump: known >= 2 && lowDays >= 2, n: h.length};
 }
-R.mood = {analyze, track, summary, hits, style, EMO};
+R.mood = {extend, loadLex, analyze, track, summary, hits, style, EMO};
 if(typeof module !== "undefined" && module.exports) module.exports = R.mood;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -17,7 +17,7 @@ def seeds():
     words = collections.Counter()
     def add(txt):
         for w in re.findall(r"[а-яё]{3,}", txt.lower()): words[w.replace("ё", "е")] += 1
-    for f in ["lexicon.js", "catalog.js", "catalog3.js"]:
+    for f in ["lexicon.js", "catalog.js", "catalog3.js", "mood.js", "dialog.js"]:
         p = os.path.join(ROOT, f)
         if os.path.exists(p): add(open(p, encoding="utf-8").read())
     return [w for w, _ in words.most_common()]
@@ -99,10 +99,19 @@ def navec_vectors(words):
         if w in seen or not re.fullmatch(r"[а-яе\-]{2,}", w): return
         if w in nv: seen.add(w); vocab.append(w)
     for w in words: take(w)
-    n_app = len(vocab)
+    # слова приложения в seeds() — основы («яблок»), а в словаре Navec нужны все формы: берём любые слова, начинающиеся на основу (≥4 букв)
+    stems = sorted({w for w in words if len(w) >= 4}, key=len)
+    pre = {}
+    for st_ in stems: pre.setdefault(st_[:4], []).append(st_)
+    forms = collections.Counter()
+    for w in nv.vocab.words:
+        lw = w.lower().replace("ё", "е")
+        for st_ in pre.get(lw[:4], ()):
+            if lw.startswith(st_) and len(lw) <= len(st_) + 4 and forms[st_] < 25: forms[st_] += 1; take(lw); break
+    n_app = len(vocab); log(f"  слов приложения и их форм: {n_app}")
     for w in nv.vocab.words[:60000]:            # самые частые слова языка (для обобщения на незнакомые)
         take(w.lower())
-        if len(vocab) >= 45000: break
+        if len(vocab) >= 50000: break
     M = np.stack([nv[w] for w in vocab]).astype("float32")
     M -= M.mean(0); U, S, Vt = np.linalg.svd(M, full_matrices=False)
     P = M @ Vt[:64].T; P /= (np.linalg.norm(P, axis=1, keepdims=True) + 1e-9)
@@ -129,7 +138,9 @@ def ruwordnet(words):
 
 if __name__ == "__main__":
     W = seeds(); log(f"слов приложения: {len(W)}")
+    only = os.environ.get("ONLY", "").split(",") if os.environ.get("ONLY") else None
     for name, fn, args in [("Navec", navec_vectors, (W,)), ("Wikidata", wikidata, ()), ("ConceptNet", conceptnet, (W,)), ("RuWordNet", ruwordnet, (W,))]:
+        if only and name not in only: continue
         t = time.time(); log(f"[{name}]")
         try: fn(*args); log(f"  готово за {int(time.time() - t)} с")
         except Exception as e: log(f"  ПРОПУЩЕНО: {type(e).__name__}: {e}")

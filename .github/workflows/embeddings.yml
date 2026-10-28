@@ -1,0 +1,29 @@
+name: Только векторы слов (Navec, быстро)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Библиотеки
+        run: pip install numpy navec ruwordnet
+      - name: RuWordNet (скачать базу; если недоступна, шаг пропускается)
+        continue-on-error: true
+        run: echo skip
+      - name: Собрать знания
+        env:
+          ONLY: Navec
+        run: python tools/build_knowledge.py knowledge
+      - name: Положить результат в ветку embeddings-data
+        run: |
+          git config user.name "knowledge-bot"; git config user.email "bot@users.noreply.github.com"
+          mkdir -p /tmp/kd && cp -r knowledge/. /tmp/kd/
+          git checkout --orphan embeddings-data && git rm -rf . >/dev/null 2>&1 || true
+          cp -r /tmp/kd/. . && git add -A && git commit -m "Знания для движка (автосборка)" && git push -f origin embeddings-data
