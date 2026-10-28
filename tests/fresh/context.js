@@ -1,0 +1,22 @@
+// Свежий набор: контекст беседы. Каждый сценарий — реплики; проверяем, что движок раскрывает продолжения и держит тренд настроения.
+global.window=global;global.localStorage={getItem:()=>null,setItem(){}};require("../../mood.js");require("../../dialog.js");
+const D=RITM.dialog,M=RITM.mood;let ok=0,bad=[],n=0;const t=(name,c)=>{n++;if(c)ok++;else bad.push(name)};
+const mk=(turns)=>{const c=new D.Context();for(const [txt,meta] of turns)c.push("user",txt,Object.assign({mood:M.analyze(txt)},meta||{}));return c};
+let c=mk([["сколько я сегодня прошёл",{intent:"query",topic:"steps"}]]);
+t("а вчера?",c.resolve("а вчера?").resolved&&c.resolve("а вчера?").when==="вчера"&&c.resolve("а вчера?").topic==="steps");
+t("а за неделю?",c.resolve("а за неделю?").when==="за неделю");
+t("а за месяц",c.resolve("а за месяц").when==="за месяц");
+t("почему?",c.resolve("почему?").why===true);
+t("не продолжение: купил хлеб",!c.resolve("купил хлеб").resolved);
+t("не продолжение: длинная фраза",!c.resolve("а вчера я ходил в магазин и купил хлеб и молоко").resolved);
+c=mk([["просто ужасный день"],["всё бесит"],["устал как собака"]]);
+t("тренд вниз/устойчиво негативный",c.mood().valence<-.2);
+c=mk([["мне грустно"],["ну всё плохо"],["ладно, разберёмся"],["уже лучше"],["кайф, получилось!"],["ура!!!"]]);
+t("тренд вверх",c.mood().trend>.4);
+const ctx=new D.Context();const r1=D.compose({mood:M.analyze("мне грустно")},ctx,()=>0),r2=D.compose({mood:M.analyze("мне грустно")},ctx,()=>0);
+t("не повторяет фразу подряд",r1!==r2);
+t("пустое настроение → нейтральная реплика",typeof D.compose({mood:M.analyze("ну")},null,()=>0)==="string");
+t("склонение 21 минута",D.dur(21)==="21 минута"&&D.dur(62)==="1 ч 2 минуты");
+t("уточнение с темой",/яблоко/.test(D.clarify([{name:"Еда"},{name:"Покупки"}],"яблоко").text));
+t("уточнение без вариантов",D.clarify([],"x").options.length===0);
+console.log("context: "+ok+"/"+n);if(process.argv[2]==="-v")bad.forEach(b=>console.log("  ✗ "+b));

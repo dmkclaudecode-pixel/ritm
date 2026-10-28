@@ -31,4 +31,6 @@ console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
 require("./stress.js"); require("./food.js"); require("./mood.js"); require("./onto.js");
 { const cp = require("child_process"); for(const a of [[], ["--noise"]]){ const x = cp.spawnSync(process.execPath, [__dirname + "/gen.js", "8000", ...a], {encoding:"utf8"}); console.log("Генератор" + (a.length ? " с шумом" : "") + ": " + x.stdout.split("\n")[0]); if(x.status) process.exitCode = 1; } }
+{ const cp = require("child_process"); console.log("\nСвежие наборы (информационно, не тренируемся на них):");
+  for(const f of ["mood_a", "mood_b", "food_unknown", "context"]){ const x = cp.spawnSync(process.execPath, [__dirname + "/fresh/" + f + ".js"], {encoding:"utf8"}); console.log("  " + f + ": " + (x.stdout.match(/\d+\/\d+( \(\d+%\))?/) || ["?"])[0]); } }
 process.exit(bad || process.exitCode ? 1 : 0);
