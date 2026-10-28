@@ -116,5 +116,9 @@ t("не больше 2 вопросов из 4 подряд", many.every((_, i) 
   t("llm: ложное «записал» отбрасывается", L.clean("Хорошо, я записал это.") === null);
   t("llm: мат и китайский отбрасываются", L.clean("Ну это пиздец") === null && L.clean("好的 понял") === null);
   t("llm: не больше трёх предложений", L.clean("Раз. Два. Три. Четыре.") === "Раз. Два. Три.");
-  t("llm: без ключа выключена", L.enabled() === false); }
+  t("llm: без ключа выключена", L.enabled() === false);
+  const a = L.parseAnswer('{"say":"Здорово!","do":"прогулка 30 минут"}');
+  t("llm: JSON → say и команда", a.say === "Здорово!" && a.doText === "прогулка 30 минут", JSON.stringify(a));
+  t("llm: не JSON → обычная реплика без команды", L.parseAnswer("Привет, как дела?").say === "Привет, как дела?" && L.parseAnswer("Привет").doText === "");
+  t("llm: длинная или многострочная команда отбрасывается", L.parseAnswer(JSON.stringify({say: "ок", do: "а\nб"})).doText === ""); }
 console.log(`разговор (2): ${ok} ок всего, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;

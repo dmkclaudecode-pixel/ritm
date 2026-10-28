@@ -53,13 +53,23 @@ const DLG = new RITM.dialog.Context(14);
 let lastMD = null, lastText = "", chatUntil = 0;
 // живой ответ: если включена облачная модель, отвечает она (с запасом на правила), иначе сразу правила
 const LLM_ACTS = new Set(["clarify", "short", "topic", "event", "mood", "question", "ack", "advice", "vague"]);
+let inCommand = false;
 function deliver(text, x, hint){
   const L = RITM.llm;
-  if(!L || !L.enabled() || !LLM_ACTS.has(x.act) || /\d/.test(text)){ DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return bot(x.text + (hint || "")); }
-  const turns = DLG.turns.slice();
-  L.chat(turns, text).then(t => {
-    const out = t || x.text + (hint || ""); DLG.push("bot", t || x.text, {asked: t ? /\?\s*$/.test(t) : x.asked, act: x.act}); bot(out);
-    try{ window.dispatchEvent(new Event("ritm:chat")); }catch(e){ /* не в браузере */ }
+  if(inCommand) return;   // команда от модели: разговорные ответы правил не нужны, подтверждение даёт только настоящая запись
+  if(!L || !L.enabled() || !LLM_ACTS.has(x.act)){ DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return bot(x.text + (hint || "")); }
+  const turns = getChat().slice(-12).map(m => ({role: m.who === "me" ? "user" : "bot", text: m.text}));   // настоящая лента чата, включая подтверждения записей
+  L.chat(turns, text).then(a => {
+    const refresh = () => { try{ window.dispatchEvent(new Event("ritm:chat")); }catch(e){ /* не в браузере */ } };
+    if(a && a.doText){   // модель перевела фразу в команду: выполняют обычные правила, они же и подтверждают
+      const before = getChat().length, keep = DLG.turns.length; inCommand = true;
+      try{ respondRules(a.doText); }catch(e){ console.error(e); }
+      inCommand = false;
+      DLG.turns.length = Math.min(DLG.turns.length, keep);   // служебная команда не должна попасть в память беседы как слова человека
+      const added = getChat().slice(before).filter(m => m.who === "bot");
+      if(added.length){ DLG.push("bot", added[added.length - 1].text, {asked: false, act: "log"}); refresh(); return; }
+    }
+    const t = a && a.say; DLG.push("bot", t || x.text, {asked: t ? /\?\s*$/.test(t) : x.asked, act: x.act}); bot(t || x.text + (hint || "")); refresh();
   });
 }
 function talkFallback(text){ const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); return deliver(text, x); }
