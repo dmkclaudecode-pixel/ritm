@@ -59,7 +59,7 @@ function llmFirst(text){
   const L = RITM.llm;
   if(inCommand || !L || !L.enabled() || text.trim().split(/\s+/).length < 3 || QUICK.test(nrm(text))) return false;
   const lb = getChat().filter(m => m.who === "bot").slice(-1)[0];
-  if(lb && lb.acts && lb.acts.length && Date.now() - lb.at < 10*60000) return false;   // бот ждёт ответа кнопкой
+  if(lb && lb.acts && lb.acts.length && Date.now() - lb.at < 10*60000 && /\d/.test(text) && text.trim().split(/\s+/).length <= 5) return false;   // короткое уточнение к записи («45 минут точно»): это дело правил
   const feed = getChat().slice(-12).map(m => ({role: m.who === "me" ? "user" : "bot", text: m.text})), cb = ctxBot();
   if(cb.explicit && cb.m && cb.m.who === "bot") feed.splice(Math.max(0, feed.length - 1), 0, {role: "bot", text: cb.m.text});   // ответ на выбранное сообщение
   const refresh = () => { try{ window.dispatchEvent(new Event("ritm:chat")); }catch(e){ /* не в браузере */ } };
