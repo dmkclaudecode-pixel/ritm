@@ -1,0 +1,25 @@
+name: Корпуса → статистика для онтологии (рецепты, диалоги, эмоции)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Библиотеки
+        run: pip install pymorphy3 pymorphy3-dicts-ru huggingface_hub pyarrow
+      - name: Собрать статистику
+        run: python tools/build_corpora.py corpora
+      - name: Положить результат в ветку corpora-data
+        if: always()
+        run: |
+          git config user.name "knowledge-bot"; git config user.email "bot@users.noreply.github.com"
+          mkdir -p /tmp/kd && cp -r corpora/. /tmp/kd/
+          git checkout --orphan corpora-data && git rm -rf . >/dev/null 2>&1 || true
+          cp -r /tmp/kd/. . && git add -A && git commit -m "Статистика корпусов (автосборка)" && git push -f origin corpora-data
