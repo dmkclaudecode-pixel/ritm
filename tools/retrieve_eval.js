@@ -44,3 +44,7 @@ if(process.argv.includes("-c")){ const good = new Set([0,4,6,8,16,17,23,24,25,27
   console.log(`\nпопадание в (акт, вопрос/не вопрос): правила ${okR.filter(Boolean).length}/${rows.length}, подбор без порога ${okT.filter(Boolean).length}/${rows.length}`);
   for(const th of [.2, .3, .4, .5, .6, .7]){ const use = rows.map(r => r.p >= th), n = use.filter(Boolean).length, good = rows.filter((r, i) => use[i] && okT[i]).length, mix = rows.filter((r, i) => use[i] ? okT[i] : okR[i]).length;
     console.log(`p>=${th}: подбор в ${n} случаях, верно ${good}${n ? " (" + Math.round(100 * good / n) + "%)" : ""}; правила на остальных верно ${rows.filter((r, i) => !use[i] && okR[i]).length}/${rows.length - n}; смесь ${mix}/${rows.length}`); } }
+{ const sig = (a, t) => (a || "?") + "|" + (/\?\s*$/.test(t || "") ? "q" : "s");
+  for(const [name, f] of [["первая реплика (без вопроса бота)", r => !r.prev], ["ответ на вопрос бота", r => !!r.prev]]){
+    const sub = rows.filter(f); const okT = sub.map(r => r.ret && sig(r.ract2, r.ret) === sig(r.gact, r.gold)), okR = sub.map(r => sig(r.ract, r.rule) === sig(r.gact, r.gold));
+    console.log(`${name}: пар ${sub.length}; подбор верно ${okT.filter(Boolean).length}, правила верно ${okR.filter(Boolean).length}; при p>=.4: ${sub.filter((r, i) => r.p >= .4 && okT[i]).length}/${sub.filter(r => r.p >= .4).length}`); } }
