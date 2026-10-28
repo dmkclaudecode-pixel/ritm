@@ -1,0 +1,41 @@
+== apksigner
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v3.2 scheme (APK Signature Scheme v3.2): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+V2 Signer: certificate DN: CN=Ritm nedeli
+V2 Signer: certificate SHA-256 digest: 12af3ca476438e766db2d473c18043e558fa7c288a2e18e9ce2f054ad85119cb
+V2 Signer: certificate SHA-1 digest: c459dd91077101a0ec1742e4cb71f04a3634da09
+V2 Signer: certificate MD5 digest: 7d7af3fe41d421df4be3b17ff97fdd97
+V2 Signer: key algorithm: RSA
+V2 Signer: key size (bits): 2048
+V2 Signer: public key SHA-256 digest: b08670d7f813d0afacc1d0e0c2ce0d010a6984cd9bef4e245a1092b9d75ac12f
+V2 Signer: public key SHA-1 digest: 576b27dc3cbd89e4185117b1273c6374630bf69b
+V2 Signer: public key MD5 digest: accb3b057c29136d5d9c39681f68d41a
+== badging
+package: name='app.ritm.nedeli' versionCode='113' versionName='1.113' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'
+sdkVersion:'26'
+targetSdkVersion:'35'
+uses-permission: name='android.permission.INTERNET'
+uses-permission: name='android.permission.POST_NOTIFICATIONS'
+uses-permission: name='android.permission.RECEIVE_BOOT_COMPLETED'
+uses-permission: name='android.permission.health.READ_STEPS'
+uses-permission: name='android.permission.health.READ_SLEEP'
+uses-permission: name='android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND'
+uses-permission: name='android.permission.QUERY_ALL_PACKAGES'
+uses-permission: name='android.permission.PACKAGE_USAGE_STATS'
+uses-permission: name='app.ritm.nedeli.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'
+  uses-feature: name='android.hardware.faketouch'
+  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'
+== zip
+No errors detected in compressed data of android/app/build/outputs/apk/release/app-release.apk.
+== libs
+   10120  Defl:N     2537  75% 1981-01-01 01:01 786ef0a5  AndroidManifest.xml
+   55544  Stored    55544   0% 1981-01-01 01:01 4f20fcf1  resources.arsc
+== zipalign
+Verification successful
