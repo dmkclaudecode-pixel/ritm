@@ -89,6 +89,20 @@ function xhits(s, taken){
   }
   return out;
 }
+// классификатор (наивный Байес по основам слов и парам), обученный на размеченных фразах: data/mood_nb.json
+let NB = null;
+const NBSTOP = new Set("и в на не что я он она это как а но с к у о от по за из для то бы же ли уж вот так все всё".split(" "));
+const nbFeats = t => { const ws = (String(t).toLowerCase().replace(/ё/g, "е").match(/[а-я]{2,}/g) || []).filter(w => !NBSTOP.has(w)).map(stemOf); const f = ws.slice(); for(let i = 0; i + 1 < ws.length; i++) f.push(ws[i] + "_" + ws[i + 1]); return f; };
+function useModel(m){ NB = m; }
+function loadModel(url){ return fetch(url).then(r => r.json()).then(j => { NB = j; return true; }).catch(() => false); }
+function nbPredict(text){
+  if(!NB) return null;
+  const sc = NB.prior.slice(); let hit = 0;
+  for(const f of new Set(nbFeats(text))){ const w = NB.W[f]; if(w){ hit++; for(let i = 0; i < sc.length; i++) sc[i] += w[i]; } }
+  if(!hit) return null;
+  const mx = Math.max(...sc), e = sc.map(x => Math.exp(x - mx)), z = e.reduce((a, b) => a + b, 0), j = sc.indexOf(mx);
+  return {label: NB.labels[j], p: e[j] / z, hit};
+}
 let SEEDS = null;                                 // [{i: индекс слова в векторах, k: эмоция}]
 function seedIndex(){
   if(SEEDS || !R.embed || !R.embed.size()) return SEEDS;
@@ -112,14 +126,15 @@ function vhits(s, taken){
   }
   return out;
 }
-const VTH = 0.75;
+const VTH = 0.75, NBTH = 0.3;
 // служебные, временные и бытовые слова не несут эмоции — векторы у них «похожи на всё»
 const STOPV = new Set("после завтра сегодня вчера внутри снаружи сейчас потом всегда никогда иногда утром вечером ночью днём днем тогда сразу опять снова уже ещё еще очень совсем просто почти будто словно кажется вокруг около между через перед сквозь вдруг теперь здесь тут там куда откуда почему зачем когда пока чтобы потому поэтому однако который которая которое которые весь всего всем всех свою свой своя моего моей моим этот этого этой этим такой такая такое такие какой какая какие стою стоять сидеть сижу лежу лежать ходил ходить смены смена работа работы работе дома домой дому".split(" "));
 function analyze(text){
   const raw = String(text || ""), s = norm(raw), st = style(raw), toks = s.trim().split(/\s+/);
   const score = {}; const add = (k, w) => { score[k] = (score[k] || 0) + w; };
   const signals = [];
-  const H = hits(raw); for(const h of xhits(s, H)) H.push(h); if(!H.length) for(const h of vhits(s, H)) H.push(h); H.sort((a, b) => a.at - b.at);
+  const H = hits(raw); for(const h of xhits(s, H)) H.push(h); { const nb = nbPredict(raw); if(nb && nb.label !== "neutral" && nb.p >= NBTH) H.push({k:nb.label, at:0, len:0, w:"модель", x:Math.min(1.2, .6 + nb.p / 2)}); }
+  if(!H.length) for(const h of vhits(s, H)) H.push(h); H.sort((a, b) => a.at - b.at);
   for(const h of H){
     // слова до совпадения: усилители, ослабители, отрицания (в пределах трёх слов)
     const before = s.slice(0, h.at).split(/[,.;:!?\u2014]/).pop().trim().split(/\s+/).slice(-3); let mult = 1, neg = false;
@@ -172,6 +187,6 @@ function summary(now){
   const w = avg(week), b = avg(base);
   return {today: avg(today), week: w, base: b, trend: w != null && b != null ? +(w - b).toFixed(2) : null, slump: known >= 2 && lowDays >= 2, n: h.length};
 }
-R.mood = {extend, loadLex, analyze, track, summary, hits, style, EMO};
+R.mood = {useModel, loadModel, nbPredict, extend, loadLex, analyze, track, summary, hits, style, EMO};
 if(typeof module !== "undefined" && module.exports) module.exports = R.mood;
 })(typeof window !== "undefined" ? window : globalThis);
