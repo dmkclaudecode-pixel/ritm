@@ -18,7 +18,7 @@ dialogs.forEach((d, di) => {
     const prevB = d.turns[i - 2] && d.turns[i - 2].who === "B" ? d.turns[i - 2].text : null;
     const mood = RITM.mood.analyze(u), tp = T.topicOf(users.join(" "));
     const uw = new Set(users.flatMap(Rt.toks).map(Rt.stemOf)), echo = [...new Set(Rt.toks(t.text).map(Rt.stemOf).filter(s => uw.has(s)))];
-    items.push({u: Rt.toks(u), b: prevB ? Rt.toks(prevB) : [], kind: prevB ? F.qKind(prevB) : null, ak: F.answerKind(u), topic: tp ? tp.k : null, val: +(mood.valence || 0).toFixed(2), dom: mood.dominant || null, reply: t.text.replace(/\s*\[act=\w+\]$/, ""), act: t.act, echo, f: d.file, d: di, q: {text: u, history: users.slice(0, -1), botq: prevB && /\?\s*$/.test(prevB) ? prevB : null, kind: prevB ? F.qKind(prevB) : null, ak: F.answerKind(u), topic: tp ? tp.k : null, mood: {valence: mood.valence || 0, dominant: mood.dominant || null}}});
+    items.push({u: Rt.toks(u), b: prevB ? Rt.toks(F.lastQuestion(prevB) || prevB) : [], kind: prevB ? F.qKind(prevB) : null, ak: F.answerKind(u), sh: F.shape(u), topic: tp ? tp.k : null, val: +(mood.valence || 0).toFixed(2), dom: mood.dominant || null, reply: t.text.replace(/\s*\[act=\w+\]$/, ""), act: t.act, echo, f: d.file, d: di, q: {text: u, history: users.slice(0, -1), botq: prevB && /\?\s*$/.test(prevB) ? (F.lastQuestion(prevB) || prevB) : null, kind: prevB ? F.qKind(prevB) : null, ak: F.answerKind(u), shape: F.shape(u), topic: tp ? tp.k : null, mood: {valence: mood.valence || 0, dominant: mood.dominant || null}}});
   }
 });
 if(process.argv.includes("--withq")) module.exports = {items, dialogs};

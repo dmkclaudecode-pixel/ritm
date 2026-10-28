@@ -133,7 +133,7 @@ function retrieved(text, ctx, mood, topic, words){
   const Rt = R.retrieve; if(!Rt || !Rt.size() || Rt.tau() > 1 || words < 2 || !ctx) return null;
   const lb = ctx.last("bot"), asked = lb && lb.meta.asked, F = R.followup;
   const hist = ctx.turns.filter(t => t.role === "user").map(t => t.text).slice(-6, -1);
-  const r = Rt.pick({text, history: hist, botq: asked ? lb.text : null, kind: asked && F ? F.qKind(lb.text) : null, ak: F ? F.answerKind(text) : null, topic, mood, said: ctx.said}, Rt.tau());
+  const r = Rt.pick({text, history: hist, botq: asked ? (F && F.lastQuestion(lb.text) || lb.text) : null, kind: asked && F ? F.qKind(lb.text) : null, ak: F ? F.answerKind(text) : null, shape: F ? F.shape(text) : null, topic, mood, said: ctx.said}, Rt.tau());
   if(!r || !r.text) return null; ctx.fresh(r.text); return r;
 }
 // главный вход: {text, mood, ctx, rnd} → {text, act, asked, topic}

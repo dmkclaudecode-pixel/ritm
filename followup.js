@@ -159,6 +159,13 @@ function generic(o){
 const react = o => react0(o) || generic(o);
 const reactSpecific = react0;
 
-R.followup = {qKind, answerKind, hours, options, pickOption, lastQuestion, react, reactSpecific, generic};
+// форма ответа: yes / no / num (число или срок) / word (1–2 слова) / phrase
+function shape(text){
+  const a = answerKind(text); if(a !== "content") return a;
+  const w = String(text).trim().split(/\s+/).filter(Boolean).length;
+  if(hours(text) != null && w <= 4) return "num";
+  return w <= 2 ? "word" : "phrase";
+}
+R.followup = {shape, qKind, answerKind, hours, options, pickOption, lastQuestion, react, reactSpecific, generic};
 if(typeof module !== "undefined" && module.exports) module.exports = R.followup;
 })(typeof window !== "undefined" ? window : globalThis);

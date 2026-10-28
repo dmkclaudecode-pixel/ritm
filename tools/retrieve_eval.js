@@ -23,7 +23,7 @@ for(const d of tests){
     ctx.push("user", t.text, {mood, topic: (T.topicOf(t.text) || {}).k});
     const gb = d.turns[i + 1], prevB = d.turns[i - 1] && d.turns[i - 1].who === "B" ? d.turns[i - 1] : null;
     const rule = T.reply({text: t.text, mood, ctx, rnd});
-    const r = Rt.pick({text: t.text, history: users.slice(0, -1), botq: prevB && /\?\s*$/.test(prevB.text) ? prevB.text : null, kind: prevB ? F.qKind(prevB.text) : null, ak: F.answerKind(t.text), topic: (T.topicOf(users.join(" ")) || {}).k, mood, said: []}, 0);
+    const r = Rt.pick({text: t.text, history: users.slice(0, -1), botq: prevB && /\?\s*$/.test(prevB.text) ? (F.lastQuestion(prevB.text) || prevB.text) : null, kind: prevB ? F.qKind(prevB.text) : null, ak: F.answerKind(t.text), shape: F.shape(t.text), topic: (T.topicOf(users.join(" ")) || {}).k, mood, said: []}, 0);
     if(gb && gb.who === "B" && !ACTION.test(gb.text)) rows.push({u: t.text, prev: prevB && prevB.text, gold: gb.text, rule: rule.text, ret: r && (r.text || r.best), score: r ? r.score : 0, p: r ? r.p : 0, gact: gb && gb.act, ract: rule.act, ract2: r && r.act, rasked: rule.asked, c: r && r.c, margin: r ? r.margin : 0, from: r && r.from});
     ctx.push("bot", gb && gb.who === "B" ? gb.text : rule.text, {asked: gb && gb.who === "B" ? /\?\s*$/.test(gb.text) : rule.asked, act: gb ? gb.act : rule.act});
   }
@@ -48,3 +48,4 @@ if(process.argv.includes("-c")){ const good = new Set([0,4,6,8,16,17,23,24,25,27
   for(const [name, f] of [["первая реплика (без вопроса бота)", r => !r.prev], ["ответ на вопрос бота", r => !!r.prev]]){
     const sub = rows.filter(f); const okT = sub.map(r => r.ret && sig(r.ract2, r.ret) === sig(r.gact, r.gold)), okR = sub.map(r => sig(r.ract, r.rule) === sig(r.gact, r.gold));
     console.log(`${name}: пар ${sub.length}; подбор верно ${okT.filter(Boolean).length}, правила верно ${okR.filter(Boolean).length}; при p>=.4: ${sub.filter((r, i) => r.p >= .4 && okT[i]).length}/${sub.filter(r => r.p >= .4).length}`); } }
+if(process.argv.includes("-g")){ const th = +process.argv[process.argv.indexOf("-g") + 1] || .5; rows.filter(r => r.p >= th).forEach(r => console.log(`\nБ: ${r.prev || "-"}\n У: ${r.u}\n ЭТАЛОН: ${r.gold}\n ПОДБОР (p=${r.p}): ${r.ret}`)); }
