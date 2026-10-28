@@ -119,6 +119,9 @@ def merge(fetched, shards_dir, out):
     with open(os.path.join(out, "sample.txt"), "w", encoding="utf-8") as fo:
         for d in smp:
             fo.write(f"## {d['src']} | {d['emotion']}\n" + "\n".join(("U: " if i % 2 == 0 else "B: ") + t for i, t in enumerate(d["turns"])) + "\n\n")
+    import random as _r; _r.seed(5); items = _r.sample(sorted(tr.items()), min(80, len(tr)))
+    with open(os.path.join(out, "tr_sample.txt"), "w", encoding="utf-8") as fo:
+        for en, ru in items: fo.write(f"EN: {en}\nRU: {ru}\n\n")
     open(os.path.join(out, "REPORT.md"), "w", encoding="utf-8").write(f"# Диалоги RU (машинный перевод)\n\nдиалогов: {len(kept)}, отброшено: {dropped}, предложений переведено: {len(tr)}\n")
 
 if __name__ == "__main__":
