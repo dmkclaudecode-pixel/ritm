@@ -1,11 +1,22 @@
+// Rhythm · ES-модуль (native.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, LS, NATIVE, __set_health, curKey, esc, fmtDur, getWeek, health, learnSleepNeed, pad, persistSettings, settings, sleepNeed, sleepTotal, todayI} from "./base.js";
+import {getChat, pushMsg, setReply} from "./chat.js";
+import {postIssues, pullNative, restOfWeek, scrollChat, sendChat, setBedtime} from "./checkins.js";
+import {mutateQuiet, openReview, reviewTime} from "./daily.js";
+import {compare, habitTimes, maybeForecast, maybeHabit, maybeMissReview, maybePreempt, maybeWeeklyReport, personalInsights, reverseNote, weakDays, weekForecast} from "./insights.js";
+import {logSleepWords, morningBrief, nightFacts} from "./morning.js";
+import {applyRhythm, nudgeReview, syncWatch, syncWidget} from "./nudges.js";
+import {__set_dismissed, __set_tab, tab} from "./plan.js";
+import {__set_lastReviewSync, closeSheet, maybeAutoBackup, openSheet, render, renderBackupNote, syncNative, syncWalkWatch, toast} from "./render.js";
+import {askRoutine} from "./routine.js";
 // Rhythm · Мост с Android, прогулки по шагам, установка и офлайн
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- android app bridge ---------- */
-function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } if(o === "chat"){ closeSheet(); tab = "chat"; render(); scrollChat(); return true; } if(o === "today"){ closeSheet(); tab = "today"; render(); return true; } return false; }
+function checkOpen(){ if(!NATIVE) return false; let o = ""; try{ o = NATIVE.consumeOpen(); }catch(e){} if(o === "review"){ closeSheet(); openReview(); return true; } if(o === "chat"){ closeSheet(); __set_tab("chat"); render(); scrollChat(); return true; } if(o === "today"){ closeSheet(); __set_tab("today"); render(); return true; } return false; }
 /* ---------- прогулки по шагам: замечаем ходьбу и предлагаем записать ---------- */
 // сегмент: подряд идущие 10-минутные отрезки, где ≥60 шагов в минуту; ≥15 минут и ≥1200 шагов
-function walkSegments(buckets, nowMs){
+export function walkSegments(buckets, nowMs){
   const B = (buckets||[]).map(b => ({t: new Date(b.t).getTime(), n: b.n})).filter(b => !isNaN(b.t)).sort((a,b) => a.t - b.t);
   const segs = []; let cur = null;
   for(const b of B){
@@ -18,36 +29,13 @@ function walkSegments(buckets, nowMs){
   return segs.map(g => ({start:g.start, end:g.hotEnd, steps:g.steps, min:Math.round((g.hotEnd - g.start)/60000)}))
              .filter(g => g.min >= 20 && g.steps >= 1200 && g.end <= nowMs - 10*60000);
 }
-function suggestWalks(){
-  return;   // теперь прогулки показывает карточка «Заметил за день» на экране «Сегодня»
-  if(!health || !health.stepBuckets || !health.stepBuckets.length) return;
-  const seen = LS.get("walkSeen") || {}, bad = LS.get("walkNo") || {}, nowMs = Date.now();
-  let posted = 0;
-  for(const g of walkSegments(health.stepBuckets, nowMs)){
-    if(posted >= 2) break;
-    const id = String(g.start); if(seen[id]) continue;
-    const st = new Date(g.start), en = new Date(g.end), hh = st.getHours();
-    if((bad[hh] || 0) >= 2){ seen[id] = 1; continue; }                                 // в это время вы уже дважды говорили «это не прогулка»
-    const k = dateKeyOf(st), d = dayIdxOf(st), w = getWeek(k), day = (w.days && w.days[d]) || {};
-    const a0 = g.start, a1 = g.end, hmOf = x => x.time ? +x.time.slice(0,2)*60 + +x.time.slice(3,5) : null, m0 = st.getHours()*60 + st.getMinutes(), m1 = m0 + g.min;
-    const busy = (day.log||[]).some(e => e.type !== "water" && e.type !== "caffeine" && hmOf(e) != null && (CATS[e.type] && CATS[e.type].move) && e.min && hmOf(e) < m1 && hmOf(e) + e.min > m0)
-      || (day.log||[]).some(e => e.src === "steps" && hmOf(e) != null && Math.abs(hmOf(e) - m0) < 20);
-    if(busy){ seen[id] = 1; continue; }
-    // дорога на работу и с работы обычно не прогулка: если сегмент вплотную к рабочим границам — всё равно спрашиваем, но нейтрально
-    const t0 = fmtHM(st), t1 = fmtHM(en);
-    seen[id] = 1; posted++;
-    bot(`Заметил по шагам: с ${t0} до ${t1} вы шли около ${g.min} минут, ${fmtNum(g.steps)} шагов. Записать как прогулку?`,
-      [act("Да, записать прогулку", {op:"walkAdd", key:k, d, time:t0, min:g.min, steps:g.steps}), act("Это не прогулка (дорога, дела)", {op:"walkNo", hour:hh})]);
-  }
-  LS.set("walkSeen", seen);
-}
-const fmtHM = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+export const fmtHM = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
 
 window.__ritmNative = {
   onHealth(json){
     try{ const d = JSON.parse(json); if(d.error) return;
-      health = {apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, bgGranted:!!d.bgGranted, usage:!!d.usage, at:d.at};
-      LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} try{ applyRhythm(); }catch(e){} render();
+      __set_health({apps:d.apps||{}, steps:d.steps||{}, sleep:d.sleep||{}, sessions:d.sessions||[], stepBuckets:d.stepBuckets||[], stepsGranted:!!d.stepsGranted, sleepGranted:!!d.sleepGranted, bgGranted:!!d.bgGranted, usage:!!d.usage, at:d.at});
+      LS.set("health", health); try{ syncWalkWatch(); }catch(e){} try{ applyRhythm(); }catch(e){} render();
     }catch(e){}
   },
   onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybePreempt() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
@@ -57,7 +45,44 @@ window.__ritmNative = {
     render();
   }
 };
-if(NATIVE){
+
+
+/* ---------- install & offline ---------- */
+let deferredPrompt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; $("installBtn").hidden = false; });
+
+window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; toast("Rhythm установлен"); });
+
+document.addEventListener("visibilitychange", () => { if(!document.hidden){ __set_dismissed(new Set()); render(); } });
+
+  
+
+
+
+
+
+
+
+// крючок для автотестов (без влияния на работу)
+
+// поправка записи одним касанием: сколько на самом деле
+document.addEventListener("click", e => {
+  const t = e.target.closest && e.target.closest("[data-ledit]"); if(t){
+    const ck = curKey(), ti = todayI(), rec = ((getWeek(ck).days[ti] || {}).log || []).find(x => x.id === t.dataset.ledit); if(!rec) return;
+    openSheet(`<h2>${esc(rec.name)}: сколько на самом деле?</h2><div class="chips">${[10,15,20,30,45,60,90,120].map(m => `<button type="button" class="chip ${rec.min === m ? "on" : ""}" data-lmin="${m}" data-lid="${rec.id}">${fmtDur(m)}</button>`).join("")}</div>
+      <div class="tools"><button class="btn" data-ldel="${rec.id}">Удалить запись</button></div>`); return;
+  }
+  const c = e.target.closest && e.target.closest("[data-lmin]"); if(c){
+    const ck = curKey(), ti = todayI(), id = c.dataset.lid, m = +c.dataset.lmin;
+    mutateQuiet(ck, w => { const day = w.days[ti]; const r = day && (day.log || []).find(x => x.id === id); if(r){ r.min = m; delete r.mg; } });
+    closeSheet(); toast("Исправил: " + fmtDur(m)); render();
+  }
+});
+
+
+// Действия при запуске (раньше выполнялись при загрузке файла); вызывает main.js в прежнем порядке
+export function init(){
+  if(NATIVE){
   $("nToggle").onclick = () => {
     if(settings.notify){ settings.notify = false; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, false); }catch(e){} toast("Уведомления выключены"); render(); }
     else { try{ NATIVE.requestNotifications(); }catch(e){} }
@@ -75,7 +100,7 @@ if(NATIVE){
       "Разбор дня: " + (d.review||"—") + " (" + on(d.reviewEnabled) + "), ближайший " + d.nextReview + ". В приложении сейчас: " + reviewTime() + ".",
       "Уведомления Android: " + (d.notif ? "разрешены" : "ЗАПРЕЩЕНЫ"),
       "Экономия батареи: " + (d.batteryUnrestricted ? "без ограничений" : "включена, Android может задерживать напоминания (Настройки → Приложения → Rhythm → Батарея → Без ограничений)")].join("\n");
-    if(d.review && d.review !== reviewTime()){ lastReviewSync = ""; syncNative(); $("nDiagOut").textContent += "\nВремя разбора не совпало, отправил заново. Нажмите ещё раз."; } };
+    if(d.review && d.review !== reviewTime()){ __set_lastReviewSync(""); syncNative(); $("nDiagOut").textContent += "\nВремя разбора не совпало, отправил заново. Нажмите ещё раз."; } };
   $("nTestCheckin").onclick = () => { try{ NATIVE.testCheckin(); }catch(e){} };
   $("nWatch").onclick = e => { const b = e.target.closest("[data-watch]"); if(!b) return; settings.watchMin = +b.dataset.watch; persistSettings(); render(); toast("Сохранено"); };
   $("nTestWatch").onclick = () => { syncWatch(); try{ NATIVE.testWatch(); toast("Проверил. Если есть повод, придёт уведомление"); }catch(e){} };
@@ -85,22 +110,17 @@ if(NATIVE){
   try{ NATIVE.refreshHealth(); }catch(e){}
   if(settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){}
 }
-
-/* ---------- install & offline ---------- */
-let deferredPrompt = null;
-window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; $("installBtn").hidden = false; });
-$("installBtn").onclick = async () => { if(!deferredPrompt) return; deferredPrompt.prompt(); try{ await deferredPrompt.userChoice; }catch(e){} deferredPrompt = null; $("installBtn").hidden = true; };
-window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; toast("Rhythm установлен"); });
-if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
-document.addEventListener("visibilitychange", () => { if(!document.hidden){ dismissed = new Set(); render(); } });
-
-render(); renderBackupNote(); setTimeout(maybeAutoBackup, 3000);
-pullNative();
-if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybePreempt() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); render(); }
-if(!checkOpen()) scrollChat();
-$("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
-$("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) setReply(null); });
-(function swipeReply(){
+  $("installBtn").onclick = async () => { if(!deferredPrompt) return; deferredPrompt.prompt(); try{ await deferredPrompt.userChoice; }catch(e){} deferredPrompt = null; $("installBtn").hidden = true; };
+  if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  render();
+  renderBackupNote();
+  setTimeout(maybeAutoBackup, 3000);
+  pullNative();
+  if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybePreempt() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); render(); }
+  if(!checkOpen()) scrollChat();
+  $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
+  $("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) setReply(null); });
+  (function swipeReply(){
   const log = $("chatLog"); let el = null, sx = 0, sy = 0, dx = 0, mode = 0;   // mode: 0 ждём, 1 свайп, -1 это прокрутка
   const TH = 56;
   const reset = animate => { if(!el) return; const x = el; x.style.transition = animate ? "transform .18s" : ""; x.style.transform = ""; x.style.setProperty("--p", 0); if(animate) setTimeout(() => { x.style.transition = ""; }, 220); el = null; };
@@ -127,19 +147,7 @@ $("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) s
   // тап по цитате — прыжок к исходному сообщению
   log.addEventListener("click", e => { const q = e.target.closest("[data-rq]"); if(!q) return; const o = log.querySelector(`[data-mid="${CSS.escape(q.dataset.rq)}"]`); if(o){ o.scrollIntoView({block:"center", behavior:"smooth"}); o.classList.add("flash"); setTimeout(() => o.classList.remove("flash"), 1200); } });
 })();
-$("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
-// крючок для автотестов (без влияния на работу)
-window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, weakDays, maybePreempt, syncWidget, nudgeReview, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
-// поправка записи одним касанием: сколько на самом деле
-document.addEventListener("click", e => {
-  const t = e.target.closest && e.target.closest("[data-ledit]"); if(t){
-    const ck = curKey(), ti = todayI(), rec = ((getWeek(ck).days[ti] || {}).log || []).find(x => x.id === t.dataset.ledit); if(!rec) return;
-    openSheet(`<h2>${esc(rec.name)}: сколько на самом деле?</h2><div class="chips">${[10,15,20,30,45,60,90,120].map(m => `<button type="button" class="chip ${rec.min === m ? "on" : ""}" data-lmin="${m}" data-lid="${rec.id}">${fmtDur(m)}</button>`).join("")}</div>
-      <div class="tools"><button class="btn" data-ldel="${rec.id}">Удалить запись</button></div>`); return;
-  }
-  const c = e.target.closest && e.target.closest("[data-lmin]"); if(c){
-    const ck = curKey(), ti = todayI(), id = c.dataset.lid, m = +c.dataset.lmin;
-    mutateQuiet(ck, w => { const day = w.days[ti]; const r = day && (day.log || []).find(x => x.id === id); if(r){ r.min = m; delete r.mg; } });
-    closeSheet(); toast("Исправил: " + fmtDur(m)); render();
-  }
-});
+  $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
+  window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, weakDays, maybePreempt, syncWidget, nudgeReview, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
+}
+

@@ -1,36 +1,40 @@
+// Rhythm · ES-модуль (checkins.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, CATS, DACC, LS, MON, MONG, NATIVE, addDays, bedMin, cafCutoffFor, curKey, esc, fmtDur, fmtNum, getWeek, isScreen, iso, nowHM, pad, persistSettings, settings, sleepFor, stepsFor, todayI, uid} from "./base.js";
+import {MAJOR, act, bestDayInWeek, bot, commentFor, dateKeyOf, dayFromText, dayIdxOf, getChat, lc, nrm, pick, planText, pushMsg, runAction, saveChat, whenWord} from "./chat.js";
+import {defaultMin, intakeOf, kbjuTarget, mutateQuiet, openReview, quickWater, usualBedtime} from "./daily.js";
+import {rememberLastLog} from "./insights.js";
+import {nudgeReview} from "./nudges.js";
+import {hash, tab} from "./plan.js";
+import {__set_lastReviewSync, render, syncNative} from "./render.js";
+import {busyAt, getRoutine, handleUser, isWorkDay, saveRoutine, wakeFor} from "./routine.js";
 // Rhythm · Журнал непонятого, напоминания в течение дня, экран чата
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- журнал непонятого ---------- */
-function noteMiss(text, why){
+export function noteMiss(text, why){
   const t = String(text||"").trim(); if(!t) return;
   const arr = (LS.get("misses") || []).filter(x => x.text !== t);
   arr.push({at:Date.now(), text:t, why:why||"unknown"}); LS.set("misses", arr.slice(-60));
 }
-function dropMiss(text){ const t = String(text||"").trim(); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== t && !t.includes(x.text) && !x.text.includes(t))); }
+export function dropMiss(text){ const t = String(text||"").trim(); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== t && !t.includes(x.text) && !x.text.includes(t))); }
 
 // DGA 2025–2030: 1,2–1,6 г/кг для взрослых; ISSN: 1,4–2,0 при тренировках. С силовыми целями берём 1,6, без них 1,2
-const proteinFor = kg => Math.max(60, Math.min(250, Math.round(kg * ((settings.goals && settings.goals.strength) >= 2 ? 1.6 : 1.2) / 10) * 10));
-(function migrateNorms(){
-  if(settings.normsV >= 2) return;
-  const old = settings.weight ? Math.max(60, Math.min(250, Math.round(settings.weight * 1.4 / 10) * 10)) : null;
-  if(old != null && settings.proteinGoal === old) settings.proteinGoal = proteinFor(settings.weight);   // норму, посчитанную автоматически, пересчитываем; ручную не трогаем
-  settings.normsV = 2; persistSettings();
-})();
-function profileStatement(s, text){
+export const proteinFor = kg => Math.max(60, Math.min(250, Math.round(kg * ((settings.goals && settings.goals.strength) >= 2 ? 1.6 : 1.2) / 10) * 10));
+
+export function profileStatement(s, text){
   let said = [];
   const h = /(?:^| )рост (?:у меня )?(\d{3})(?: см)?(?: |$)|(?:^| )мой рост (\d{3})/.exec(s); if(h){ const v = +(h[1]||h[2]); if(v >= 120 && v <= 230){ settings.height = v; said.push(`рост ${v} см`); } }
   const a = /(?:^| )мне (\d{2}) (?:лет|год|года) /.exec(s); if(a){ const v = +a[1]; if(v >= 12 && v <= 100){ settings.age = v; said.push(`возраст ${v}`); } }
   if(/ я (мужчина|парень|мужик) /.test(s)){ settings.sex = "m"; said.push("пол мужской"); }
   else if(/ я (женщина|девушка) /.test(s)){ settings.sex = "f"; said.push("пол женский"); }
-  const w = /(?:^| )(?:я )?вешу (\d{2,3})/.exec(s); if(w){ const m = setWeight(+w[1]); said.push(`вес ${w[1]} кг`); }
+  const w = /(?:^| )(?:я )?вешу (\d{2,3})/.exec(s); if(w){ setWeight(+w[1]); said.push(`вес ${w[1]} кг`); }
   if(!said.length) return false;
   persistSettings(); render();
   const tg = kbjuTarget();
   bot("Запомнил: " + said.join(", ") + "." + (tg ? ` Ориентир по калориям на поддержание веса: около ${fmtNum(tg.kcal)} ккал в день (Б ${tg.protein} · Ж ${tg.fat} · У ${tg.carbs} г). Это оценка по формуле Миффлина — Сан Жеора, не диета.` : " Для нормы калорий нужны ещё вес, рост, возраст и пол."));
   return true;
 }
-function foodStatement(text, s, pre){
+export function foodStatement(text, s, pre){
   if(!RITM.looksLikeFood(text)) return false;
   const items = RITM.parseFood(text); if(!items.length) return false;
   const off = /вчера/.test(s) ? -1 : 0, date = addDays(new Date(), off), k = dateKeyOf(date), d = dayIdxOf(date);
@@ -46,15 +50,15 @@ function foodStatement(text, s, pre){
     [act("Убрать запись", {op:"unlogIds", key:k, d, ids})]);
   return true;
 }
-function setWeight(kg){ settings.weight = kg; settings.proteinGoal = proteinFor(kg); persistSettings(); const r = getRoutine(); r.asked.weight = true; saveRoutine(r); return `Вес ${kg} кг. Норму белка поставил ${settings.proteinGoal} г в день: 1,4 г на килограмм, как рекомендуют при силовых тренировках (диапазон 1,4–2,0).`; }
-function setBedtime(hm){
+export function setWeight(kg){ settings.weight = kg; settings.proteinGoal = proteinFor(kg); persistSettings(); const r = getRoutine(); r.asked.weight = true; saveRoutine(r); return `Вес ${kg} кг. Норму белка поставил ${settings.proteinGoal} г в день: 1,4 г на килограмм, как рекомендуют при силовых тренировках (диапазон 1,4–2,0).`; }
+export function setBedtime(hm){
   settings.bedtime = hm;
   if(!settings.cafManual) settings.caffeineCutoff = cafCutoffFor(hm);
   const b = toMinHM(hm), bb = b < 6*60 ? b + 1440 : b, o = toMinHM(settings.screensOff || "22:30"), oo = o < 6*60 ? o + 1440 : o;
   if(oo > bb - 60) settings.screensOff = fromMin(bb - 60);
   persistSettings();
   const r = getRoutine(); r.bedSet = true; r.asked.bed = true; saveRoutine(r);
-  lastReviewSync = ""; try{ syncNative(); }catch(e){}
+  __set_lastReviewSync(""); try{ syncNative(); }catch(e){}
 }
 function planIssues(date){
   const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key), out = [];
@@ -98,7 +102,7 @@ function issueActions(x){
   acts.push(act("Убрать из плана", {op:"remove", key:x.key, id:it.id, t:it.t}), act("Оставить", {op:"keep"}));
   return acts;
 }
-function postIssues(dates, max){
+export function postIssues(dates, max){
   let n = 0;
   for(const dt of dates) for(const x of planIssues(dt)){
     if(n >= (max||3)) return n;
@@ -108,12 +112,12 @@ function postIssues(dates, max){
   }
   return n;
 }
-function showPlan(date){
+export function showPlan(date){
   bot(planText(date));
   const n = postIssues([date], 3);
   if(!n){ const w = getWeek(dateKeyOf(date)), d = dayIdxOf(date); if(w.items.some(i=>i.day===d && !i.done)) bot("Если что-то поменялось, просто напиши, например: «сегодня вместо силовой бассейн в 18» или «перенеси игры на 19:30»."); }
 }
-const restOfWeek = () => { const out = []; const t = new Date(); t.setHours(0,0,0,0); for(let i=0;i<7;i++){ const d = addDays(t,i); out.push(d); if(dayIdxOf(d) === 6) break; } return out; };
+export const restOfWeek = () => { const out = []; const t = new Date(); t.setHours(0,0,0,0); for(let i=0;i<7;i++){ const d = addDays(t,i); out.push(d); if(dayIdxOf(d) === 6) break; } return out; };
 function findPlanned(q){
   const qs = nrm(q), type = RITM.guessType(q), ck = curKey(), ti = todayI();
   const keys = [ck, iso(addDays(new Date(ck+"T00:00:00"),7))];
@@ -122,7 +126,7 @@ function findPlanned(q){
     if(it) return {key, it}; }
   return null;
 }
-function moveCommand(what, where){
+export function moveCommand(what, where){
   const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}». Напиши точнее или посмотри вкладку «Неделя».`);
   const date = dayFromText(" " + where + " ") || dayFromText(" в " + where + " ");
   if(!date) return bot("Не понял, на какой день. Например: «перенеси силовую на четверг».");
@@ -132,27 +136,27 @@ function moveCommand(what, where){
   mutateQuiet(key, w => { w.items.push({...f.it, day:d, time: tm && /в\s*\d/.test(where) ? pad(+tm[1])+":"+pad(+(tm[2]||0)) : f.it.time}); });
   bot(`Перенёс «${f.it.t}» на ${whenWord(date)}.`);
 }
-function removeCommand(what){
+export function removeCommand(what){
   const f = findPlanned(what); if(!f) return bot(`Не нашёл в плане «${what.trim()}».`);
   bot(`Убрать «${f.it.t}» (${DACC[f.it.day]}) из плана?`, [act("Да, убрать", {op:"remove", key:f.key, id:f.it.id, t:f.it.t}), act("Нет", {op:"keep"})]);
 }
-const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\n• самочувствие: «устал», «не выспался», «болит спина», «заболел» — подстрою план\n• поправки: «не 30, а 45 минут», «это было вчера», «удали последнее»\n• когда: «через 2 дня», «в выходные», «на следующей неделе», «до обеда», «после ужина», «по вторникам и четвергам», «каждый день», «через день»\n• ответы на мои вопросы о плане: «нет, давай завтра», «лучше в 20:30», «сделал», «не получится»\n• если я что-то не так понял, нажми «Это не занятие», и я запомню. Всё непонятое собирается в «Ещё» → «Что я не понял»\n• выводы: «что ты заметил?», «отчёт», «что я пропускаю?», «составь план»\n• «пиши реже», «пиши чаще», «не пиши сегодня»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
+export const HELP_TEXT = "Пиши мне обычными словами:\n• что сделал: «прогулка 40 минут», «выпил кофе в 9:30 и в 11:30», «два скупа протеина с водой»\n• что планируешь: «сегодня бассейн в 18», «завтра силовая вечером»\n• вопросы: «что сегодня?», «что завтра?», «как неделя?», «сколько воды?»\n• правки: «перенеси силовую на четверг», «убери кино»\n• «разбор» — итоги дня с советами\n• о себе: «я работаю пн–пт с 9 до 18», «по субботам футбол в 12», «что ты обо мне знаешь?»\n• самочувствие: «устал», «не выспался», «болит спина», «заболел» — подстрою план\n• поправки: «не 30, а 45 минут», «это было вчера», «удали последнее»\n• когда: «через 2 дня», «в выходные», «на следующей неделе», «до обеда», «после ужина», «по вторникам и четвергам», «каждый день», «через день»\n• ответы на мои вопросы о плане: «нет, давай завтра», «лучше в 20:30», «сделал», «не получится»\n• если я что-то не так понял, нажми «Это не занятие», и я запомню. Всё непонятое собирается в «Ещё» → «Что я не понял»\n• выводы: «что ты заметил?», «отчёт», «что я пропускаю?», «составь план»\n• «пиши реже», «пиши чаще», «не пиши сегодня»\nЕсли слишком долго сижу в ленте или играх, я напомню о перерыве. Ответь «по работе», и я отстану, или «ладно, выключаю», и я проверю через 15 минут.\nДнём я иногда буду спрашивать, как дела, но только когда ты не спишь.";
 
 // ---------- check-ins: messages from Ritm during the day ----------
-function wakeTime(){
+export function wakeTime(){
   const t = new Date(), w = [];
   for(let i=0;i<7;i++){ const s = sleepFor(iso(addDays(t,-i))); if(s) w.push(+s.end.slice(0,2)*60 + +s.end.slice(3,5)); }
   if(w.length >= 3){ w.sort((a,b)=>a-b); const m = w[Math.floor(w.length/2)]; return pad(Math.floor(m/60))+":"+pad(m%60); }
   return settings.wake || "08:00";
 }
-const toMinHM = t => +t.slice(0,2)*60 + +t.slice(3,5);
-const fromMin = m => pad(Math.floor(((m%1440)+1440)%1440/60))+":"+pad(((m%60)+60)%60);
+export const toMinHM = t => +t.slice(0,2)*60 + +t.slice(3,5);
+export const fromMin = m => pad(Math.floor(((m%1440)+1440)%1440/60))+":"+pad(((m%60)+60)%60);
 const CI_KINDS = new Set(["morning","lunch","before","after","doing","work","water","evening","afterwork"]);
 const ciStats = () => LS.get("ciStats") || {};
 function ciRate(h){ const x = ciStats()[h] || {sent:0, ans:0}; return {sent:x.sent, ans:x.ans, rate:(x.ans + 0.6) / (x.sent + 1)}; }
 function ciNoteFired(f){ if(!CI_KINDS.has(f.kind)) return; const h = new Date(f.firedAt || f.at).getHours(), st = ciStats(); st[h] = st[h] || {sent:0, ans:0}; st[h].sent++; LS.set("ciStats", st); LS.set("lastCi", {at:f.firedAt || f.at, h, answered:false}); }
-function ciNoteAnswer(){ const lc = LS.get("lastCi"); if(!lc || lc.answered || Date.now() - lc.at > 45*60000) return; const st = ciStats(); st[lc.h] = st[lc.h] || {sent:1, ans:0}; st[lc.h].ans++; lc.answered = true; LS.set("ciStats", st); LS.set("lastCi", lc); }
-function bestHours(){ return Object.entries(ciStats()).filter(([,x]) => x.sent >= 3).map(([h,x]) => [+h, (x.ans + 0.6)/(x.sent + 1)]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([h])=>h).sort((a,b)=>a-b); }
+export function ciNoteAnswer(){ const lc = LS.get("lastCi"); if(!lc || lc.answered || Date.now() - lc.at > 45*60000) return; const st = ciStats(); st[lc.h] = st[lc.h] || {sent:1, ans:0}; st[lc.h].ans++; lc.answered = true; LS.set("ciStats", st); LS.set("lastCi", lc); }
+export function bestHours(){ return Object.entries(ciStats()).filter(([,x]) => x.sent >= 3).map(([h,x]) => [+h, (x.ans + 0.6)/(x.sent + 1)]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([h])=>h).sort((a,b)=>a-b); }
 function buildCheckins(){
   const freq = settings.checkins ?? 5; if(!freq) return [];
   if(settings.ciPauseUntil && Date.now() < settings.ciPauseUntil) return [];
@@ -216,14 +220,14 @@ function buildCheckins(){
   }
   return out.sort((a,b)=>a.at-b.at);
 }
-let lastCheckinSync = "";
-function syncCheckins(){
+export let lastCheckinSync = "";
+export function syncCheckins(){
   if(!NATIVE || !NATIVE.setCheckins) return;
   const list = settings.notify ? buildCheckins() : [];
   const s = JSON.stringify(list.map(x=>({...x, text:x.text.replace(/Как спалось\?|Что будет на обед\?|Что делаешь\?/g, m=>m)})));
   if(s !== lastCheckinSync){ lastCheckinSync = s; try{ NATIVE.setCheckins(s); }catch(e){} }
 }
-function pullNative(){
+export function pullNative(){
   if(!NATIVE) return;
   let fired = [], inbox = [];
   try{ fired = JSON.parse(NATIVE.consumeFired() || "[]"); }catch(e){}
@@ -239,8 +243,8 @@ function pullNative(){
 }
 
 // ---------- chat screen ----------
-function fmtTime(ms){ const d = new Date(ms); const t = new Date(); const same = d.toDateString() === t.toDateString(); return (same ? "" : d.getDate() + " " + MON[d.getMonth()] + ", ") + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
-function renderChat(){
+export function fmtTime(ms){ const d = new Date(ms); const t = new Date(); const same = d.toDateString() === t.toDateString(); return (same ? "" : d.getDate() + " " + MON[d.getMonth()] + ", ") + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+export function renderChat(){
   $("subtitle").textContent = "Пиши как другу: что делал и что планируешь";
   let arr = getChat();
   if(!arr.length){ bot("Привет! Я Rhythm. Пиши мне обычными словами, что делал или что планируешь. Например: «выпил кофе в 9:30», «сегодня бассейн в 18», «что сегодня?». Я всё запишу, подскажу и днём иногда буду спрашивать, как дела.", [act("Что я умею", {op:"help"})]); arr = getChat(); }
@@ -257,9 +261,9 @@ function renderChat(){
   $("chatLog").innerHTML = html;
   $("chatQuick").innerHTML = ["Что сегодня?","+ стакан воды","Что завтра?","Как неделя?","Разбор"].map(q => `<button class="chip" data-cq="${q}">${q}</button>`).join("");
 }
-function scrollChat(){ if(tab === "chat") requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight})); }
-function sendChat(text){ handleUser(text); }
-function chatClick(ds){
+export function scrollChat(){ if(tab === "chat") requestAnimationFrame(() => window.scrollTo({top: document.body.scrollHeight})); }
+export function sendChat(text){ handleUser(text); }
+export function chatClick(ds){
   if(ds.ma){ const arr = getChat(), m = arr.find(x=>x.id===ds.ma); const a = m && m.acts[+ds.mi] && m.acts[+ds.mi].a;
     if(a && a.op === "help"){ m.chosen = +ds.mi; saveChat(arr); bot(HELP_TEXT); render(); scrollChat(); return true; }
     runAction(ds.ma, +ds.mi); return true; }
@@ -269,5 +273,18 @@ function chatClick(ds){
     sendChat(ds.cq); return true;
   }
   return false;
+}
+
+
+export const __set_lastCheckinSync = v => (lastCheckinSync = v);
+
+// Действия при запуске (раньше выполнялись при загрузке файла); вызывает main.js в прежнем порядке
+export function init(){
+  (function migrateNorms(){
+  if(settings.normsV >= 2) return;
+  const old = settings.weight ? Math.max(60, Math.min(250, Math.round(settings.weight * 1.4 / 10) * 10)) : null;
+  if(old != null && settings.proteinGoal === old) settings.proteinGoal = proteinFor(settings.weight);   // норму, посчитанную автоматически, пересчитываем; ручную не трогаем
+  settings.normsV = 2; persistSettings();
+})();
 }
 

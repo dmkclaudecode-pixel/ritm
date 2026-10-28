@@ -1,6 +1,15 @@
+// Rhythm · ES-модуль (daily.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, CATS, DACC, DFULL, LS, MONG, NATIVE, TYPES, addDays, bedMin, curKey, customActs, dateOf, esc, fmtDur, fmtNum, getWeek, goalCats, health, isScreen, iso, needText, nowHM, pad, plural, saveWeek, settings, sleepEnough, sleepFor, sleepLow, sleepTotal, stepsFor, todayI, uid} from "./base.js";
+import {dateKeyOf, dayIdxOf, logFromChat} from "./chat.js";
+import {fmtTime} from "./checkins.js";
+import {fmtHM, walkSegments} from "./native.js";
+import {APP_GROUPS, appGroup, appInfo, nudgeStats} from "./nudges.js";
+import {__set_tab, autoFill, goalState, ideasFor, recentTitles} from "./plan.js";
+import {closeSheet, confirmIn, download, openSheet, render, toast} from "./render.js";
+import {getRoutine, smartTime} from "./routine.js";
 // Rhythm · «Заметил за день», журнал, разбор дня
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- «Заметил за день»: приложение само собирает день по шагам и экрану, человек подтверждает одной кнопкой ---------- */
 const noticedMem = () => LS.get("noticed") || {};
 function noticedList(){
@@ -28,13 +37,13 @@ function noticedList(){
   }
   return out.slice(0, 5);
 }
-function renderNoticed(){
+export function renderNoticed(){
   const card = $("noticedCard"); if(!card) return;
   const list = noticedList(); card.hidden = !list.length; if(!list.length) return;
   card.innerHTML = `<h2>Заметил за день</h2><p class="note">Приложение само это увидело. Верно ли?</p>` + list.map(n =>
     `<div class="status"><span class="rl"><b>${esc(n.title)}</b><span class="note">${esc(n.sub)}</span></span><span class="tools" style="margin:0"><button class="btn primary" data-nt="yes" data-nid="${esc(n.id)}" style="padding:5px 12px">Верно</button><button class="btn" data-nt="no" data-nid="${esc(n.id)}" style="padding:5px 12px">Нет</button></span></div>`).join("");
 }
-function noticedAnswer(id, yes){
+export function noticedAnswer(id, yes){
   const n = noticedList().find(x => x.id === id); if(!n) return render();
   const mem = noticedMem(); mem[id] = yes ? 1 : 0; LS.set("noticed", mem);
   if(!yes){ if(n.kind === "walk"){ const b = LS.get("walkNo") || {}, h = new Date(n.g.start).getHours(); b[h] = (b[h]||0) + 1; LS.set("walkNo", b); } toast("Понял, не записываю"); return render(); }
@@ -49,7 +58,7 @@ function noticedAnswer(id, yes){
   toast("Записал"); render();
 }
 /* что человек делает в телефоне сегодня: берём самое долгое приложение с экраном, минус уже записанное */
-function usageGuess(){
+export function usageGuess(){
   const pd = phoneDay(dateOf(curKey(), todayI())); if(!pd) return null;
   const done = LS.get("usageLogged") || {}, day = dateOf(curKey(), todayI()), got = done[day] || {};
   let best = null;
@@ -62,9 +71,9 @@ function usageGuess(){
   got[best.p] = best.total; const keep = {}; keep[day] = got; LS.set("usageLogged", keep);
   return best;
 }
-const appsFor = ds => (health.apps && health.apps[ds]) || null;
+export const appsFor = ds => (health.apps && health.apps[ds]) || null;
 const offHour = () => { const [h,m] = settings.screensOff.split(":").map(Number); return h + m/60; };
-function phoneDay(ds){
+export function phoneDay(ds){
   const d = appsFor(ds); if(!d) return null;
   const by = {}; let ent = 0;
   const wm = (LS.get("workMarks") || {})[ds] || {};   // приложения, про которые вы сказали «это по работе»
@@ -82,14 +91,14 @@ function chooseAppGroup(a){
   $("agPick").onclick = e => { const b = e.target.closest("[data-ag]"); if(!b) return; const m = LS.get("appTypes")||{}; m[a.p] = b.dataset.ag; LS.set("appTypes", m); closeSheet(); render(); toast("Запомнил"); };
   $("agCancel").onclick = closeSheet;
 }
-function usageHelpHtml(){
+export function usageHelpHtml(){
   return `<div class="help"><b>Если переключатель серый или написано «Ограниченная настройка»</b>
     <ol><li>Нажмите «Настройки приложения» ниже.</li><li>В правом верхнем углу нажмите <b>⋮</b> → <b>«Разрешить ограниченные настройки»</b> и подтвердите.</li><li>Вернитесь сюда и снова нажмите «Разрешить».</li></ol>
     <span class="note">Если пункта в меню ⋮ нет, сначала один раз попробуйте включить переключатель, закройте предупреждение, и пункт появится. Так Android защищает приложения, установленные не из Google Play.</span>
     <div class="tools"><button class="btn primary" data-native="usage">Разрешить</button><button class="btn" data-native="appsettings">Настройки приложения</button></div></div>`;
 }
 let appsShowAll = false;
-function renderScreenCard(ck, ti){
+export function renderScreenCard(ck, ti){
   const card = $("screenCard"); if(!card) return;
   if(!NATIVE){ card.hidden = true; return; }
   card.hidden = false;
@@ -105,12 +114,12 @@ function renderScreenCard(ck, ti){
     ${pd.apps.length > 5 && !appsShowAll ? `<button class="btn" data-appsall="1">Все приложения (${pd.apps.length})</button>` : ""}</div>
     <p class="note">Нажмите на тип приложения, если я определил его неверно.</p>`;
 }
-function appsClick(ds){
+export function appsClick(ds){
   if(ds.app){ const ck = curKey(), pd = phoneDay(dateOf(ck, todayI())); const a = pd && pd.apps.find(x=>x.p===ds.app); if(a) chooseAppGroup(a); return true; }
   if(ds.appsall){ appsShowAll = true; render(); return true; }
   return false;
 }
-function weekScreenInsights(ck, ti){
+export function weekScreenInsights(ck, ti){
   const out = [], days = [], prev = [];
   for(let d=0; d<=ti; d++){ const p = phoneDay(dateOf(ck,d)); if(p && (d < ti || p.total > 0)) days.push(p); }
   for(let d=0; d<7; d++){ const p = phoneDay(dateOf(iso(addDays(new Date(ck+"T00:00:00"),-7)), d)); if(p) prev.push(p); }
@@ -128,12 +137,12 @@ function weekScreenInsights(ck, ti){
 }
 
 /* ---------- journal: free-text log, intake, own activities ---------- */
-function typeChipsHtml(cur, filter){
+export function typeChipsHtml(cur, filter){
   const groups = {};
   for(const [k,t] of Object.entries(TYPES)){ if(filter && !filter(k)) continue; (groups[t.g] = groups[t.g]||[]).push(k); }
   return Object.entries(groups).map(([g, ks]) => `<div class="tgroup"><span class="label">${RITM.GROUPS[g].n}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${cur===k?"on":""}" data-cat="${k}"><i style="background:var(${CATS[k].c})"></i>${CATS[k].n}</button>`).join("")}</div></div>`).join("");
 }
-function chooseType(title, cur, cb, multi){
+export function chooseType(title, cur, cb, multi){
   if(!multi){
     openSheet(`<h2>${esc(title)}</h2><div id="tcPick">${typeChipsHtml(cur)}</div><div class="tools"><button class="btn" id="tcCancel">Отмена</button></div>`);
     $("tcPick").onclick = e => { const b = e.target.closest("[data-cat]"); if(!b) return; closeSheet(); cb(b.dataset.cat); };
@@ -147,7 +156,7 @@ function chooseType(title, cur, cb, multi){
   $("tcDone").onclick = () => { if(!sel.length) return; closeSheet(); cb(sel.slice()); };
   $("tcCancel").onclick = closeSheet; paint();
 }
-function describe(e){
+export function describe(e){
   const p = [];
   if(e.time) p.push("в " + e.time);
   if(e.type === "sleep") return p.join(" · ");
@@ -161,7 +170,7 @@ function describe(e){
   if(e.dose) p.push(e.dose);
   return p.join(" · ");
 }
-function intakeOf(log){
+export function intakeOf(log){
   const s = {kcal:0, fat:0, carb:0, water:0, waterCaf:0, mg:0, protein:0, alcohol:0, sweets:0, lastCaf:"", screen:0, lateScreen:0, move:0, groups:new Set()};
   for(const e of log||[]){
     if(e.type === "water") s.water += e.ml||0;
@@ -183,7 +192,7 @@ function intakeOf(log){
   return s;
 }
 
-function kbjuTarget(){ return RITM.calorieTarget(settings, stepsFor(dateOf(curKey(), todayI())) || 0); }
+export function kbjuTarget(){ return RITM.calorieTarget(settings, stepsFor(dateOf(curKey(), todayI())) || 0); }
 function kbjuHtml(s, bar){
   const tg = kbjuTarget();
   if(!s.kcal && !tg) return "";
@@ -226,9 +235,9 @@ function journalHtml(ctx){
   }
   return h;
 }
-function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Записать и отметить</h2><span class="note">вода, кофе, белок, дела</span></div>` + journalHtml("t"); }
+export function renderJournal(){ const el = $("logCard"); if(el) el.innerHTML = `<div class="bhead"><h2>Записать и отметить</h2><span class="note">вода, кофе, белок, дела</span></div>` + journalHtml("t"); }
 
-function fillDefaults(e){
+export function fillDefaults(e){
   const t = TYPES[e.type]; if(!t) return e;
   if(t.unit === "min" && !e.stepsOnly && e.min == null) e.min = t.def;
   if(e.type === "water" && !e.ml) e.ml = 250;
@@ -266,7 +275,7 @@ function saveLogDraft(){
   if(rvState) rvState = getReview(getWeek(k), d);
   render(); toast(`Записано: ${n} ${plural(n,"запись","записи","записей")}`);
 }
-function quickWater(ml){
+export function quickWater(ml){
   const k = curKey(), d = todayI();
   mutateQuiet(k, w => { const day = w.days[d] = {...(w.days[d]||{})}; day.log = (day.log||[]).concat([{id:uid(), type:"water", name:"Вода", time:nowHM(), ml}]); });
   render(); toast(`+${ml} мл воды`);
@@ -279,7 +288,7 @@ function deleteLog(id){
   if(rvState) rvState = getReview(getWeek(k), d);
   render(); toast("Запись удалена");
 }
-function journalClick(ds, t){
+export function journalClick(ds, t){
   if(ds.lpt != null && logDraft){ const e = logDraft.items[+ds.lpt]; chooseType(`Что такое «${e.name}»?`, e.type, c => { e.type = c; e.changed = true; e.unknown = false; if(e.wasUnknown && !e.name) e.name = CATS[c].n; fillDefaults(e); render(); }); return true; }
   if(ds.lpx != null && logDraft){ logDraft.items.splice(+ds.lpx, 1); render(); return true; }
   if(ds.lpsave){ saveLogDraft(); return true; }
@@ -293,7 +302,7 @@ document.addEventListener("submit", e => { const f = e.target.closest("form[data
 
 /* own activities */
 let actDraft = {n:"", t:null, manual:false}, actOpen = false;
-function renderActs(){
+export function renderActs(){
   const el = $("actsCard"); if(!el) return;
   const list = customActs();
   el.innerHTML = `<h2>Мои занятия</h2>
@@ -320,7 +329,7 @@ function renderActs(){
 }
 /* что Ритм не понял: можно объяснить в одно нажатие или сохранить список */
 const MISS_WHY = {unknown:"не знал такого занятия", chat:"принял за разговор", nothing:"ничего не понял", question:"не нашёл ответа"};
-function renderMisses(){
+export function renderMisses(){
   const el = $("missCard"); if(!el) return;
   const list = (LS.get("misses") || []).slice().reverse();
   el.hidden = !list.length; if(!list.length){ el.innerHTML = ""; return; }
@@ -332,7 +341,7 @@ function renderMisses(){
   $("missSave").onclick = () => download("ritm-ne-ponyal.txt", (LS.get("misses") || []).map(x => `${new Date(x.at).toISOString().slice(0,16).replace("T"," ")}\t${x.why}\t${x.text}`).join("\n"), "text/plain");
   $("missClear").onclick = () => { LS.set("misses", []); renderMisses(); toast("Список очищен"); };
 }
-function missClick(ds){
+export function missClick(ds){
   if(ds.missdel != null){ LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== ds.missdel)); renderMisses(); return true; }
   if(ds.missnot != null){ RITM.forget(ds.missnot); LS.set("misses", (LS.get("misses") || []).filter(x => x.text !== ds.missnot)); renderMisses(); toast("Запомнил: это не занятие"); return true; }
   if(ds.missact != null){ const text = ds.missact;
@@ -341,22 +350,22 @@ function missClick(ds){
     return true; }
   return false;
 }
-function actsClick(ds){ if(ds.actdel == null) return false; const arr = customActs(); arr.splice(+ds.actdel, 1); LS.set("custom", arr); renderActs(); toast("Удалено"); return true; }
+export function actsClick(ds){ if(ds.actdel == null) return false; const arr = customActs(); arr.splice(+ds.actdel, 1); LS.set("custom", arr); renderActs(); toast("Удалено"); return true; }
 
 /* ---------- day review: input, analysis, plan corrections ---------- */
 const MOVE = c => !!(CATS[c] && CATS[c].move);
-const defaultMin = it => { const m = /(\d+)\s*(?:–\d+\s*)?мин/.exec(it.t || ""); if(m) return +m[1]; const c = RITM.CATALOG.find(e=>e.n===it.t) || customActs().find(e=>e.n===it.t); if(c && c.m) return c.m; return (TYPES[it.cat]||TYPES.other).def || 30; };
-const hmMinus = (hm, m) => { const [h,mm] = hm.split(":").map(Number); let t = (h*60+mm-m+1440)%1440; return pad(Math.floor(t/60))+":"+pad(t%60); };
-function usualBedtime(){
+export const defaultMin = it => { const m = /(\d+)\s*(?:–\d+\s*)?мин/.exec(it.t || ""); if(m) return +m[1]; const c = RITM.CATALOG.find(e=>e.n===it.t) || customActs().find(e=>e.n===it.t); if(c && c.m) return c.m; return (TYPES[it.cat]||TYPES.other).def || 30; };
+export const hmMinus = (hm, m) => { const [h,mm] = hm.split(":").map(Number); let t = (h*60+mm-m+1440)%1440; return pad(Math.floor(t/60))+":"+pad(t%60); };
+export function usualBedtime(){
   if(getRoutine().bedSet && settings.bedtime) return {hm: settings.bedtime, auto:false};
   const starts = []; const t = new Date();
   for(let i=0;i<7;i++){ const s = sleepFor(iso(addDays(t,-i))); if(s) starts.push(bedMin(s.start)); }
   if(starts.length >= 3){ starts.sort((a,b)=>a-b); const m = starts[Math.floor(starts.length/2)] % 1440; return {hm: pad(Math.floor(m/60))+":"+pad(m%60), auto:true}; }
   return {hm: settings.bedtime || "23:30", auto:false};
 }
-const reviewTime = () => hmMinus(usualBedtime().hm, 30);
+export const reviewTime = () => hmMinus(usualBedtime().hm, 30);
 
-function getReview(w, d){
+export function getReview(w, d){
   const its = w.items.filter(i=>i.day===d);
   const old = (w.days[d]||{}).review || {};
   const entries = {};
@@ -371,7 +380,7 @@ function saveReview(rv){
     for(const it of w.items) if(it.day===d && rv.entries[it.id]) it.done = rv.entries[it.id].done;
   });
 }
-function mutateQuiet(key, fn){ const w = getWeek(key); fn(w); saveWeek(key, w); }
+export function mutateQuiet(key, fn){ const w = getWeek(key); fn(w); saveWeek(key, w); }
 
 function activeMinutesWeek(w, ck, uptoDay, todayRv){
   let total = 0;
@@ -526,10 +535,10 @@ function proposeChanges(rv, m){
   return props.map((p,i)=>({...p, i, on:true}));
 }
 
-let rvState = null, rvResult = null;
-function openReview(){ tab = "review"; rvState = getReview(getWeek(curKey()), todayI()); rvResult = rvState.done ? analyzeDay(rvState) : null; if(rvResult) rvResult.props.forEach(p=>p.on=false); render(); window.scrollTo({top:0}); }
+export let rvState = null, rvResult = null;
+export function openReview(){ __set_tab("review"); rvState = getReview(getWeek(curKey()), todayI()); rvResult = rvState.done ? analyzeDay(rvState) : null; if(rvResult) rvResult.props.forEach(p=>p.on=false); render(); window.scrollTo({top:0}); }
 
-function renderReview(){
+export function renderReview(){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), ds = dateOf(ck,ti), h = w.days[ti]||{};
   if(!rvState) rvState = getReview(w, ti);
   const rv = rvState, its = w.items.filter(i=>i.day===ti).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
@@ -594,7 +603,7 @@ function applyProps(){
   toast(`План обновлён: ${n} ${plural(n,"изменение","изменения","изменений")}`);
 }
 
-function reviewClick(ds){
+export function reviewClick(ds){
   if(!rvState) return false;
   const rv = rvState, k = curKey(), d = todayI();
   if(ds.rvtick){ const e = rv.entries[ds.rvtick]; e.done = !e.done; }
@@ -611,3 +620,6 @@ function reviewClick(ds){
   saveReview(rv); render(); return true;
 }
 
+
+export const __set_rvState = v => (rvState = v);
+export const __set_rvResult = v => (rvResult = v);

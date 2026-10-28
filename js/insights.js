@@ -1,12 +1,21 @@
+// Rhythm · ES-модуль (insights.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, CATS, DACC, DFULL, LS, TYPES, addDays, bedMin, curKey, dateOf, esc, fmtDur, fmtNum, getWeek, goalCats, ideasAll, iso, learnSleepNeed, mondayOf, nowHM, pad, persistSettings, plural, settings, sleepEnough, sleepFor, sleepLow, sleepNeed, sleepTotal, stepsFor, todayI} from "./base.js";
+import {MAJOR, act, bestDayInWeek, bot, breakLines, ctxBot, dateKeyOf, dayFromText, dayIdxOf, explicitLog, getChat, lc, pick, planText, runAction, saveChat, weekText} from "./chat.js";
+import {HELP_TEXT, fromMin, showPlan, toMinHM} from "./checkins.js";
+import {defaultMin, describe, hmMinus, intakeOf, mutateQuiet, phoneDay, usualBedtime} from "./daily.js";
+import {nightFacts, personalLink, weatherAnswer, wxLine} from "./morning.js";
+import {FEEL_WORD} from "./nudges.js";
+import {AERO_GOAL, aeroMinutes, goalState, ideaFits, shuffled} from "./plan.js";
+import {busyAt, getRoutine, isWorkDay, routineSummary, wakeFor} from "./routine.js";
 // Rhythm · Понимание чувств и поправок, паттерны, недельный отчёт, план по реальной жизни
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- understanding layer: feelings, corrections, questions, small talk ---------- */
-function parserCtx(){
+export function parserCtx(){
   const r = getRoutine();
   RITM.ctx = {now:nowHM(), workEnd: r.work && !r.noWork && isWorkDay(todayI()) ? r.work.to : null, workStart: r.work && !r.noWork ? r.work.from : null, commute: r.commute||0, lunch: r.lunch || settings.lunch || "13:30", bed: usualBedtime().hm, wake: wakeFor(todayI())};
 }
-const CRISIS_TEXT = "Мне очень жаль, что тебе сейчас так тяжело. Ты не один, и с этим не нужно справляться в одиночку. Пожалуйста, поговори с кем-то прямо сейчас: с близким человеком или на телефоне доверия в своей стране. Если есть риск, что ты можешь причинить себе вред, звони 112 — это бесплатно. Я здесь и готов слушать: расскажешь, что случилось?";
+export const CRISIS_TEXT = "Мне очень жаль, что тебе сейчас так тяжело. Ты не один, и с этим не нужно справляться в одиночку. Пожалуйста, поговори с кем-то прямо сейчас: с близким человеком или на телефоне доверия в своей стране. Если есть риск, что ты можешь причинить себе вред, звони 112 — это бесплатно. Я здесь и готов слушать: расскажешь, что случилось?";
 function setDayState(patch){
   const k = curKey(), d = todayI();
   mutateQuiet(k, w => { const day = w.days[d] = {...(w.days[d]||{})};
@@ -29,7 +38,7 @@ function lightenActs(maxN){
 }
 function earlyBedAct(){ const t = hmMinus(usualBedtime().hm, 30); return act(`Лечь сегодня в ${t}`, {op:"addToday", cat:"unplug", name:"Лечь пораньше, без экрана", time:t}); }
 
-function handleStates(states){
+export function handleStates(states){
   const msgs = [], acts = [];
   const has = k => states.find(x => x.k === k);
   const h = new Date().getHours();
@@ -91,14 +100,14 @@ function handleStates(states){
 }
 
 // last logged batch, for corrections
-function rememberLastLog(key, day, ids){ LS.set("lastLog", {key, day, ids, at:Date.now()}); }
+export function rememberLastLog(key, day, ids){ LS.set("lastLog", {key, day, ids, at:Date.now()}); }
 function lastLogEntries(){
   const ex = explicitLog();
   const L = ex ? {...ex, at:Date.now()} : LS.get("lastLog"); if(!L || Date.now() - L.at > 24*3600*1000) return null;
   const w = getWeek(L.key), day = (w.days[L.day]||{}); const es = (day.log||[]).filter(e => L.ids.includes(e.id));
   return es.length ? {L, w, es} : null;
 }
-function handleCorrection(c){
+export function handleCorrection(c){
   const last = lastLogEntries();
   if(c.op === "what") return bot("Что поправить? Например: «не 30, а 45 минут», «это было вчера», «это было в 18:30», «не бег, а ходьба» или «удали последнее».");
   if(!last) return bot("Не вижу свежих записей, которые можно поправить. Посмотри журнал во вкладке «Сегодня».");
@@ -140,7 +149,7 @@ function handleCorrection(c){
 }
 
 const JOKES = ["Почему штанга не ходит на вечеринки? Её всё время кто-то поднимает.","Мой план на день: проснуться. Дальше импровизация.","Пробежка утром — как будильник, только вместо кнопки «ещё 5 минут» есть только «ещё 5 километров».","Вода: 0 калорий, 100% пользы и ни одного побочного эффекта, кроме походов в туалет."];
-function handleSmall(small){
+export function handleSmall(small){
   const h = new Date().getHours();
   const cb2 = ctxBot(), lastBot = cb2.m;
   if(small.includes("yes") || small.includes("no")){
@@ -166,7 +175,7 @@ function handleSmall(small){
   return false;
 }
 
-function answerTopic(topics){
+export function answerTopic(topics){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), L = intakeOf((w.days[ti]||{}).log), ds = dateOf(ck, ti);
   const out = [];
   for(const t of topics){
@@ -187,7 +196,7 @@ function answerTopic(topics){
   if(out.length) bot(out.join("\n\n"));
   return out.length > 0 || topics.includes("plan");
 }
-let lastUserText = "";
+export let lastUserText = "";
 function adviceText(){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), gs = goalState(w, ti), tips = [];
   const sl = []; for(let i=0;i<7;i++){ const s = sleepTotal(iso(addDays(new Date(),-i))); if(s) sl.push(s.min); }
@@ -202,7 +211,7 @@ function adviceText(){
 }
 
 /* ---------- stage 2: personal patterns, trends, streaks, weekly report ---------- */
-function dayRecord(date){
+export function dayRecord(date){
   const key = dateKeyOf(date), d = dayIdxOf(date), w = getWeek(key), day = w.days[d] || {}, ds = iso(date);
   const log = day.log || [], L = intakeOf(log), sl = sleepFor(ds), stot = sleepTotal(ds);
   const its = w.items.filter(i => i.day === d);
@@ -225,7 +234,7 @@ function dayRecord(date){
   };
 }
 // сколько у нас реальных данных: выводы и правки плана по статистике — только когда их достаточно
-function startedAt(){
+export function startedAt(){
   if(settings.startedAt) return settings.startedAt;
   let first = null;
   for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(!k || !k.startsWith("ritm:w:")) continue;
@@ -237,13 +246,12 @@ function startedAt(){
   const t = first || new Date(); t.setHours(0,0,0,0);
   settings.startedAt = t.getTime(); persistSettings(); return settings.startedAt;
 }
-const dataDays = () => Math.floor((Date.now() - startedAt()) / 86400000);
-const statsReady = (min) => dataDays() >= (min || 14) && Date.now() >= (settings.statsHold || 0);
-const afterStart = (key, dow) => addDays(new Date(key+"T00:00:00"), dow).getTime() >= startedAt();
-function history(n){ const out = [], t = new Date(); t.setHours(0,0,0,0); for(let i = n; i >= 0; i--) out.push(dayRecord(addDays(t, -i))); return out; }
-const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+export const dataDays = () => Math.floor((Date.now() - startedAt()) / 86400000);
+export const statsReady = (min) => dataDays() >= (min || 14) && Date.now() >= (settings.statsHold || 0);
+export function history(n){ const out = [], t = new Date(); t.setHours(0,0,0,0); for(let i = n; i >= 0; i--) out.push(dayRecord(addDays(t, -i))); return out; }
+export const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
 // сравнение «в дни, когда X» против «остальные дни» с поправкой на малую выборку
-function compare(days, cond, val, minN, by, raw){
+export function compare(days, cond, val, minN, by, raw){
   // причинность: из исхода вычитаем средние по день недели (и по доп. факторам), чтобы не путать «сон» с «понедельником»
   const dowOf = r => r.x ? r.y.dow : r.dow;
   const factors = (raw ? [] : [dowOf]).concat(by || []);
@@ -267,13 +275,13 @@ function compare(days, cond, val, minN, by, raw){
 // насколько можно верить выводу: размер выборки и разброс (статистика Уэлча)
 const confNote = r => !r || r.t == null ? "" : (r.adj ? " Поправку на сон учёл." : "") + (r.back ? " Возможна и обратная связь: " + r.back + "." : "") + (r.t >= 2.5 && Math.min(r.nA, r.nB) >= 6 ? " Это устойчиво." : r.t >= 1.7 ? " Скорее всего так." : " Пока это лишь намёк, данных мало.");
 // обратная связь: вчерашнее самочувствие предсказывает сегодняшнее поведение не хуже, чем наоборот
-function reverseNote(days, getY, isHigh, getX, text){
+export function reverseNote(days, getY, isHigh, getX, text){
   const prs = days.map((x, i) => ({x, y: days[i+1]})).filter(p => p.y && getY(p.x) != null && getX(p.y) != null);
   const r = compare(prs, p => isHigh(getY(p.x)), p => getX(p.y) ? 1 : 0, 4);
   return r && r.t >= 1.7 && r.diff >= 0.2 ? text : "";
 }
 const SLP = x => x.sleepMin == null ? null : (sleepEnough(x.sleepMin) ? 1 : 0);
-function personalInsights(){
+export function personalInsights(){
   const days = history(42).filter(x => !x.sick), next = i => days[i+1];
   const pairs = days.map((x, i) => ({x, y: next(i)})).filter(p => p.y);
   const out = [];
@@ -332,7 +340,7 @@ function personalInsights(){
   return out.sort((a,b) => b.score - a.score);
 }
 // слабые дни недели: когда энергия стабильно ниже и что их отличает (сон перед ним, шаги, экран, загрузка)
-function weakDays(){
+export function weakDays(){
   if(!statsReady(21)) return [];
   const days = history(84).filter(x => !x.sick), out = [];
   const withE = days.filter(x => x.energy != null);
@@ -346,7 +354,7 @@ function weakDays(){
     const r = compare(withE, x => x.dow === dow, x => x.energy, 3, null, true);
     if(!r || r.diff > -0.6 || r.t < 1.7) continue;
     let why = null, best = 0;
-    for(const [k, f, sign, txt] of DOWN){
+    for(const [, f, sign, txt] of DOWN){
       const q = compare(days, x => x.dow === dow, f, 3, null, true);
       if(q && q.diff * sign > 0 && q.t >= 1.7 && q.t > best){ best = q.t; why = txt(q.diff); }
     }
@@ -355,7 +363,7 @@ function weakDays(){
   return out.sort((a, b) => b.drop - a.drop);
 }
 // накануне слабого дня: предупреждаю и предлагаю облегчить его
-function maybePreempt(){
+export function maybePreempt(){
   const h = new Date().getHours(); if(h < 17 || h >= 22) return false;
   const ck = curKey(), ti = todayI(), tm = (ti + 1) % 7, nextKey = ti === 6 ? iso(addDays(new Date(ck + "T00:00:00"), 7)) : ck;
   const P = LS.get("preemptPosted") || {}, tag = nextKey + ":" + tm;
@@ -375,7 +383,7 @@ function maybePreempt(){
   bot(`Завтра ${DFULL[tm].toLowerCase()}. По твоим данным в такие дни энергия ниже в среднем на ${wd.drop.toFixed(1).replace(".", ",")} балла${wd.why ? ": " + wd.why : ""}.${maj.length ? ` А в плане «${maj[0].t}».` : ""}${wxN ? ` Погода: ${wxN}.` : ""} Подготовимся заранее?`, acts, {kind:"preempt"});
   return true;
 }
-function streaks(){
+export function streaks(){
   const days = history(60).reverse(); // сегодня первым
   const run = (test, skipToday) => { let n = 0; for(let i = skipToday ? 1 : 0; i < days.length; i++){ const v = test(days[i]); if(v === null) { if(n) break; else continue; } if(!v) break; n++; } return n; };
   const out = [];
@@ -396,7 +404,7 @@ function itemHistory(weeks){
       out.push({cat:i.cat, dow:i.day, time:(lg && lg.time) || i.time || "", done:!!i.done, title:i.t}); } }
   return out;
 }
-function skipPatterns(){
+export function skipPatterns(){
   if(!statsReady()) return [];
   const h = itemHistory(6).filter(x => goalCats().includes(x.cat) || MAJOR.has(x.cat));
   const groups = {};
@@ -428,7 +436,6 @@ function weeklyReport(){
   const a = weekNumbers(ck), b = weekNumbers(pk), gs = goalState(getWeek(ck), 7);
   const L = [];
   L.push(`Неделя: сделано ${a.done} из ${a.planned} запланированного, движения ${fmtDur(a.move)}${b.planned ? ` (прошлая: ${b.done} из ${b.planned}, ${fmtDur(b.move)})` : ""}.`);
-  const cmp = (x, y, f, better) => x == null || y == null ? "" : Math.abs(x - y) < (better === "sleep" ? 10 : 0.3) ? "" : (x > y ? "больше" : "меньше");
   if(a.sleep != null && a.days >= 3) L.push(`Сон в среднем ${fmtDur(Math.round(a.sleep))}${b.sleep != null && Math.abs(a.sleep - b.sleep) >= 10 ? ` — на ${fmtDur(Math.round(Math.abs(a.sleep-b.sleep)))} ${a.sleep > b.sleep ? "больше" : "меньше"}, чем неделей раньше` : ""}.`);
   if(a.screen != null) L.push(`Развлечения в телефоне: ${fmtDur(Math.round(a.screen))} в день${b.screen != null && Math.abs(a.screen-b.screen) >= 10 ? ` (${a.screen < b.screen ? "меньше" : "больше"} на ${fmtDur(Math.round(Math.abs(a.screen-b.screen)))})` : ""}.`);
   if(a.steps != null) L.push(`Шагов в среднем ${fmtNum(Math.round(a.steps))} в день (ориентир ${fmtNum(settings.stepsGoal)}).`);
@@ -446,7 +453,7 @@ function weeklyReport(){
 
 /* ---------- stage 3: plan that fits the real you ---------- */
 // лучший день для занятия с учётом того, когда ты его реально делаешь
-function smartDay(key, cat, from, avoid, load, wObj){
+export function smartDay(key, cat, from, avoid, load, wObj){
   const bs = bestSlotFor(cat), w = wObj || getWeek(key);
   let best = -1, bestScore = -1e9;
   for(let d = from; d < 7; d++){
@@ -462,7 +469,7 @@ function smartDay(key, cat, from, avoid, load, wObj){
   }
   return best;
 }
-function learnedTime(cat, d, fallback){ const bs = bestSlotFor(cat); if(bs && bs.time && !busyAt(d, bs.time)) return bs.time; return fallback; }
+export function learnedTime(cat, d, fallback){ const bs = bestSlotFor(cat); if(bs && bs.time && !busyAt(d, bs.time)) return bs.time; return fallback; }
 // подстройка целей по последним двум неделям
 function goalSuggestions(){
   const out = [], base = mondayOf(new Date());
@@ -488,13 +495,13 @@ function sleepNeedNews(){
   } else if(settings.needAnnounced !== L.T){ settings.needAnnounced = L.T; persistSettings();
     bot(`Заметил про тебя: когда сплю от ${fm(L.T)}, энергия выше в среднем на ${L.diff.toFixed(1).replace(".", ",")} балла (${L.nA} против ${L.nB} дней). Беру ${fm(L.T)} как твою норму вместо общих 7 часов. Скажешь «мне хватает 6 часов» — поставлю твою.`); }
 }
-function postWeeklyReport(){
+export function postWeeklyReport(){
   bot(weeklyReport(), [act("Составить план на следующую неделю", {op:"planNext"}), act("Открыть итоги", {op:"tab", tab:"stats"})], {kind:"report"});
   sleepNeedNews();
   for(const g of goalSuggestions().slice(0, 2)) bot(g.text, [act(g.to > settings.goals[g.c] ? "Поднять" : "Снизить", {op:"goal", c:g.c, to:g.to}), act("Оставить", {op:"keep"})]);
 }
 
-function renderPatterns(){
+export function renderPatterns(){
   const el = $("patternsCard"); if(!el) return;
   const ins = personalInsights(), st = streaks(), sk = skipPatterns();
   const dataDays = history(28).filter(x => x.hasData).length;
@@ -505,14 +512,14 @@ function renderPatterns(){
     (sk.length ? `<span class="label">Что чаще срывается</span><ul class="list bad">${sk.slice(0,4).map(x => `<li>${esc(x.text)}</li>`).join("")}</ul><p class="note">При планировании я ставлю такие занятия на дни и часы, когда у тебя получается лучше.</p>` : "") +
     `<div class="tools"><button class="btn primary" data-report="1">Отчёт недели в чат</button></div>`;
 }
-function maybeWeeklyReport(){
+export function maybeWeeklyReport(){
   const h = new Date().getHours(), ck = curKey();
   if(todayI() === 6 && h >= 18 && LS.get("reportPosted") !== ck){ LS.set("reportPosted", ck); postWeeklyReport(); return true; }
   return false;
 }
 // привычные времена: что ты делаешь примерно в одно и то же время (по последним трём неделям)
 const HABIT_TYPES = ["caffeine","protein","walk","run","bike","swim","strength","mobility","reading","learning","supplements"];
-function habitTimes(){
+export function habitTimes(){
   const today = new Date(); today.setHours(0,0,0,0);
   const by = {}, names = {}, seenDays = new Set();
   for(let i = 1; i <= 21; i++){
@@ -533,7 +540,7 @@ function habitTimes(){
   }
   return out;
 }
-function maybeHabit(){
+export function maybeHabit(){
   if(document.hidden) return false;
   const now = new Date(), nm = now.getHours() * 60 + now.getMinutes(), ck = curKey(), ti = todayI();
   const posted = LS.get("habitPosted") || {}, today = dateKeyOf(now) + ":" + ti, st = posted.day === today ? posted : {day:today, types:[]};
@@ -553,7 +560,7 @@ function maybeHabit(){
 }
 setInterval(() => { try{ maybeHabit(); }catch(e){} }, 5 * 60 * 1000);
 // прогноз недели: по темпу первых дней видно, хватит ли движения, шагов и сна, пока ещё можно успеть
-function weekForecast(){
+export function weekForecast(){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), left = 6 - ti, out = [];
   if(ti < 2 || ti > 5) return out;
   // 1. аэробная нагрузка против нормы ВОЗ
@@ -577,7 +584,7 @@ function weekForecast(){
     if(sp) out.push({kind:"skip", text:`Завтра в плане ${CATS[sp.cat].full.toLowerCase()}. ${sp.text} Хочешь перенести на удобное время?`}); }
   return out;
 }
-function maybeForecast(){
+export function maybeForecast(){
   const ck = curKey(), h = new Date().getHours();
   if(h < 9 || h >= 21 || dataDays() < 4) return false;
   const posted = LS.get("forecastPosted") || {}, st = posted.key === ck ? posted : {key:ck, kinds:[]};
@@ -589,7 +596,7 @@ function maybeForecast(){
   return true;
 }
 // раз в неделю (суббота и воскресенье) напоминаю разобрать фразы, на которых споткнулся
-function maybeMissReview(){
+export function maybeMissReview(){
   const ck = curKey(), list = LS.get("misses") || [];
   if(todayI() < 5 || list.length < 3 || LS.get("missPosted") === ck) return false;
   LS.set("missPosted", ck);
@@ -597,3 +604,5 @@ function maybeMissReview(){
   bot(`На этой неделе я не понял ${list.length} ${plural(list.length, "фразу", "фразы", "фраз")}, например ${ex}. Разберём? Это займёт минуту, и дальше я пойму такие фразы сам.`, [act("Разобрать", {op:"openMiss"}), act("Позже", {op:"keep"})]);
   return true;
 }
+
+export const __set_lastUserText = v => (lastUserText = v);

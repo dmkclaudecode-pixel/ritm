@@ -25,7 +25,7 @@ for(const [t, exp] of NLU){
 }
 { const c = require("./core.test.js"); ok += c.ok; bad += c.fails.length; fails.push(...c.fails); }
 { const vm = require("vm"), fs = require("fs");   // синтаксис всех файлов интерфейса
-  for(const f of [...require("fs").readdirSync(__dirname + "/../js").map(f => "js/" + f),"core.js","parser.js","nlu.js","catalog.js","catalog2.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
+  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
 require("./stress.js"); require("./food.js");

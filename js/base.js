@@ -1,18 +1,21 @@
+// Rhythm · ES-модуль (base.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {history, mean} from "./insights.js";
+import {toast} from "./render.js";
 // Rhythm · Основа: справочники, хранилище, данные телефона, сон
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
-const TYPES = RITM.TYPES;
-const CATS = Object.fromEntries(Object.entries(TYPES).map(([k,t]) => [k, {n:t.short||t.n, full:t.n, g:t.gen, c:t.c, move:t.g==="move", grp:t.g, unit:t.unit}]));
-const GOALABLE = Object.keys(TYPES).filter(k => ["move","rest","social"].includes(TYPES[k].g) && TYPES[k].unit === "min");
-const isScreen = c => !!(CATS[c] && CATS[c].grp === "screen");
-const goalCats = () => GOALABLE.filter(c => (settings.goals[c]||0) > 0);
+
+export const TYPES = RITM.TYPES;
+export const CATS = Object.fromEntries(Object.entries(TYPES).map(([k,t]) => [k, {n:t.short||t.n, full:t.n, g:t.gen, c:t.c, move:t.g==="move", grp:t.g, unit:t.unit}]));
+export const GOALABLE = Object.keys(TYPES).filter(k => ["move","rest","social"].includes(TYPES[k].g) && TYPES[k].unit === "min");
+export const isScreen = c => !!(CATS[c] && CATS[c].grp === "screen");
+export const goalCats = () => GOALABLE.filter(c => (settings.goals[c]||0) > 0);
 const DEFAULT_SETTINGS = {goals:{strength:2,walk:3,swim:1,mobility:2,social:2,unplug:1,outing:1,nature:1}, waterGoal:2000, caffeineMax:400, caffeineCutoff:"14:00", proteinGoal:100, screenLimit:120, screensOff:"22:30", morning:"08:45", evening:"19:45", stepsGoal:7000, notify:false, bedtime:"23:30", reviewOn:true};
-const DW = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
-const DFULL = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
-const DACC = ["в понедельник","во вторник","в среду","в четверг","в пятницу","в субботу","в воскресенье"];
-const MON = ["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
-const MONG = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
-const TEMPLATE = [
+export const DW = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+export const DFULL = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"];
+export const DACC = ["в понедельник","во вторник","в среду","в четверг","в пятницу","в субботу","в воскресенье"];
+export const MON = ["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
+export const MONG = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+export const TEMPLATE = [
   [0,"strength","Силовая дома: всё тело","19:00"],[0,"gaming","Видеоигры, до часа","21:00"],
   [1,"walk","Быстрая прогулка","18:30"],[1,"social","Позвонить родителям или близким",""],
   [2,"mobility","Растяжка","21:00"],[2,"unplug","Вечер без экранов","21:00"],
@@ -22,33 +25,33 @@ const TEMPLATE = [
   [6,"walk","Прогулка в новом районе","12:00"],[6,"mobility","Йога","18:00"],[6,"relax","Отдых и план на неделю","19:00"]
 ];
 // экраны в шаблоне не должны заходить на последний час перед сном
-const fitScreenTime = (cat, tm) => { if(!tm || !isScreen(cat)) return tm; const hm = x => +x.slice(0,2)*60 + +x.slice(3,5); let off = hm(settings.screensOff || "22:30"); if(off < 6*60) off += 1440;
+export const fitScreenTime = (cat, tm) => { if(!tm || !isScreen(cat)) return tm; const hm = x => +x.slice(0,2)*60 + +x.slice(3,5); let off = hm(settings.screensOff || "22:30"); if(off < 6*60) off += 1440;
   let t = hm(tm); if(t < 6*60) t += 1440; if(t + 60 <= off) return tm; const n = Math.max(17*60, off - 60); return String(Math.floor(n/60)%24).padStart(2,"0") + ":" + String(n%60).padStart(2,"0"); };
-const customActs = () => LS.get("custom") || [];
+export const customActs = () => LS.get("custom") || [];
 // отсечка кофеина: не позже чем за 9 часов до сна (период полувыведения ~5–6 ч; AASM/Drake 2013: кофеин за 6 ч до сна укорачивает сон)
-function cafCutoffFor(bed){ let m = +bed.slice(0,2)*60 + +bed.slice(3,5); if(m < 6*60) m += 1440; m = Math.max(12*60, Math.min(16*60, m - 9*60)); return pad(Math.floor(m/60)) + ":" + pad(m%60); }
+export function cafCutoffFor(bed){ let m = +bed.slice(0,2)*60 + +bed.slice(3,5); if(m < 6*60) m += 1440; m = Math.max(12*60, Math.min(16*60, m - 9*60)); return pad(Math.floor(m/60)) + ":" + pad(m%60); }
 const IDEAS_BASE = RITM.CATALOG.filter(e => e.s).map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:e.w||"any", time:e.tm||"", note:e.s}));
-const ideasAll = () => IDEAS_BASE.concat(customActs().filter(e => TYPES[e.t] && TYPES[e.t].unit === "min").map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:"any", time:"", note:"Ваше занятие"})));
+export const ideasAll = () => IDEAS_BASE.concat(customActs().filter(e => TYPES[e.t] && TYPES[e.t].unit === "min").map(e => ({cat:e.t, t:e.n, min:e.m || TYPES[e.t].def, when:"any", time:"", note:"Ваше занятие"})));
 
-const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const uid = () => Math.random().toString(36).slice(2,10);
-const pad = n => String(n).padStart(2,"0");
-const iso = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
-function mondayOf(d){ const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
-function addDays(d,n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
-const plural = (n, a, b, c) => { const m10 = n%10, m100 = n%100; return m10===1 && m100!==11 ? a : (m10>=2 && m10<=4 && (m100<12 || m100>14) ? b : c); };
-const nowHM = () => { const d = new Date(); return pad(d.getHours())+":"+pad(d.getMinutes()); };
+export const $ = id => document.getElementById(id);
+export const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+export const uid = () => Math.random().toString(36).slice(2,10);
+export const pad = n => String(n).padStart(2,"0");
+export const iso = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+export function mondayOf(d){ const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+export function addDays(d,n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+export const plural = (n, a, b, c) => { const m10 = n%10, m100 = n%100; return m10===1 && m100!==11 ? a : (m10>=2 && m10<=4 && (m100<12 || m100>14) ? b : c); };
+export const nowHM = () => { const d = new Date(); return pad(d.getHours())+":"+pad(d.getMinutes()); };
 
 /* ---------- storage (this device only) ---------- */
-const LS = {
+export const LS = {
   get(k){ try{ const v = localStorage.getItem("ritm:"+k); return v ? JSON.parse(v) : null; }catch(e){ return null; } },
   set(k,v){ try{ localStorage.setItem("ritm:"+k, JSON.stringify(v)); return true; }catch(e){ toast("Не удалось сохранить: память браузера недоступна"); return false; } },
   keys(){ const out = []; try{ for(let i=0;i<localStorage.length;i++){ const k = localStorage.key(i); if(k && k.startsWith("ritm:")) out.push(k.slice(5)); } }catch(e){} return out; }
 };
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
-function getWeek(key){ const w = LS.get("w:"+key); return w ? {items:w.items||[], days:w.days||{}} : {items:[], days:{}}; }
-function saveWeek(key, w){ LS.set("w:"+key, {items:w.items, days:w.days, week:key, updated:new Date().toISOString()}); }
+export function getWeek(key){ const w = LS.get("w:"+key); return w ? {items:w.items||[], days:w.days||{}} : {items:[], days:{}}; }
+export function saveWeek(key, w){ LS.set("w:"+key, {items:w.items, days:w.days, week:key, updated:new Date().toISOString()}); }
 (function migrate(){
   if((LS.get("schema")||1) >= 2) return;
   const MAP = {pool:"swim", offline:"unplug", fun:"outing", games:"gaming"};
@@ -66,17 +69,17 @@ function saveWeek(key, w){ LS.set("w:"+key, {items:w.items, days:w.days, week:ke
   if(st && st.goals){ const g = {}; for(const [c,v] of Object.entries(st.goals)) g[MAP[c]||c] = v; st.goals = {...DEFAULT_SETTINGS.goals, ...g}; LS.set("settings", st); }
   LS.set("schema", 2);
 })();
-function loadSettings(){ const s = LS.get("settings") || {}; return {...DEFAULT_SETTINGS, ...s, goals:{...DEFAULT_SETTINGS.goals, ...(s.goals||{})}}; }
-let settings = loadSettings();
-const persistSettings = () => LS.set("settings", settings);
+export function loadSettings(){ const s = LS.get("settings") || {}; return {...DEFAULT_SETTINGS, ...s, goals:{...DEFAULT_SETTINGS.goals, ...(s.goals||{})}}; }
+export let settings = loadSettings();
+export const persistSettings = () => LS.set("settings", settings);
 
 /* ---------- phone data: steps & sleep (Android app only) ---------- */
-const NATIVE = window.RitmNative || null;
-let health = LS.get("health") || {steps:{}, sleep:{}};
-const fmtDur = m => { m = Math.round(m); return m < 60 ? `${m} мин` : (m % 60 ? `${Math.floor(m/60)} ч ${pad(m%60)} мин` : `${m/60} ч`); };
-const fmtNum = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
-const dateOf = (key, d) => iso(addDays(new Date(key+"T00:00:00"), d));
-function dayLog(ds){ const d = new Date(ds+"T00:00:00"); const w = LS.get("w:"+iso(mondayOf(d))); return (w && w.days && w.days[(d.getDay()+6)%7]) || {}; }
+export const NATIVE = window.RitmNative || null;
+export let health = LS.get("health") || {steps:{}, sleep:{}};
+export const fmtDur = m => { m = Math.round(m); return m < 60 ? `${m} мин` : (m % 60 ? `${Math.floor(m/60)} ч ${pad(m%60)} мин` : `${m/60} ч`); };
+export const fmtNum = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+export const dateOf = (key, d) => iso(addDays(new Date(key+"T00:00:00"), d));
+export function dayLog(ds){ const d = new Date(ds+"T00:00:00"); const w = LS.get("w:"+iso(mondayOf(d))); return (w && w.days && w.days[(d.getDay()+6)%7]) || {}; }
 function sleepFromLog(ds){
   const today = dayLog(ds), prev = dayLog(iso(addDays(new Date(ds+"T00:00:00"),-1)));
   const wake = (today.log||[]).filter(e=>e.type==="sleep" && e.event==="wake" && e.time).map(e=>e.time).sort()[0];
@@ -88,9 +91,9 @@ function sleepFromLog(ds){
   let min = toM(wake) - toM(bed); if(min <= 0) min += 1440;
   return min >= 120 && min <= 16*60 ? {start:bed, end:wake, min, src:"log"} : null;
 }
-const sleepFor = ds => (health.sleep && health.sleep[ds]) || sleepFromLog(ds);
+export const sleepFor = ds => (health.sleep && health.sleep[ds]) || sleepFromLog(ds);
 /* ----- сон за сутки: ночь + вечерний/дневной сон; норма — личная ----- */
-function sleepTotal(ds){
+export function sleepTotal(ds){
   const main = sleepFor(ds), day = dayLog(ds), log = day.log || [];
   let extra = 0, nap = 0; const prev = iso(addDays(new Date(ds+"T00:00:00"), -1));
   const ses = health.sessions || [];
@@ -111,9 +114,9 @@ function sleepTotal(ds){
   if(!total || (!main && !base)) return null;
   return {min: total, main: base, extra: extra + nap, start: main ? main.start : null, end: main ? main.end : null, src};
 }
-let needCache = {t:0, v:null};
+export let needCache = {t:0, v:null};
 // по самочувствию: при каком количестве сна энергия заметно выше (нужно ≥10 дней с оценкой энергии)
-function learnSleepNeed(){
+export function learnSleepNeed(){
   const pairs = history(60).filter(x => x.sleepMin != null && x.energy != null);
   if(pairs.length < 10) return {n:pairs.length, T:null};
   let best = null;
@@ -125,18 +128,18 @@ function learnSleepNeed(){
   if(best && best.diff >= 0.6) return {n:pairs.length, T:best.T, diff:best.diff, nA:best.nA, nB:best.nB};
   return {n:pairs.length, T:null, flat:true};
 }
-function sleepNeed(){
+export function sleepNeed(){
   if(settings.sleepNeed) return {min:settings.sleepNeed, src:"user"};
   if(Date.now() - needCache.t > 60000){ let L = null; try{ L = learnSleepNeed(); }catch(e){} needCache = {t:Date.now(), v:L}; }
   const L = needCache.v; if(L && L.T) return {min:L.T, src:"data", n:L.n, diff:L.diff};
   return {min:420, src:"default", flat:!!(L && L.flat), n:L ? L.n : 0};
 }
-const sleepLow = m => m != null && m < sleepNeed().min - 30;
-const sleepEnough = m => m != null && m >= sleepNeed().min - 15;
-function needText(){ const n = sleepNeed(), h = fmtDur(n.min);
+export const sleepLow = m => m != null && m < sleepNeed().min - 30;
+export const sleepEnough = m => m != null && m >= sleepNeed().min - 15;
+export function needText(){ const n = sleepNeed(), h = fmtDur(n.min);
   return n.src === "user" ? `твоя норма — ${h}` : n.src === "data" ? `по твоему самочувствию тебе нужно около ${h}` : "ориентир для взрослых — 7–9 часов, твою норму определю по самочувствию"; }
-const stepsFor = ds => { if(health.steps && health.steps[ds] != null) return health.steps[ds]; const d = dayLog(ds); return d.stepsManual != null ? d.stepsManual : ((d.review||{}).steps ?? null); };
-function bedMin(hm){ const [h,m] = hm.split(":").map(Number); let t = h*60+m; if(t < 12*60) t += 24*60; return t; }
+export const stepsFor = ds => { if(health.steps && health.steps[ds] != null) return health.steps[ds]; const d = dayLog(ds); return d.stepsManual != null ? d.stepsManual : ((d.review||{}).steps ?? null); };
+export function bedMin(hm){ const [h,m] = hm.split(":").map(Number); let t = h*60+m; if(t < 12*60) t += 24*60; return t; }
 function sleepRegular(ds){
   const t = sleepTotal(ds); if(!t) return null;
   const en = dayLog(ds).energy;
@@ -147,11 +150,11 @@ function sleepRegular(ds){
   prev.sort((a,b)=>a-b); return Math.abs(bedMin(s.start) - prev[Math.floor(prev.length/2)]) <= 60;
 }
 // null — данных о ночи нет; иначе ночь засчитана или нет (≥7 ч по AASM/SRS и ровный отбой)
-function sleepVerdict(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; const ds = dateOf(key,d); if(!sleepTotal(ds)) return null; return sleepRegular(ds) === true; }
-function sleepOk(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; return sleepRegular(dateOf(key,d)) === true; }
+export function sleepVerdict(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; const ds = dateOf(key,d); if(!sleepTotal(ds)) return null; return sleepRegular(ds) === true; }
+export function sleepOk(w, key, d){ const h = w.days[d]||{}; if(typeof h.sleep === "boolean") return h.sleep; return sleepRegular(dateOf(key,d)) === true; }
 
-const curKey = () => iso(mondayOf(new Date()));
-const todayI = () => (new Date().getDay()+6)%7;
+export const curKey = () => iso(mondayOf(new Date()));
+export const todayI = () => (new Date().getDay()+6)%7;
 (function migrateV3(){
   if((LS.get("schema") || 0) >= 3) return;
   const st = LS.get("settings");
@@ -173,3 +176,7 @@ if(!LS.get("started")){
   LS.set("started", true); persistSettings();
 }
 
+
+export const __set_settings = v => (settings = v);
+export const __set_needCache = v => (needCache = v);
+export const __set_health = v => (health = v);

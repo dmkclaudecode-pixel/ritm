@@ -1,6 +1,14 @@
+// Rhythm · ES-модуль (nudges.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, LS, NATIVE, addDays, curKey, dateOf, fmtDur, fmtNum, getWeek, goalCats, health, iso, pad, persistSettings, plural, settings, sleepFor, stepsFor, todayI} from "./base.js";
+import {act, bot, ctxBot, getChat} from "./chat.js";
+import {fromMin, toMinHM, wakeTime} from "./checkins.js";
+import {intakeOf, phoneDay, usualBedtime} from "./daily.js";
+import {goalState} from "./plan.js";
+import {closeSheet, openSheet, render, toast} from "./render.js";
+import {getRoutine, wakeFor} from "./routine.js";
 // Rhythm · Ответы на напоминания, виджет, наблюдатель приложений, привычные часы, «Главное»
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- ответы на напоминания о телефоне: реакция, выводы, поправки ---------- */
 const NUDGE_KINDS = new Set(["nudge", "nudge-result"]);
 function nudgeContext(){
@@ -32,9 +40,9 @@ function classifyNudgeReply(s, rec){
   if(/ (ладно|ок|окей|хорошо|понял|поняла|выключаю|закрываю|закрою|убираю|ухожу|сейчас закрою|договорились|да|верно|правда|согласен|согласна|точно|ты прав\S*|завязываю|хватит|нет) /.test(s)) return {kind:"comply"};
   return {kind:null};
 }
-const FEEL_WORD = {tired:"усталость", bored:"скука", stress:"тревога и стресс", sleepless:"бессонница", sad:"грусть"};
-function nativeNudgeReply(id, kind, text, snooze){ try{ return NATIVE.nudgeReply ? NATIVE.nudgeReply(id, kind, text, snooze || 0) : ""; }catch(e){ return ""; } }
-function nudgeChatReply(text, s, pre){
+export const FEEL_WORD = {tired:"усталость", bored:"скука", stress:"тревога и стресс", sleepless:"бессонница", sad:"грусть"};
+export function nativeNudgeReply(id, kind, text, snooze){ try{ return NATIVE.nudgeReply ? NATIVE.nudgeReply(id, kind, text, snooze || 0) : ""; }catch(e){ return ""; } }
+export function nudgeChatReply(text, s, pre){
   const cx = nudgeContext(); if(!cx) return false;
   const c = classifyNudgeReply(s, cx.rec); if(!c.kind) return false;
   const nw = s.trim().split(/\s+/).length;
@@ -85,7 +93,7 @@ function nudgeChatReply(text, s, pre){
   return false;
 }
 // выводы и поправки по истории реакций на напоминания
-function nudgeReview(){
+export function nudgeReview(){
   if(!NATIVE || !NATIVE.nudges) return false;
   const hist = nudgeHistory().filter(n => n.at > Date.now() - 30*864e5), P = LS.get("nudgeProposed") || {}, now = Date.now();
   const by = {};
@@ -119,7 +127,7 @@ function nudgeReview(){
 }
 /* ---------- виджет на главном экране ---------- */
 let lastWidget = "";
-function syncWidget(){
+export function syncWidget(){
   if(!NATIVE || !NATIVE.setWidget) return;
   const ck = curKey(), ti = todayI(), L = intakeOf((getWeek(ck).days[ti] || {}).log), st = stepsFor(dateOf(ck, ti));
   const j = JSON.stringify({date:iso(new Date()), water:L.water, waterGoal:settings.waterGoal, mg:L.mg, mgMax:settings.caffeineMax, steps: st != null ? Math.round(st) : -1, stepsGoal:settings.stepsGoal});
@@ -127,7 +135,7 @@ function syncWidget(){
 }
 /* ---------- app watcher settings & history ---------- */
 let lastWatchSync = "";
-function syncWatch(){
+export function syncWatch(){
   if(!NATIVE || !NATIVE.setWatch) return;
   const r = getRoutine(), types = LS.get("appTypes") || {};
   const ent = new Set(Object.entries(KNOWN_APPS).filter(([,g]) => APP_GROUPS[g] && APP_GROUPS[g].ent).map(([p]) => p));
@@ -142,8 +150,8 @@ function syncWatch(){
     wake: wakeFor(todayI()), off: settings.screensOff, workDays: Array.isArray(r.workDays) ? r.workDays : [], workFrom: r.work ? r.work.from : "", workTo: r.work ? r.work.to : ""};
   const s = JSON.stringify(cfg); if(s !== lastWatchSync){ lastWatchSync = s; try{ NATIVE.setWatch(s); }catch(e){} }
 }
-function nudgeHistory(){ if(!NATIVE || !NATIVE.nudges) return []; try{ return JSON.parse(NATIVE.nudges()); }catch(e){ return []; } }
-function nudgeStats(fromMs, toMs){
+export function nudgeHistory(){ if(!NATIVE || !NATIVE.nudges) return []; try{ return JSON.parse(NATIVE.nudges()); }catch(e){ return []; } }
+export function nudgeStats(fromMs, toMs){
   const list = nudgeHistory().filter(n => n.at >= fromMs && n.at < toMs);
   const c = k => list.filter(n => n.outcome === k).length;
   return {n:list.length, obeyed:c("obeyed"), ignored:c("ignored"), exempt:c("exempt"), promisedIgnored:list.filter(n=>n.outcome==="ignored" && n.response==="comply").length, list};
@@ -179,7 +187,7 @@ const APP_NOTES = {
   "com.netflix.mediaclient":["low","Netflix — фильмы и сериалы: отдых, если без марафонов до ночи."],
   "ru.kinopoisk":["low","Кинопоиск — фильмы и сериалы: отдых, если без марафонов до ночи."]
 };
-function appInfo(a){
+export function appInfo(a){
   const g = appGroup(a), base = GROUP_INFO[g] || GROUP_INFO.other, own = APP_NOTES[a.p];
   const overridden = (LS.get("appTypes")||{})[a.p];
   const risk = own && !overridden ? own[0] : base.risk, why = own && !overridden ? own[1] : base.why;
@@ -189,7 +197,7 @@ function appInfo(a){
   return {group:g, risk, why, limit};
 }
 /* ---------- screen time by app (Android app, usage access) ---------- */
-const APP_GROUPS = {
+export const APP_GROUPS = {
   video:{n:"Видео", ent:true, c:"--c-games"}, series:{n:"Фильмы и сериалы", ent:true, c:"--c-games"}, gaming:{n:"Игры", ent:true, c:"--c-games"},
   feeds:{n:"Соцсети", ent:true, c:"--c-social"}, chat:{n:"Мессенджеры", c:"--c-pool"}, browser:{n:"Браузер", c:"--c-other"},
   music:{n:"Музыка и подкасты", c:"--c-fun"}, work:{n:"Работа и учёба", c:"--c-offline"}, health:{n:"Здоровье и спорт", c:"--c-walk"},
@@ -208,7 +216,7 @@ const KNOWN_APPS = {
   "com.wildberries.ru":"shop","ru.ozon.app.android":"shop","com.avito.android":"shop","com.alibaba.aliexpresshd":"shop","com.amazon.mShop.android.shopping":"shop"
 };
 const CAT_MAP = {0:"gaming", 1:"music", 2:"video", 3:"other", 4:"feeds", 5:"feeds", 6:"maps", 7:"work"};
-const appGroup = a => (LS.get("appTypes")||{})[a.p] || KNOWN_APPS[a.p] || CAT_MAP[a.c] || "other";
+export const appGroup = a => (LS.get("appTypes")||{})[a.p] || KNOWN_APPS[a.p] || CAT_MAP[a.c] || "other";
 
 
 /* ---------- привычные часы: утренний и вечерний сигнал идут за реальным подъёмом и отбоем ---------- */
@@ -222,13 +230,13 @@ function rhythmTimes(){
   const evening = Math.max(19*60, Math.min(22*60 + 30, r5(bedN - 150)));
   return {morning: fromMin(morning), evening: fromMin(evening), wake: wakeTime(), bed: usualBedtime().hm};
 }
-function renderRhythm(){
+export function renderRhythm(){
   const b = $("rhythmToggle"); if(!b) return; const on = settings.rhythm !== false, r = rhythmTimes();
   b.textContent = "Подстраивать под мой ритм: " + (on ? "включено" : "выключено"); b.classList.toggle("primary", on);
   $("rhythmNote").textContent = r ? `По данным сна: подъём около ${r.wake}, отбой около ${r.bed}. Утро ${r.morning}, вечер ${r.evening}.` : "Пока мало данных о сне. Нужно хотя бы пять ночей.";
 }
-$("rhythmToggle").onclick = () => { settings.rhythm = settings.rhythm === false; persistSettings(); LS.set("rhythmDay", ""); if(settings.rhythm !== false) applyRhythm(); renderRhythm(); };
-function applyRhythm(){
+
+export function applyRhythm(){
   if(settings.rhythm === false) return;
   const day = new Date().toDateString(); if(LS.get("rhythmDay") === day) return;
   const r = rhythmTimes(); if(!r) return;
@@ -258,7 +266,7 @@ function focusTile(k, ck, ti){
   if(k === "goals"){ const gs = goalState(w, ti); let g = 0, d = 0; for(const c of goalCats()){ if(!gs[c]) continue; g += gs[c].goalMin; d += Math.min(gs[c].goalMin, gs[c].doneMin); } return tile(g ? Math.round(d/g*100) + "%" : "—", "целей недели", g ? d/g : null); }
   return "";
 }
-function renderFocus(ck, ti){
+export function renderFocus(ck, ti){
   const card = $("focusCard"); if(!card) return;
   const more = !!LS.get("moreMetrics");
   card.innerHTML = `<div class="metrics">${focusList().map(k => focusTile(k, ck, ti)).join("")}</div>
@@ -276,3 +284,10 @@ document.addEventListener("click", e => {
   if(!f.length) return; settings.focus = f; persistSettings(); b.classList.toggle("on", f.includes(k));
 });
 document.addEventListener("click", e => { if(e.target.id === "focusOk"){ closeSheet(); render(); } });
+
+
+// Действия при запуске (раньше выполнялись при загрузке файла); вызывает main.js в прежнем порядке
+export function init(){
+  $("rhythmToggle").onclick = () => { settings.rhythm = settings.rhythm === false; persistSettings(); LS.set("rhythmDay", ""); if(settings.rhythm !== false) applyRhythm(); renderRhythm(); };
+}
+

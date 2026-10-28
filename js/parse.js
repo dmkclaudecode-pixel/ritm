@@ -1,6 +1,16 @@
+// Rhythm · ES-модуль (parse.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {CATS, DACC, LS, TYPES, addDays, curKey, fmtDur, getWeek, iso, nowHM, persistSettings, plural, settings, todayI} from "./base.js";
+import {MAJOR, __set_normsMemo, act, addPlanFromChat, bestDayInWeek, bot, commentFor, ctxBot, dateKeyOf, dayFromText, dayIdxOf, explicitLog, getChat, handleNegations, isFutureClause, lc, logFromChat, nrm, pendingIssueDates, pick, saveChat, todayStatsText, weekText, whenWord, workBreakReply} from "./chat.js";
+import {__set_lastCheckinSync, foodStatement, moveCommand, noteMiss, postIssues, profileStatement, removeCommand, showPlan} from "./checkins.js";
+import {describe, fillDefaults, intakeOf, mutateQuiet, usageGuess} from "./daily.js";
+import {CRISIS_TEXT, __set_lastUserText, answerTopic, dataDays, handleCorrection, handleSmall, handleStates, parserCtx, personalInsights, postWeeklyReport, skipPatterns, startedAt, streaks} from "./insights.js";
+import {cityFromText, contextReply, logSleepWords, setCityByName} from "./morning.js";
+import {nudgeChatReply} from "./nudges.js";
+import {autoFill} from "./plan.js";
+import {__set_ruleMiss, applyRecurring, askRoutine, routineAnswer, routineStatement, routineSummary} from "./routine.js";
 // Rhythm · Разбор сообщения: продолжение фразы, контекст ответа
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 // ---------- understanding a message ----------
 /* ---------- продолжение прошлой фразы: «ещё час», «ещё стакан», «то же самое вчера» ---------- */
 function durOf(s){
@@ -22,7 +32,7 @@ function followUp(text, s, pre){
     const L = lastRecord(4*3600*1000), dur = durOf(s);
     if(L && dur && L.rec.min && (!typed.length || typed.every(e => e.type === L.rec.type))){
       mutateQuiet(L.key, w => { const r = ((w.days[L.d] || {}).log || []).find(x => x.id === L.rec.id); if(r){ r.min = (r.min || 0) + dur; delete r.mg; } });
-      normsMemo = null; bot(`Добавил ещё ${fmtDur(dur)}: ${lc(L.rec.name)} теперь ${fmtDur(L.rec.min + dur)}.`); return true;
+      __set_normsMemo(null); bot(`Добавил ещё ${fmtDur(dur)}: ${lc(L.rec.name)} теперь ${fmtDur(L.rec.min + dur)}.`); return true;
     }
   }
   // «ещё стакан», «ещё одну», «ещё кофе»: повторить последнюю запись; «то же самое», «то же вчера»: тоже
@@ -39,9 +49,9 @@ function followUp(text, s, pre){
   }
   return false;
 }
-function respondRules(text){
+export function respondRules(text){
   const s = nrm(text);
-  lastUserText = text; parserCtx();
+  __set_lastUserText(text); parserCtx();
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
   { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
@@ -66,7 +76,7 @@ function respondRules(text){
   if(A.question && /\?/.test(text) && pre.length && pre.every(e => e.neg)){
     const tps0 = A.topics.filter(t => t !== "plan");
     if(tps0.length && answerTopic(tps0)) return;
-    ruleMiss = true; noteMiss(text, "question");
+    __set_ruleMiss(true); noteMiss(text, "question");
     return bot("Это похоже на вопрос, поэтому я ничего не записал. Я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экраны. Если это было занятие, напиши без вопроса.");
   }
   const hasAct = pre.some(e => e.type && TYPES[e.type].unit !== "event");
@@ -83,17 +93,17 @@ function respondRules(text){
   // «смотрю», «слушаю» без названия: сначала смотрим, что видно по телефону, иначе спрашиваем одной кнопкой
   if(!/\d/.test(s) && / (смотрю|смотрел[аи]?|листаю|листал[аи]?|кручу|залип\w*|сижу в телефоне|сидел[аи]? в телефоне) $/.test(s)){
     const g = usageGuess();
-    if(g){ lastUserText = text; const e = {type:g.type, name:g.name, text, dayOffset:0, min:g.min}; fillDefaults(e); logFromChat([e]); const L = LS.get("lastLog");
+    if(g){ __set_lastUserText(text); const e = {type:g.type, name:g.name, text, dayOffset:0, min:g.min}; fillDefaults(e); logFromChat([e]); const L = LS.get("lastLog");
       bot(`Вижу по телефону: сегодня ${g.name} ${fmtDur(g.min)}. Записал.`, L ? [act("Это не то, убрать", {op:"unlogIds", key:L.key, d:L.day, ids:L.ids}), act("Всё верно", {op:"keep"})] : null); return; }
-    ruleMiss = false;
+    __set_ruleMiss(false);
     return bot("Что смотрите?", [["video","Ютуб","Ютуб"],["series","Сериал","Сериал"],["series","Фильм","Фильм"],["series","Трансляция","Матч или трансляция"],["feeds","Лента","Соцсети"]].map(([t, n, l]) => act(l, {op:"logQuick", type:t, name:n, text})).concat([act("Не надо записывать", {op:"keep"})]));
   }
   if(!/\d/.test(s) && / (слушаю|слушал[аи]?) $/.test(s)){
-    ruleMiss = false;
+    __set_ruleMiss(false);
     return bot("Что слушаете?", [["learning","Подкаст","Подкаст"],["relax","Музыка","Музыку"],["reading","Аудиокнига","Аудиокнигу"]].map(([t, n, l]) => act(l, {op:"logQuick", type:t, name:n, text})).concat([act("Не надо записывать", {op:"keep"})]));
   }
   // «еду на работу», «жена приготовила ужин», «заказал пиццу»: не запись о деле (если нет цифр и явного времени)
-  if(A.notMine && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ ruleMiss = false; return bot(chattyReply(null)); }
+  if(A.notMine && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ __set_ruleMiss(false); return bot(chattyReply(null)); }
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
   if(A.meta === "tooEarly" && !hasSureAct){
     settings.statsHold = Math.max(settings.statsHold || 0, startedAt() + 14*86400000); persistSettings();
@@ -118,9 +128,9 @@ function respondRules(text){
   if(rm && !/^ (последн|это|эту|запись)/.test(" " + rm[2])) return removeCommand(rm[2]);
   if(/^ (ничего|ничем|отдыхаю|просто отдыхаю|ничего особенного) /.test(s)) return bot(pick(["Отдых тоже важен. Если захочется движения, короткая прогулка на 15 минут отлично перезагружает.","Понял. Если что-то будешь делать, напиши, я запишу."]));
 
-  if(/ (не пиши|не беспокой|не трогай|хватит писать|помолчи|не надо писать)/.test(s) && !hasAct){ const t = new Date(); t.setDate(t.getDate()+1); t.setHours(6,0,0,0); settings.ciPauseUntil = t.getTime(); persistSettings(); lastCheckinSync = ""; return bot("Понял, сегодня больше не пишу. Завтра продолжим. Если хочешь реже насовсем — напиши «пиши реже»."); }
-  if(/ (пиши реже|реже пиши|слишком часто пишешь|часто пишешь)/.test(s)){ settings.checkins = Math.max(1, Math.min(4, (settings.checkins ?? 5) === 5 ? 3 : (settings.checkins ?? 5) - 1)); persistSettings(); lastCheckinSync = ""; return bot("Хорошо, буду писать реже. Вернуть как было — «пиши чаще»."); }
-  if(/ (пиши чаще|чаще пиши|пиши почаще|пиши каждый час)/.test(s)){ settings.checkins = 5; settings.ciPauseUntil = 0; persistSettings(); lastCheckinSync = ""; return bot("Договорились: буду писать примерно раз в час, пока ты не спишь, и постепенно подстроюсь под время, когда тебе удобно отвечать."); }
+  if(/ (не пиши|не беспокой|не трогай|хватит писать|помолчи|не надо писать)/.test(s) && !hasAct){ const t = new Date(); t.setDate(t.getDate()+1); t.setHours(6,0,0,0); settings.ciPauseUntil = t.getTime(); persistSettings(); __set_lastCheckinSync(""); return bot("Понял, сегодня больше не пишу. Завтра продолжим. Если хочешь реже насовсем — напиши «пиши реже»."); }
+  if(/ (пиши реже|реже пиши|слишком часто пишешь|часто пишешь)/.test(s)){ settings.checkins = Math.max(1, Math.min(4, (settings.checkins ?? 5) === 5 ? 3 : (settings.checkins ?? 5) - 1)); persistSettings(); __set_lastCheckinSync(""); return bot("Хорошо, буду писать реже. Вернуть как было — «пиши чаще»."); }
+  if(/ (пиши чаще|чаще пиши|пиши почаще|пиши каждый час)/.test(s)){ settings.checkins = 5; settings.ciPauseUntil = 0; persistSettings(); __set_lastCheckinSync(""); return bot("Договорились: буду писать примерно раз в час, пока ты не спишь, и постепенно подстроюсь под время, когда тебе удобно отвечать."); }
   if(/ (отчет|итоги недели|недельн|как прошла неделя)/.test(s) && !hasAct){ postWeeklyReport(); return; }
   if(/ (что ты (понял|заметил)|закономерност|выводы обо мне|что влияет|что мне помогает|что мне мешает)/.test(s)){ const ins = personalInsights(); return bot(ins.length ? "Вот что я заметил по твоим данным:\n" + ins.slice(0,5).map(x => "• " + x.text).join("\n") : "Пока мало данных для выводов. Нужно хотя бы 1–2 недели: отмечай энергию и настроение, пиши, что делал, — и я начну находить закономерности."); }
   if(/ (серии|стрик|сколько дней подряд)/.test(s)){ const st = streaks(); return bot(st.length ? "Твои серии: " + st.join("; ") + ". Не прерывай!" : "Пока серий нет — начни сегодня, и я буду считать."); }
@@ -131,7 +141,7 @@ function respondRules(text){
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
   if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; }
-  if(A.question && !hasAct && !pre.some(e=>e.type)){ ruleMiss = true; noteMiss(text, "question"); return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
+  if(A.question && !hasAct && !pre.some(e=>e.type)){ __set_ruleMiss(true); noteMiss(text, "question"); return bot("Пока я умею отвечать про план, неделю, воду, кофеин, белок, шаги, сон и экранное время. Спроси, например: «сколько я выпил воды?» или «как я сплю?»."); }
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);
   const entries = RITM.parse(text);
@@ -141,7 +151,7 @@ function respondRules(text){
     for(const e of sl){ entries.splice(entries.indexOf(e), 1); logSleepWords(e, text); }
     if(sl.length && !entries.length) return; }
   if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return bot(chattyReply(null));
-  if(!entries.length){ ruleMiss = true; noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
+  if(!entries.length){ __set_ruleMiss(true); noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
   const cb0 = ctxBot(), lastBot = cb0.m;
   const ctxKind = lastBot && (cb0.explicit || Date.now() - lastBot.at < 3*3600*1000) ? lastBot.kind : null;
 
@@ -157,7 +167,7 @@ function respondRules(text){
     if(e.fuzzy && !e.learned){ fuzzies.push(e); continue; }
     (fut ? future : past).push(e);
   }
-  if(!past.length && !future.length && !negs.length && !clar.length && unknown.length && ctxKind !== "lunch") ruleMiss = true;
+  if(!past.length && !future.length && !negs.length && !clar.length && unknown.length && ctxKind !== "lunch") __set_ruleMiss(true);
   // «сегодня будет бассейн, силовой не будет» — это замена одного на другое
   for(const n of negs.slice()){
     if(!n.negFuture || !MAJOR.has(n.type)) continue;
@@ -278,8 +288,9 @@ function isChatty(u, A){
   if(/ (я|мы|ты|он|она|они|это|не|нет|пока|еще|ещё|уже|никаких|ничего|знаю|понял|думаю|кажется|наверное|может|надо|нужно|хочу|рано|поздно|просто|вообще|короче|типа|вроде) /.test(nrm(u.name))) return true;
   return !!A.conversational && w.length >= 2;
 }
-const SKIP_OK = ["Ничего страшного, бывает.","Понял, без проблем.","Окей, случается.","Бывает, не страшно.","Жизнь вносит правки, это нормально.","Понял. Один пропуск ничего не ломает.","Окей, не беда."];
+export const SKIP_OK = ["Ничего страшного, бывает.","Понял, без проблем.","Окей, случается.","Бывает, не страшно.","Жизнь вносит правки, это нормально.","Понял. Один пропуск ничего не ломает.","Окей, не беда."];
 function chattyReply(kind){
   if(kind === "report" || kind === "insight") return "Понял тебя. Ничего не меняю, просто продолжаю наблюдать.";
   return pick(["Понял тебя.","Принято.","Окей, понял.","Ясно.","Услышал.","Понимаю."]) + " " + pick(["Если что-то делал или собираешься — напиши, я запишу.","Будут новости по делам — пиши.","Если захочешь что-то запланировать — я тут."]);
 }
+

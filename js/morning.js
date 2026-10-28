@@ -1,6 +1,15 @@
+// Rhythm · ES-модуль (morning.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, CATS, DACC, LS, TYPES, addDays, bedMin, curKey, dayLog, esc, fmtDur, getWeek, goalCats, iso, needText, nowHM, pad, persistSettings, plural, settings, sleepEnough, sleepLow, sleepNeed, sleepTotal, todayI, uid} from "./base.js";
+import {MAJOR, act, bestDayInWeek, bot, commentFor, ctxBot, dateKeyOf, dayFromText, dayIdxOf, getChat, lc, logFromChat, nrm, pendingIssueDates, pick, saveChat, whenWord} from "./chat.js";
+import {postIssues, scrollChat} from "./checkins.js";
+import {appsFor, fillDefaults, hmMinus, intakeOf, mutateQuiet, phoneDay, usualBedtime} from "./daily.js";
+import {dayRecord, personalInsights, statsReady} from "./insights.js";
+import {SKIP_OK} from "./parse.js";
+import {__set_tab, shuffled, suggestionsToday, tab} from "./plan.js";
+import {mutate, render, toast} from "./render.js";
 // Rhythm · Контекст, утро, погода, ритуал, сон словами, срывы
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- контекст: на что отвечает пользователь ---------- */
 function refOf(m){
   if(!m) return null;
@@ -27,7 +36,7 @@ function skipPrompt(f, date){
 const CANCEL_RE = / (не будет|не пойду|не поеду|не получится|не получилось|не успею|не успел|не успела|отмена|отменяется|отменяю|отменил|не смогу|не смог|не сегодня|не хочу|пропущу|пропускаю|пропустил|не вышло|не сделал|не сделала|не было|не ходил|не ходила|сорвалось|слил) /;
 const DONE_RE = / (сделал|сделала|сделано|готово|сходил|сходила|отзанимался|отзанималась|сделал уже|уже сделал|выполнил|выполнила|получилось|отлично прошло|норм прошло|хорошо прошло|прошло|был|была|позанимался|потренировался|потренил|отходил|отплавал|отбегал|закрыл) /;
 const STILL_RE = / (в силе|иду|пойду|буду|еду|поеду|собираюсь|все в силе|всё в силе|по плану|да|ага|конечно|ок|окей|угу|да конечно|естественно) /;
-function contextReply(text, s, A, pre){
+export function contextReply(text, s, A, pre){
   const cb1 = ctxBot(), lastBot = cb1.m;
   if(!lastBot || lastBot.chosen != null || (!cb1.explicit && Date.now() - lastBot.at > 3*3600*1000)) return false;
   const f = refOf(lastBot); if(!f) return false;
@@ -63,7 +72,7 @@ function contextReply(text, s, A, pre){
 }
 
 /* ---------- утро: как прошла ночь и что на неё повлияло ---------- */
-function nightFacts(){
+export function nightFacts(){
   const t = new Date(); t.setHours(0,0,0,0); const y = addDays(t, -1), ds = iso(t), ys = iso(y);
   const sl = sleepTotal(ds), facts = [], causes = [];
   const pdY = phoneDay(ys), pdT = phoneDay(ds);
@@ -78,9 +87,9 @@ function nightFacts(){
   causes.sort((a, b) => b.w - a.w);
   return {sl, facts, causes};
 }
-const TIP = {screen:`Сегодня попробуй убрать телефон в ${settings.screensOff} — хотя бы за 30 минут до сна.`, caffeine:`Сегодня кофеин только до ${settings.caffeineCutoff}.`, alcohol:"Сегодня больше воды и лечь пораньше.", move:"Сегодня хотя бы 20 минут пешком — сон будет глубже.", late:"Сегодня постарайся лечь вовремя, даже если не очень хочется."};
-function personalLink(kind){ if(!statsReady(14)) return ""; const x = personalInsights().find(i => i.kind === kind); return x ? " По твоим данным: " + lc(x.text) : ""; }
-function morningBrief(){
+export let TIP;
+export function personalLink(kind){ if(!statsReady(14)) return ""; const x = personalInsights().find(i => i.kind === kind); return x ? " По твоим данным: " + lc(x.text) : ""; }
+export function morningBrief(){
   const h = new Date().getHours(), today = iso(new Date());
   if(LS.get("briefDay") === today || h < 5 || h >= 13) return false;
   const n = nightFacts(); if(!n.sl && !n.causes.length) return false;
@@ -101,7 +110,7 @@ const WX_WET = c => (c >= 51 && c <= 67) || (c >= 80 && c <= 99) || (c >= 71 && 
 const getCity = () => settings.city && settings.city.lat != null ? settings.city : null;
 let wxBusy = false;
 function wxCache(){ const c = LS.get("weather"); return c && getCity() && c.city === getCity().name ? c : null; }
-async function refreshWeather(force){
+export async function refreshWeather(force){
   const city = getCity(); if(!city || wxBusy || !navigator.onLine) return;
   const c = wxCache(); if(!force && c && Date.now() - c.at < 2*3600*1000) return;
   wxBusy = true;
@@ -130,7 +139,7 @@ function wxDay(dateIso){
   return {hours, tmax, tmin, wetFrom, dryWin, bad, ok, desc: WX_CODE(noon.c), wind: Math.max(...day.map(x => x.w)), allWet: day.every(bad)};
 }
 const wxT = n => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(Math.round(n));
-function wxLine(dateIso){
+export function wxLine(dateIso){
   const d = wxDay(dateIso); if(!d) return "";
   let s = `${wxT(d.tmin)}…${wxT(d.tmax)}°, ${d.desc}`;
   if(d.allWet) s += ", весь день неуютно для улицы";
@@ -151,7 +160,7 @@ function wxConflicts(S){
   }
   return out;
 }
-async function setCityByName(name){
+export async function setCityByName(name){
   const q = String(name || "").trim().replace(/^(в|г\.?|город)\s+/i, "").replace(/[.!]+$/, "").trim();
   if(q.length < 2) return bot("Не разобрал название. Напиши город, например: «Казань».");
   try{
@@ -168,21 +177,21 @@ async function setCityByName(name){
 function askCity(){
   bot("В каком городе ты живёшь? Нужно для погоды: советы про прогулки и тренировки на улице. Прогноз беру по названию города из открытого сервиса, геолокация не нужна.", [act("Не нужно", {op:"cityNo"})], {kind:"city"});
 }
-function weatherAnswer(){
+export function weatherAnswer(){
   if(!getCity()){ askCity(); return; }
   const today = iso(new Date()), tm = iso(addDays(new Date(), 1)), a = wxLine(today), b = wxLine(tm);
   if(!a && !b){ refreshWeather(true).then(() => { const x = wxLine(today); bot(x ? `Сегодня в ${getCity().name}: ${x}.` : "Прогноз пока не загрузился, попробуй чуть позже."); render(); }); return; }
   const d = wxDay(today), tip = d ? (d.allWet ? "На улице сегодня неуютно: лучше домашняя разминка или зал." : d.dryWin.length ? `Для прогулки лучше всего около ${pad(d.dryWin[Math.floor(d.dryWin.length / 2)])}:00.` : "") : "";
   bot(`${getCity().name}. Сегодня: ${a || "нет данных"}.${b ? " Завтра: " + b + "." : ""} ${tip}`.trim());
 }
-function cityFromText(text){
+export function cityFromText(text){
   const m = /(?:^|\s)(?:живу в|я живу в|мой город|я из|город)\s+([а-яёa-z\- ]{2,30})$/i.exec(String(text).trim().replace(/[.!]+$/, ""));
   return m ? m[1] : null;
 }
 
 /* ---------- утренний ритуал: итог сна, энергия и план дня по состоянию ---------- */
 function ritualState(){
-  const now = new Date(), ck = curKey(), ti = todayI(), w = getWeek(ck), day = w.days[ti] || {};
+  const ck = curKey(), ti = todayI(), w = getWeek(ck), day = w.days[ti] || {};
   const n = nightFacts(), sl = n.sl, need = sleepNeed().min, energy = day.energy ?? null;
   const shortSleep = !!(sl && sl.min < need - 60);
   const low = (energy != null && energy <= 2) || !!day.sick || (energy == null && shortSleep);
@@ -201,7 +210,7 @@ function lightenToday(){
   mutateQuiet(S.ck, w => { w.days[S.ti] = {...(w.days[S.ti] || {}), lightDay:true}; });
   return {moved, swapped};
 }
-function renderRitual(){
+export function renderRitual(){
   const c = $("ritualCard"); if(!c) return;
   const h = new Date().getHours(), today = iso(new Date());
   if(h < 5 || h >= 13 || LS.get("ritualDone") === today){ c.hidden = true; return; }
@@ -232,12 +241,12 @@ function renderRitual(){
   const main = S.undone.slice(0, 3).map((i, k) => `<li class="${k ? "" : "first"}"><b>${i.time || "—"}</b><span>${esc(i.t)}</span></li>`).join("");
   c.innerHTML = `<div class="bhead"><h2>Утро</h2><span class="note">30 секунд</span></div>${sleepLine}${scale}${wx}${mode}${main ? `<span class="label">Главное на сегодня</span><ul class="rmain">${main}</ul>` : ""}<div class="tools">${btns}<button class="btn" data-rit="done">Готово</button></div>`;
 }
-function ritualClick(ds){
+export function ritualClick(ds){
   if(!ds.rit) return false;
   if(ds.rit === "done"){ LS.set("ritualDone", iso(new Date())); render(); return true; }
   if(ds.rit === "lighten"){ const r = lightenToday(); toast(`Облегчил: перенёс ${r.moved}, заменил ${r.swapped}`); bot(`Облегчил день: перенёс ${r.moved}, заменил на лёгкую прогулку ${r.swapped}. Если станет лучше, можно вернуть.`); render(); return true; }
   if(ds.rit === "bed"){ const S = ritualState(), tm = hmMinus(usualBedtime().hm, 30); mutate(S.ck, w => w.items.push({id:uid(), day:S.ti, cat:"unplug", t:"Лечь пораньше, без экрана", time:tm, done:false})); toast("Добавил: лечь в " + tm); return true; }
-  if(ds.rit === "city"){ askCity(); tab = "chat"; render(); scrollChat(); return true; }
+  if(ds.rit === "city"){ askCity(); __set_tab("chat"); render(); scrollChat(); return true; }
   if(ds.rit === "wxmove"){ const S = ritualState(); mutate(S.ck, w => { const x = w.items.find(i => i.id === ds.id); if(x) x.time = ds.t; }); toast("Перенёс на " + ds.t); return true; }
   if(ds.rit === "wxswap"){ const S = ritualState(); mutate(S.ck, w => { const x = w.items.find(i => i.id === ds.id); if(x){ x.cat = "mobility"; x.t = "Домашняя разминка, 20 мин"; } }); toast("Заменил на домашнюю разминку"); return true; }
   if(ds.rit === "push"){ const sg = suggestionsToday().find(x => x.idea); if(sg){ const S = ritualState(); mutate(S.ck, w => w.items.push({id:uid(), day:S.ti, cat:sg.cat, t:sg.idea.t, time:"", done:false})); toast("Добавил: " + sg.idea.t); } else toast("Сегодня всё по целям"); return true; }
@@ -245,7 +254,7 @@ function ritualClick(ds){
 }
 
 /* ---------- сон словами: «поспал 3 часа вечером», «ночью спал 5 часов» ---------- */
-function logSleepWords(e, text){
+export function logSleepWords(e, text){
   const s = nrm(text), verbNap = /(вздремнул|подремал|задремал|дремал|заснул на|уснул на)/i.test((e.name || "") + " " + (e.text || ""));
   const nightWord = / (ночью|ночь|всю ночь|за ночь|ночи) /.test(s), dayWord = / (днем|днём|после обеда|в обед|после работы|вечером|утром) /.test(s);
   const night = nightWord || (e.time && (e.time >= "22:00" || e.time < "05:00")) || (!e.time && !dayWord && !verbNap && e.min >= 240);
@@ -260,7 +269,7 @@ function logSleepWords(e, text){
 }
 
 /* ---------- срывы: спрашиваем, что мешает, и подстраиваемся ---------- */
-function noteSkip(cat, dow){
+export function noteSkip(cat, dow){
   if(!CATS[cat] || !(CATS[cat].move || goalCats().includes(cat))) return;
   const arr = (LS.get("skips") || []).filter(x => Date.now() - x.at < 42*86400000);
   arr.push({cat, dow, at:Date.now()}); LS.set("skips", arr);
@@ -278,7 +287,7 @@ function noteSkip(cat, dow){
 function nextPlanned(cat){ const ck = curKey(), ti = todayI();
   for(const key of [ck, iso(addDays(new Date(ck+"T00:00:00"), 7))]){ const w = getWeek(key); const it = w.items.filter(i => i.cat === cat && !i.done && (key !== ck || i.day >= ti)).sort((a,b) => a.day - b.day)[0]; if(it) return {key, it}; }
   return null; }
-function whyAnswer(a){
+export function whyAnswer(a){
   const cat = a.cat, nx = nextPlanned(cat), sameType = RITM.CATALOG.filter(e => e.t === cat);
   if(a.r === "time"){
     const short = sameType.filter(e => e.m && e.m >= 12 && e.m <= 25).sort((x,y) => Math.abs(x.m - 20) - Math.abs(y.m - 20))[0] || {n:`${CATS[cat].n}, 15 минут`, m:15};
@@ -305,5 +314,12 @@ function whyAnswer(a){
       acts: [g > 1 ? act(`Цель ${g - 1} в неделю вместо ${g}`, {op:"goal", c:cat, to:g - 1}) : null, nx ? act("Ближайшую сделать лёгкой (растяжка)", {op:"swap", key:nx.key, id:nx.it.id, type:"mobility", name:"Лёгкая растяжка, 20 минут", t:nx.it.t}) : null, act("Пока ничего", {op:"keep"})].filter(Boolean)};
   }
   return {text:"Понял."};
+}
+
+
+
+// Действия при запуске (раньше выполнялись при загрузке файла); вызывает main.js в прежнем порядке
+export function init(){
+  TIP = {screen:`Сегодня попробуй убрать телефон в ${settings.screensOff} — хотя бы за 30 минут до сна.`, caffeine:`Сегодня кофеин только до ${settings.caffeineCutoff}.`, alcohol:"Сегодня больше воды и лечь пораньше.", move:"Сегодня хотя бы 20 минут пешком — сон будет глубже.", late:"Сегодня постарайся лечь вовремя, даже если не очень хочется."};
 }
 

@@ -1,23 +1,30 @@
+// Rhythm · ES-модуль (routine.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {CATS, DACC, DW, LS, TYPES, __set_needCache, addDays, curKey, fmtDur, getWeek, iso, pad, persistSettings, plural, saveWeek, settings, todayI, uid} from "./base.js";
+import {MAJOR, __set_replyId, act, bestDayInWeek, bot, ctxBot, getChat, lc, nrm, pushMsg, renderReplyBar, replyId, replyTarget} from "./chat.js";
+import {ciNoteAnswer, fromMin, postIssues, restOfWeek, scrollChat, setBedtime, setWeight, toMinHM, wakeTime} from "./checkins.js";
+import {usualBedtime} from "./daily.js";
+import {learnedTime} from "./insights.js";
+import {render, respond} from "./render.js";
 // Rhythm · Точка входа сообщения и распорядок дня
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- message entry point ---------- */
-let ruleMiss = false;
-function handleUser(text, pushMe){
+export let ruleMiss = false;
+export function handleUser(text, pushMe){
   text = (text||"").trim(); if(!text) return;
   ciNoteAnswer();
   const tg = replyTarget();
   if(pushMe !== false) pushMsg({who:"me", text, ...(tg ? {reply:{id:tg.id, who:tg.who, text:String(tg.text || "").slice(0, 140)}} : {})});
   try{ respond(text); }catch(err){ console.error(err); bot("Что-то пошло не так, попробуй написать иначе."); }
-  if(replyId){ replyId = null; renderReplyBar(); }
+  if(replyId){ __set_replyId(null); renderReplyBar(); }
   render(); scrollChat();
 }
 try{ localStorage.removeItem("ritm:claudeKey"); localStorage.removeItem("ritm:claudeUsage"); }catch(e){}
 
 /* ---------- routine: learn the daily schedule by asking ---------- */
 const nrt = s => " " + String(s).toLowerCase().replace(/ё/g,"е").replace(/[!?;()«»"]/g," ").replace(/,/g," , ").replace(/\s+/g," ").trim() + " ";
-const getRoutine = () => LS.get("routine") || {asked:{}, recurring:[]};
-const saveRoutine = r => LS.set("routine", r);
+export const getRoutine = () => LS.get("routine") || {asked:{}, recurring:[]};
+export const saveRoutine = r => LS.set("routine", r);
 const WD_ABBR = [["пн","понедельник"],["вт","вторник"],["ср","сред"],["чт","четверг"],["пт","пятниц"],["сб","суббот"],["вс","воскресень"]];
 const hmFrom = (h, m) => pad(Math.min(23, +h)) + ":" + pad(+(m||0));
 function parseRange(s){
@@ -66,13 +73,12 @@ const ROUTINE_QS = [
      return {morning:"Утро, отлично: буду ставить тренировки до работы.", lunch:"Понял, в обед.", evening:"Вечер, понял: буду ставить тренировки после работы.", any:"Понял, буду подбирать по свободному времени."}[p]; }}
 ];
 ROUTINE_QS.push({k:"sleepneed", q:"Сколько часов сна тебе обычно хватает, чтобы чувствовать себя нормально? У каждого своя норма: кому-то хватает 6, кому-то нужно 8. Ответь числом, например «6,5», или пропусти.",
-  parse(t, r){ const m = /(\d{1,2}(?:[.,]\d)?)/.exec(t); const hv = m ? parseFloat(m[1].replace(",", ".")) : NaN; if(!(hv >= 3 && hv <= 12)) return null; settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); needCache = {t:0, v:null};
+  parse(t, r){ const m = /(\d{1,2}(?:[.,]\d)?)/.exec(t); const hv = m ? parseFloat(m[1].replace(",", ".")) : NaN; if(!(hv >= 3 && hv <= 12)) return null; settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); __set_needCache({t:0, v:null});
     return `Записал: тебе хватает около ${fmtDur(settings.sleepNeed)}. Буду сверять это с твоим самочувствием.`; }});
 ROUTINE_QS.push({k:"weight", q:"Сколько ты примерно весишь? Нужно, чтобы посчитать норму белка (1,2–1,6 г на кг). Можно пропустить.",
   parse(t, r){ const m = /(\d{2,3})/.exec(t); if(!m || +m[1] < 30 || +m[1] > 250) return null; return setWeight(+m[1]); }});
-function routineKnown(r){ return ROUTINE_QS.filter(q => r.asked[q.k]).length; }
 function nextRoutineQ(r){ return ROUTINE_QS.find(q => !r.asked[q.k]); }
-function askRoutine(force){
+export function askRoutine(force){
   const r = getRoutine(), q = nextRoutineQ(r); if(!q) return false;
   const lastMe = getChat().filter(m=>m.who==="me").slice(-1)[0];
   if(!force && lastMe && Date.now() - lastMe.at < 10*60*1000) return false;
@@ -82,7 +88,7 @@ function askRoutine(force){
   bot(q.q, [act("Пропустить", {op:"rskip", k:q.k})], {kind:"routine:" + q.k});
   return true;
 }
-function routineAnswer(text){
+export function routineAnswer(text){
   const r = getRoutine(), cb3 = ctxBot();
   // ответ свайпом на вопрос про распорядок — это ответ именно на него, даже если он не последний
   if(cb3.explicit && /^routine:/.test(cb3.m.kind || "") && ROUTINE_QS.some(x => x.k === cb3.m.kind.slice(8))) r.pending = cb3.m.kind.slice(8);
@@ -102,7 +108,7 @@ function routineAnswer(text){
   return true;
 }
 // free statements anywhere in chat: «я работаю с 10 до 19», «по субботам футбол в 12», «в выходные встаю в 11»
-function routineStatement(text){
+export function routineStatement(text){
   const s = nrt(text), r = getRoutine(); const said = []; let bedChanged = false;
   if(/ (работаю|работа|учусь|учеба|на работе|в офисе) /.test(s) && !/ (сегодня|сейчас|вчера) /.test(s)){
     const rg = parseRange(s); if(rg){ r.work = rg; r.asked.hours = true; said.push(`работа с ${rg.from} до ${rg.to}`); }
@@ -110,10 +116,10 @@ function routineStatement(text){
     if(/ (удален|из дома) /.test(s) || / удал/.test(s)){ r.place = "home"; r.asked.place = true; said.push("удалёнка"); }
   }
   if(/ (сна|сон|спать|спится|высыпа)/.test(s)){
-    if(/ (определи|вычисли|посчитай|сам определи)/.test(s)){ settings.sleepNeed = null; persistSettings(); needCache = {t:0, v:null}; bot("Хорошо, норму сна буду определять сам по твоему самочувствию. Пока данных мало, ориентир — 7 часов."); return true; }
+    if(/ (определи|вычисли|посчитай|сам определи)/.test(s)){ settings.sleepNeed = null; persistSettings(); __set_needCache({t:0, v:null}); bot("Хорошо, норму сна буду определять сам по твоему самочувствию. Пока данных мало, ориентир — 7 часов."); return true; }
     const sm = /(?:хватает|нужно|надо|достаточно|норма сна|норма|высыпаюсь за|выспаться)\D{0,14}?(\d{1,2}(?:[.,]\d)?)|(\d{1,2}(?:[.,]\d)?)\s*(?:час\S*|ч)\s*(?:сна\s*)?(?:мне\s*)?(?:хватает|достаточно|нормально)/.exec(s);
     const hv = sm ? parseFloat((sm[1] || sm[2]).replace(",", ".")) : NaN;
-    if(hv >= 3 && hv <= 12){ settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); needCache = {t:0, v:null}; const r0 = getRoutine(); r0.asked.sleepneed = true; saveRoutine(r0);
+    if(hv >= 3 && hv <= 12){ settings.sleepNeed = Math.round(hv*60/15)*15; persistSettings(); __set_needCache({t:0, v:null}); const r0 = getRoutine(); r0.asked.sleepneed = true; saveRoutine(r0);
       bot(`Запомнил: тебе нужно около ${fmtDur(settings.sleepNeed)} сна. Буду считать ночь нормальной от этого. По самочувствию проверю, так ли это: если энергия будет говорить о другом, скажу.`); return true; } }
   const wm = /(?:^| )(?:я )?(?:вешу|мой вес|вес)\s*(?:сейчас |около |примерно )?(\d{2,3})(?:[.,]\d)?\s*(?:кг|килограмм|кило)?(?= |$)/.exec(s);
   if(wm && +wm[1] >= 30 && +wm[1] <= 250){ bot(setWeight(+wm[1])); return true; }
@@ -155,7 +161,7 @@ function routineStatement(text){
         bot(`На этой неделе ${DACC[x.day]} уже стоит «${c.t}». Что с ним сделать?`, acts); break; } } }
   return true;
 }
-function routineSummary(){
+export function routineSummary(){
   const r = getRoutine(), L = [];
   if(r.noWork) L.push("Работы по графику нет.");
   else if(r.shift) L.push("График сменный.");
@@ -174,11 +180,11 @@ function applyRoutineToSettings(r){
   if(r.lunch) settings.lunch = r.lunch;
   persistSettings();
 }
-function isWorkDay(d){ const r = getRoutine(); return Array.isArray(r.workDays) ? r.workDays.includes(d) : d < 5; }
-function wakeFor(d){ const r = getRoutine(); return (!isWorkDay(d) && r.wakeWe) ? r.wakeWe : (r.wakeWd || wakeTime()); }
-function busyAt(d, hm){ const r = getRoutine(); if(!r.work || !isWorkDay(d) || r.noWork) return false; const m = toMinHM(hm), a = toMinHM(r.work.from) - (r.commute||0), b = toMinHM(r.work.to) + (r.commute||0); return m >= a && m < b; }
+export function isWorkDay(d){ const r = getRoutine(); return Array.isArray(r.workDays) ? r.workDays.includes(d) : d < 5; }
+export function wakeFor(d){ const r = getRoutine(); return (!isWorkDay(d) && r.wakeWe) ? r.wakeWe : (r.wakeWd || wakeTime()); }
+export function busyAt(d, hm){ const r = getRoutine(); if(!r.work || !isWorkDay(d) || r.noWork) return false; const m = toMinHM(hm), a = toMinHM(r.work.from) - (r.commute||0), b = toMinHM(r.work.to) + (r.commute||0); return m >= a && m < b; }
 // time for a planned activity that respects work hours and training preference
-function smartTime(cat, d, fallback){
+export function smartTime(cat, d, fallback){
   const r = getRoutine();
   if(CATS[cat] && CATS[cat].move){ const lt = learnedTime(cat, d, null); if(lt) return lt; }
   const major = MAJOR.has(cat);
@@ -190,7 +196,7 @@ function smartTime(cat, d, fallback){
   if(fallback && busyAt(d, fallback) && r.work) return fromMin(toMinHM(r.work.to) + (r.commute||0) + 45);
   return fallback || "";
 }
-function applyRecurring(key, force){
+export function applyRecurring(key, force){
   const r = getRoutine(); if(!(r.recurring||[]).length) return;
   const flag = "rec:" + key; if(!force && LS.get(flag)) return;
   const w = getWeek(key); let changed = false;
@@ -199,3 +205,5 @@ function applyRecurring(key, force){
   if(changed) saveWeek(key, w); LS.set(flag, true);
 }
 
+
+export const __set_ruleMiss = v => (ruleMiss = v);

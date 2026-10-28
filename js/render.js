@@ -1,6 +1,17 @@
+// Rhythm · ES-модуль (render.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {$, CATS, DACC, DFULL, DW, GOALABLE, LS, MON, MONG, NATIVE, TEMPLATE, TYPES, __set_needCache, __set_settings, addDays, bedMin, curKey, dateOf, esc, fitScreenTime, fmtDur, fmtNum, getWeek, goalCats, health, isScreen, iso, loadSettings, mondayOf, needText, nowHM, pad, persistSettings, plural, saveWeek, settings, sleepEnough, sleepFor, sleepLow, sleepNeed, sleepOk, sleepTotal, sleepVerdict, stepsFor, todayI, uid} from "./base.js";
+import {breakLines, dateKeyOf, dayIdxOf} from "./chat.js";
+import {bestHours, chatClick, proteinFor, renderChat, scrollChat, syncCheckins} from "./checkins.js";
+import {__set_rvResult, __set_rvState, actsClick, appsClick, journalClick, missClick, noticedAnswer, openReview, renderActs, renderJournal, renderMisses, renderNoticed, renderReview, renderScreenCard, reviewClick, reviewTime, typeChipsHtml, usageHelpHtml, usualBedtime, weekScreenInsights} from "./daily.js";
+import {postWeeklyReport, renderPatterns} from "./insights.js";
+import {refreshWeather, renderRitual, ritualClick} from "./morning.js";
+import {nudgeStats, renderFocus, renderRhythm, syncWatch, syncWidget} from "./nudges.js";
+import {respondRules} from "./parse.js";
+import {AERO_GOAL, __set_tab, __set_weekStart, aeroMinutes, autoFill, dismissed, gLeft, goalState, offsets, relIdx, suggestionsToday, tab, viewKey, weekStart} from "./plan.js";
+import {applyRecurring, askRoutine} from "./routine.js";
 // Rhythm · Отрисовка экранов, календарь, резервная копия, действия, листы
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- rendering ---------- */
 function itemRow(it){
   const cat = CATS[it.cat]||CATS.other, late = isScreen(it.cat) && it.time && it.time >= settings.screensOff;
@@ -121,14 +132,14 @@ function buildSnapshot(){
   }
   return {days};
 }
-let lastSnap = "", lastReviewSync = "";
+export let lastSnap = "", lastReviewSync = "";
 let lastWalkCfg = "";
-function syncWalkWatch(){
+export function syncWalkWatch(){
   if(!NATIVE || !NATIVE.setWalkWatch) return;
   const bad = LS.get("walkNo") || {}, cfg = JSON.stringify({enabled: !!(health && health.bgGranted && settings.notify), bad: Object.keys(bad).filter(h => bad[h] >= 2).map(Number)});
   if(cfg !== lastWalkCfg){ lastWalkCfg = cfg; try{ NATIVE.setWalkWatch(cfg); }catch(e){} }
 }
-function syncNative(){
+export function syncNative(){
   if(!NATIVE) return;
   syncWalkWatch();
   const s = JSON.stringify(buildSnapshot());
@@ -242,7 +253,7 @@ function renderMore(){
 }
 
 const TITLES = {chat:"Rhythm", today:"Сегодня", review:"Разбор дня", week:"Неделя", stats:"Итоги", more:"Ещё"};
-function render(){
+export function render(){
   applyRecurring(curKey()); applyRecurring(iso(addDays(new Date(curKey()+"T00:00:00"),7)));
   for(const t of Object.keys(TITLES)) $("tab-"+t).hidden = t !== tab;
   document.querySelectorAll("#tabbar button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
@@ -273,8 +284,8 @@ function renderReminders(){
   $("gReviewNote").textContent = "В " + reviewTime() + ", за 30 минут до сна";
   $("gEvening").href = gcalUrl({title:"Rhythm: отметить день", date:today, time:settings.evening, minutes:10, daily:true, details:"Отметьте сделанное, сон, свет, энергию и настроение. Экраны выключить к "+settings.screensOff+".\n"+APP_URL});
 }
-$("remMorning").onchange = e => { if(e.target.value){ settings.morning = e.target.value; persistSettings(); renderReminders(); toast("Время сохранено. Добавьте напоминание в календарь заново"); } };
-$("remEvening").onchange = e => { if(e.target.value){ settings.evening = e.target.value; persistSettings(); renderReminders(); toast("Время сохранено. Добавьте напоминание в календарь заново"); } };
+
+
 function icsText(s){ return String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\n/g,"\\n"); }
 function buildIcs(key){
   const w = getWeek(key), ws = new Date(key+"T00:00:00"), dtstamp = new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d+/,"");
@@ -290,49 +301,35 @@ function buildIcs(key){
   }
   L.push("END:VCALENDAR"); return L.join("\r\n");
 }
-function download(name, text, type){
+export function download(name, text, type){
   if(NATIVE){ let ok = false; try{ ok = NATIVE.saveFile(name, text, type); }catch(e){} toast(ok ? "Файл сохранён в «Загрузки»" : "Не удалось сохранить файл"); return; }
   const url = URL.createObjectURL(new Blob([text], {type})), a = document.createElement("a");
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
-$("icsWeek").onclick = async () => {
-  const key = curKey();
-  if(!getWeek(key).items.some(i=>!i.done)){ toast("На этой неделе нет несделанных дел"); return; }
-  const text = buildIcs(key), name = "ritm-"+key+".ics";
-  try{ const file = new File([text], name, {type:"text/calendar"}); if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Rhythm"}); return; } }catch(e){ if(e && e.name==="AbortError") return; }
-  download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
-};
 
-function respond(text){ respondRules(text); }
+
+export function respond(text){ respondRules(text); }
 /* ---------- backup ---------- */
 function backupData(){ const data = {app:"ritm", version:2, exported:new Date().toISOString(), entries:{}}; for(const k of LS.keys()) data.entries[k] = LS.get(k); return data; }
 // автокопия: раз в 7 дней, если в приложении есть что сохранять (только в Android-версии, файл попадает в «Загрузки»)
-function maybeAutoBackup(){
+export function maybeAutoBackup(){
   if(!NATIVE || settings.autoBackup === false) return;
   const last = LS.get("lastBackup") || 0, weeks = LS.keys().filter(k => /^w:/.test(k)).length;
   if(!weeks || Date.now() - last < 7*86400000) return;
   try{ const ok = NATIVE.saveFile("ritm-auto-backup-" + iso(new Date()) + ".json", JSON.stringify(backupData()), "application/json"); if(ok){ LS.set("lastBackup", Date.now()); renderBackupNote(); } }catch(e){}
 }
-function renderBackupNote(){
+export function renderBackupNote(){
   const n = $("backupNote"), t = $("autoBackupToggle"); if(!n) return;
   const last = LS.get("lastBackup");
   n.textContent = NATIVE ? (last ? "Последняя автокопия: " + new Date(last).toLocaleDateString("ru-RU") + "." : "Автокопий пока не было.") : "Автокопия работает только в приложении для Android.";
   t.hidden = !NATIVE; t.textContent = settings.autoBackup === false ? "Автокопия выключена" : "Автокопия включена"; t.classList.toggle("primary", settings.autoBackup !== false);
 }
-$("autoBackupToggle").onclick = () => { settings.autoBackup = settings.autoBackup === false; persistSettings(); renderBackupNote(); toast(settings.autoBackup === false ? "Автокопия выключена" : "Автокопия включена"); maybeAutoBackup(); };
-$("exportBtn").onclick = () => {
-  const data = backupData();
-  download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); LS.set("lastBackup", Date.now()); renderBackupNote(); if(!NATIVE) toast("Копия сохранена в загрузках");
-};
-$("importFile").onchange = async e => {
-  const f = e.target.files && e.target.files[0]; e.target.value = ""; if(!f) return;
-  try{ const data = JSON.parse(await f.text()); if(!data || data.app!=="ritm" || !data.entries) throw 0;
-    for(const [k,v] of Object.entries(data.entries)) LS.set(k,v); settings = loadSettings(); render(); toast("Данные восстановлены");
-  }catch(err){ toast("Это не копия Rhythm. Выберите файл ritm-backup-….json"); }
-};
+
+
+
 
 /* ---------- actions ---------- */
-function mutate(key, fn){ const w = getWeek(key); fn(w); saveWeek(key, w); render(); }
+export function mutate(key, fn){ const w = getWeek(key); fn(w); saveWeek(key, w); render(); }
 function findIn(w, id){ return w.items.find(i=>i.id===id); }
 function keyOfItem(id){ for(const k of [curKey(), viewKey()]) if(getWeek(k).items.some(i=>i.id===id)) return k; return tab==="week" ? viewKey() : curKey(); }
 function bestDayFor(cat, key){
@@ -344,14 +341,14 @@ document.addEventListener("click", e => {
   const t = e.target.closest("button"); if(!t) return;
   const ds = t.dataset;
   if(chatClick(ds)) return;
-  if(ds.report){ tab = "chat"; postWeeklyReport(); render(); scrollChat(); return; }
+  if(ds.report){ __set_tab("chat"); postWeeklyReport(); render(); scrollChat(); return; }
   if(journalClick(ds, t)) return;
   if(appsClick(ds)) return;
   if(actsClick(ds)) return;
   if(missClick(ds)) return;
   if(tab==="review" && reviewClick(ds)) return;
   if(ds.openreview){ openReview(); return; }
-  if(ds.tab){ rvState = null; rvResult = null; tab = ds.tab; if(tab === "chat") askRoutine(); if(tab==="week") weekStart = mondayOf(new Date()); render(); window.scrollTo({top:0}); return; }
+  if(ds.tab){ __set_rvState(null); __set_rvResult(null); __set_tab(ds.tab); if(tab === "chat") askRoutine(); if(tab==="week") __set_weekStart(mondayOf(new Date())); render(); window.scrollTo({top:0}); return; }
   if(ds.tick){ const k = keyOfItem(ds.tick); mutate(k, w => { const it = findIn(w, ds.tick); it.done = !it.done; if(it.done) toast("Отмечено. Так держать!"); }); }
   else if(ds.edit){ const k = keyOfItem(ds.edit); openItem(k, findIn(getWeek(k), ds.edit)); }
   else if(ds.add){ openItem(ds.week || curKey(), {id:null, day:+ds.add, cat:"walk", t:"", time:""}); }
@@ -372,29 +369,25 @@ document.addEventListener("click", e => {
   else if(ds.autofill){ const n = autoFill(viewKey()); render(); toast(n ? `Добавлено ${n} ${plural(n,"занятие","занятия","занятий")} в свободные дни` : "Свободных дней не осталось"); }
   else if(ds.act==="tpl") fillTemplate();
 });
-$("prev").onclick = () => { weekStart = addDays(weekStart,-7); render(); };
-$("next").onclick = () => { weekStart = addDays(weekStart,7); render(); };
-$("now").onclick = () => { weekStart = mondayOf(new Date()); render(); };
-$("tpl").onclick = fillTemplate;
-$("copyPrev").onclick = () => {
-  const k = curKey(), prev = getWeek(iso(addDays(mondayOf(new Date()),-7)));
-  if(!prev.items.length){ toast("Прошлая неделя пустая"); return; }
-  mutate(k, w => prev.items.forEach(it => w.items.push({id:uid(), day:it.day, cat:it.cat, t:it.t, time:it.time||"", done:false}))); toast("Скопировано на эту неделю");
-};
-$("goalsBtn").onclick = openGoals;
-$("helpBtn").onclick = openIntro;
-$("clear").onclick = () => confirmIn($("clear"), "Точно очистить эту неделю?", () => { mutate(curKey(), w => { w.items = []; }); toast("Неделя очищена"); });
+
+
+
+
+
+
+
+
 function fillTemplate(){ const k = tab==="week" ? viewKey() : curKey(); mutate(k, w => TEMPLATE.forEach(([d,c,t,tm]) => w.items.push({id:uid(), day:d, cat:c, t, time:fitScreenTime(c, tm), done:false}))); toast("Неделя заполнена по шаблону"); }
-function confirmIn(btn, text, fn){
+export function confirmIn(btn, text, fn){
   if(btn.dataset.armed){ delete btn.dataset.armed; btn.textContent = btn.dataset.orig; fn(); return; }
   btn.dataset.orig = btn.textContent; btn.dataset.armed = "1"; btn.textContent = text;
   setTimeout(() => { if(btn.dataset.armed){ delete btn.dataset.armed; btn.textContent = btn.dataset.orig; } }, 3500);
 }
 
 /* ---------- sheets ---------- */
-function openSheet(html){ $("sheetIn").innerHTML = html; $("sheet").hidden = false; $("scrim").hidden = false; }
-function closeSheet(){ $("sheet").hidden = true; $("scrim").hidden = true; }
-$("scrim").onclick = closeSheet;
+export function openSheet(html){ $("sheetIn").innerHTML = html; $("sheet").hidden = false; $("scrim").hidden = false; }
+export function closeSheet(){ $("sheet").hidden = true; $("scrim").hidden = true; }
+
 document.addEventListener("keydown", e => { if(e.key==="Escape") closeSheet(); });
 const defaultTitle = c => (CATS[c]||CATS.other).n;
 
@@ -460,10 +453,10 @@ function openGoals(){
   $("gCancel").onclick = closeSheet;
   $("gSave").onclick = () => {
     const cafNew = $("gCaf").value || settings.caffeineCutoff, wt = Math.round(+$("gWeight").value || 0), protChanged = lim.proteinGoal !== settings.proteinGoal;
-    settings = {...settings, ...lim, goals:draft, goalsEdited:true, screensOff:$("gOff").value || "22:30", caffeineCutoff:cafNew, cafManual: settings.cafManual || cafNew !== settings.caffeineCutoff};
+    __set_settings({...settings, ...lim, goals:draft, goalsEdited:true, screensOff:$("gOff").value || "22:30", caffeineCutoff:cafNew, cafManual: settings.cafManual || cafNew !== settings.caffeineCutoff});
     if(wt >= 30 && wt <= 250){ if(wt !== settings.weight && !protChanged) settings.proteinGoal = proteinFor(wt); settings.weight = wt; }
     { const hh = Math.round(+$("gHeight").value || 0), aa = Math.round(+$("gAge").value || 0); if(hh >= 120 && hh <= 230) settings.height = hh; if(aa >= 12 && aa <= 100) settings.age = aa; settings.sex = $("gSex").value || settings.sex || null; }
-    const sv = parseFloat(($("gSleep").value || "").replace(",", ".")); settings.sleepNeed = sv >= 3 && sv <= 12 ? Math.round(sv*60/15)*15 : null; needCache = {t:0, v:null};
+    const sv = parseFloat(($("gSleep").value || "").replace(",", ".")); settings.sleepNeed = sv >= 3 && sv <= 12 ? Math.round(sv*60/15)*15 : null; __set_needCache({t:0, v:null});
     persistSettings(); closeSheet(); render(); toast("Цели сохранены"); };
 }
 
@@ -480,5 +473,45 @@ function openIntro(){
 }
 
 let toastT = null;
-function toast(msg){ const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
+export function toast(msg){ const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
+
+
+export const __set_lastReviewSync = v => (lastReviewSync = v);
+
+// Действия при запуске (раньше выполнялись при загрузке файла); вызывает main.js в прежнем порядке
+export function init(){
+  $("remMorning").onchange = e => { if(e.target.value){ settings.morning = e.target.value; persistSettings(); renderReminders(); toast("Время сохранено. Добавьте напоминание в календарь заново"); } };
+  $("remEvening").onchange = e => { if(e.target.value){ settings.evening = e.target.value; persistSettings(); renderReminders(); toast("Время сохранено. Добавьте напоминание в календарь заново"); } };
+  $("icsWeek").onclick = async () => {
+  const key = curKey();
+  if(!getWeek(key).items.some(i=>!i.done)){ toast("На этой неделе нет несделанных дел"); return; }
+  const text = buildIcs(key), name = "ritm-"+key+".ics";
+  try{ const file = new File([text], name, {type:"text/calendar"}); if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Rhythm"}); return; } }catch(e){ if(e && e.name==="AbortError") return; }
+  download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
+};
+  $("autoBackupToggle").onclick = () => { settings.autoBackup = settings.autoBackup === false; persistSettings(); renderBackupNote(); toast(settings.autoBackup === false ? "Автокопия выключена" : "Автокопия включена"); maybeAutoBackup(); };
+  $("exportBtn").onclick = () => {
+  const data = backupData();
+  download("ritm-backup-"+iso(new Date())+".json", JSON.stringify(data), "application/json"); LS.set("lastBackup", Date.now()); renderBackupNote(); if(!NATIVE) toast("Копия сохранена в загрузках");
+};
+  $("importFile").onchange = async e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = ""; if(!f) return;
+  try{ const data = JSON.parse(await f.text()); if(!data || data.app!=="ritm" || !data.entries) throw 0;
+    for(const [k,v] of Object.entries(data.entries)) LS.set(k,v); __set_settings(loadSettings()); render(); toast("Данные восстановлены");
+  }catch(err){ toast("Это не копия Rhythm. Выберите файл ritm-backup-….json"); }
+};
+  $("prev").onclick = () => { __set_weekStart(addDays(weekStart,-7)); render(); };
+  $("next").onclick = () => { __set_weekStart(addDays(weekStart,7)); render(); };
+  $("now").onclick = () => { __set_weekStart(mondayOf(new Date())); render(); };
+  $("tpl").onclick = fillTemplate;
+  $("copyPrev").onclick = () => {
+  const k = curKey(), prev = getWeek(iso(addDays(mondayOf(new Date()),-7)));
+  if(!prev.items.length){ toast("Прошлая неделя пустая"); return; }
+  mutate(k, w => prev.items.forEach(it => w.items.push({id:uid(), day:it.day, cat:it.cat, t:it.t, time:it.time||"", done:false}))); toast("Скопировано на эту неделю");
+};
+  $("goalsBtn").onclick = openGoals;
+  $("helpBtn").onclick = openIntro;
+  $("clear").onclick = () => confirmIn($("clear"), "Точно очистить эту неделю?", () => { mutate(curKey(), w => { w.items = []; }); toast("Неделя очищена"); });
+  $("scrim").onclick = closeSheet;
+}
 

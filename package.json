@@ -1,0 +1,7 @@
+{
+  "name": "rhythm",
+  "private": true,
+  "type": "commonjs",
+  "scripts": { "test": "node tests/run.js", "lint": "eslint js core.js" },
+  "devDependencies": { "eslint": "^9.0.0", "globals": "^15.0.0" }
+}

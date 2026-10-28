@@ -1,5 +1,6 @@
 android/.gradle/
-android/build/
 android/app/build/
 android/app/src/main/assets/www/
+android/build/
 android/local.properties
+node_modules/

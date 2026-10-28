@@ -1,23 +1,30 @@
+// Rhythm · ES-модуль (plan.js). Зависимости объявлены явно; запуск — через init() из main.js.
+import {CATS, LS, TYPES, addDays, curKey, dateOf, fmtDur, fmtNum, getWeek, goalCats, ideasAll, iso, mondayOf, nowHM, plural, saveWeek, settings, sleepFor, stepsFor, todayI, uid} from "./base.js";
+import {fromMin, toMinHM} from "./checkins.js";
+import {defaultMin} from "./daily.js";
+import {learnedTime, smartDay} from "./insights.js";
+import {toast} from "./render.js";
+import {smartTime} from "./routine.js";
 // Rhythm · Состояние экрана, анализ недели и подсказки на сегодня
 // Часть интерфейса: общая область видимости со всеми js/*.js (порядок подключения в index.html важен).
-"use strict";
+
 /* ---------- view state ---------- */
-let tab = ((LS.get("chat") || []).length >= 6) ? "today" : "chat";   // главный экран «Сегодня»; чат — для поправок (новичку сначала чат)
-let weekStart = mondayOf(new Date());
-const viewKey = () => iso(weekStart);
-function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key < ck ? 7 : -1); } // index of "today" inside a week
+export let tab;   // главный экран «Сегодня»; чат — для поправок (новичку сначала чат)
+export let weekStart;
+export const viewKey = () => iso(weekStart);
+export function relIdx(key){ const ck = curKey(); return key === ck ? todayI() : (key < ck ? 7 : -1); } // index of "today" inside a week
 
 /* ---------- analysis ---------- */
 // Цели считаются в процентах по минутам: цель = число занятий × обычная длительность.
 // Одно занятие засчитывается не больше, чем на 1,5 нормы (чтобы марафон не перекрыл всю неделю).
-const {CREDIT_CAP, roundMin} = RITM.core;
+export const {CREDIT_CAP, roundMin} = RITM.core;
 const sessDef = c => (TYPES[c] || TYPES.other).def || 30;
-const goalState = (w, ti) => RITM.core.goalState(w, ti, {goals:settings.goals, cats:goalCats(), def:sessDef, defaultMin});
-const gLeft = g => "~" + roundMin(g.leftMin) + " мин";
-const gTxt = g => `${g.pct}% (${g.doneMin} из ${g.goalMin} мин)`;
+export const goalState = (w, ti) => RITM.core.goalState(w, ti, {goals:settings.goals, cats:goalCats(), def:sessDef, defaultMin});
+export const gLeft = g => "~" + roundMin(g.leftMin) + " мин";
+export const gTxt = g => `${g.pct}% (${g.doneMin} из ${g.goalMin} мин)`;
 // аэробная нагрузка за неделю: ВОЗ рекомендует 150–300 минут умеренной (или 75–150 интенсивной)
-const {AERO, AERO_GOAL} = RITM.core;
-const aeroMinutes = w => RITM.core.aeroMinutes(w, defaultMin);
+export const {AERO, AERO_GOAL} = RITM.core;
+export const aeroMinutes = w => RITM.core.aeroMinutes(w, defaultMin);
 function daysSinceDone(cat){
   const ck = curKey(), ti = todayI(), cw = getWeek(ck), pw = getWeek(iso(addDays(mondayOf(new Date()),-7)));
   let best = 99;
@@ -27,14 +34,14 @@ function daysSinceDone(cat){
   for(const [d, day] of Object.entries(pw.days||{})) if((day.log||[]).some(e=>e.type===cat)) best = Math.min(best, ti + 7 - +d);
   return best;
 }
-function recentTitles(){
+export function recentTitles(){
   const s = new Set(), m = mondayOf(new Date());
   for(const k of [iso(m), iso(addDays(m,-7))]) for(const it of getWeek(k).items) s.add(it.t);
   return s;
 }
-function hash(str){ let h = 2166136261; for(let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h>>>0; }
-function shuffled(arr, seed){ const a = arr.slice(); let s = seed||1; for(let i=a.length-1;i>0;i--){ s = (Math.imul(s,1103515245)+12345)>>>0; const j = s % (i+1); [a[i],a[j]] = [a[j],a[i]]; } return a; }
-function ideaFits(idea, day, hour){
+export function hash(str){ let h = 2166136261; for(let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h>>>0; }
+export function shuffled(arr, seed){ const a = arr.slice(); let s = seed||1; for(let i=a.length-1;i>0;i--){ s = (Math.imul(s,1103515245)+12345)>>>0; const j = s % (i+1); [a[i],a[j]] = [a[j],a[i]]; } return a; }
+export function ideaFits(idea, day, hour){
   const weekend = day >= 5;
   if(idea.when === "weekend" && !weekend) return false;
   if(hour != null){
@@ -44,7 +51,7 @@ function ideaFits(idea, day, hour){
   }
   return true;
 }
-function ideasFor(cat, day, hour, offset, recent){
+export function ideasFor(cat, day, hour, offset, recent){
   const pool = ideasAll().filter(i => i.cat===cat && ideaFits(i, day, hour));
   const fresh = pool.filter(i => !recent.has(i.t));
   const list = shuffled(fresh.length ? fresh : pool, hash(curKey()+cat+day));
@@ -52,9 +59,9 @@ function ideasFor(cat, day, hour, offset, recent){
 }
 
 /* suggestions for today */
-const offsets = {};
-let dismissed = new Set();
-function suggestionsToday(){
+export const offsets = {};
+export let dismissed = new Set();
+export function suggestionsToday(){
   const ck = curKey(), ti = todayI(), w = getWeek(ck), gs = goalState(w, ti), hour = new Date().getHours();
   const recent = recentTitles(), out = [];
   const h = w.days[ti] || {};
@@ -88,7 +95,7 @@ function suggestionsToday(){
 }
 
 /* auto-fill missing items into a week */
-function autoFill(key){
+export function autoFill(key){
   const w = getWeek(key), ti = Math.max(0, relIdx(key));
   if(relIdx(key) === 7){ toast("Эта неделя уже прошла"); return 0; }
   const gs = goalState(w, ti), recent = recentTitles(), added = [];
@@ -119,5 +126,16 @@ function autoFill(key){
   }
   if(added.length) saveWeek(key, w);
   return added.length;
+}
+
+
+export const __set_tab = v => (tab = v);
+export const __set_weekStart = v => (weekStart = v);
+export const __set_dismissed = v => (dismissed = v);
+
+// Действия при запуске (раньше выполнялись при загрузке файла); вызывает main.js в прежнем порядке
+export function init(){
+  tab = ((LS.get("chat") || []).length >= 6) ? "today" : "chat";
+  weekStart = mondayOf(new Date());
 }
 
