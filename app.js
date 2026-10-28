@@ -550,7 +550,7 @@ function render(){
   document.querySelectorAll("#tabbar button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   $("title").textContent = TITLES[tab];
   if(tab==="chat") renderChat(); else if(tab==="today") renderToday(); else if(tab==="review") renderReview(); else if(tab==="week") renderWeek(); else if(tab==="stats") renderStats(); else renderMore();
-  syncNative(); syncCheckins(); syncWatch(); try{ syncWidget(); }catch(e){}
+  syncNative(); syncCheckins(); syncWatch(); try{ syncWidget(); }catch(e){} try{ refreshWeather(); }catch(e){}
   document.body.classList.toggle("inchat", tab === "chat");
 }
 
@@ -960,6 +960,7 @@ function runAction(msgId, i){
   else if(a.op === "rhythmOff"){ settings.rhythm = false; settings.morning = a.m; settings.evening = a.e; persistSettings(); if(NATIVE && settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} reply = `Вернул ${a.m} и ${a.e}. Сам их больше менять не буду.`; }
   else if(a.op === "openMiss"){ tab = "more"; render(); setTimeout(() => { const el = $("missCard"); if(el) el.scrollIntoView({behavior:"smooth", block:"start"}); }, 50); reply = "Открыл список. Подскажите, что это было: «Занятие…» или «Не занятие»."; }
   else if(a.op === "nudgeWork"){ const hist = nudgeHistory(); const n = hist.find(x => x.id === a.id); if(n){ nativeNudgeReply(n.id, "work", "", 0); const wm = LS.get("workMarks") || {}, dk = iso(new Date()); wm[dk] = {...(wm[dk] || {}), [n.pkg]:1}; LS.set("workMarks", wm); } reply = `Понял, ${a.label} по работе. Сегодня про него не напоминаю.`; }
+  else if(a.op === "cityNo"){ settings.cityNo = true; persistSettings(); reply = "Хорошо, без погоды. Если передумаешь, напиши «мой город Х»."; }
   else if(a.op === "workOkUndo"){ if(settings.workOk) delete settings.workOk[a.pkg]; persistSettings(); syncWatch(); reply = `Хорошо, ${a.label} в рабочее время снова проверяю.`; }
   else if(a.op === "appWork"){ const ty = LS.get("appTypes") || {}; ty[a.pkg] = "work"; LS.set("appTypes", ty); syncWatch(); reply = `Теперь ${a.label} — это «Работа и учёба», в развлечения не считаю. Поменять можно в разделе приложений.`; }
   else if(a.op === "appLimit"){ settings.appLimit = {...(settings.appLimit || {}), [a.pkg]: a.min}; persistSettings(); syncWatch(); reply = `Для ${a.label} теперь напоминаю после ${a.min} минут подряд.`; }
@@ -1131,6 +1132,11 @@ function respondRules(text){
   lastUserText = text; parserCtx();
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
+  { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
+    const cb = ctxBot();
+    if(cb.m && cb.m.kind === "city" && cb.m.chosen == null && (cb.explicit || Date.now() - cb.m.at < 3*3600*1000) && text.trim().split(/\s+/).length <= 4 && !/\?/.test(text)){
+      const arr = getChat(), mm = arr.find(x => x.id === cb.m.id); if(mm){ mm.chosen = -1; saveChat(arr); }
+      setCityByName(text); return; } }
   if(routineAnswer(text)) return;
   if(A.correction && (LS.get("lastLog") || explicitLog()) || (A.correction && A.correction.op === "what")) return handleCorrection(A.correction);
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
@@ -1182,7 +1188,7 @@ function respondRules(text){
     return bot(`Согласен, ты прав: данных пока слишком мало, и выводы по ним были бы гаданием. Ничего не меняю. Статистику буду только копить, а правки целей и расписания предложу не раньше чем через ${left} ${plural(left,"день","дня","дней")}, когда наберётся хотя бы две полные недели. Пока план строю по твоим целям и распорядку.`); }
   if(A.meta === "dontChange" && !hasSureAct){ settings.statsHold = Math.max(settings.statsHold || 0, Date.now() + 14*86400000); persistSettings();
     return bot("Хорошо, ничего не меняю. Сам с правками плана по статистике не полезу ещё минимум две недели. Если захочешь что-то поменять — просто напиши."); }
-  if(A.small.length && !hasAct && A.words <= 7 && !A.states.length && handleSmall(A.small)) return;
+  if(A.small.length && !pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event") && A.words <= 7 && !A.states.length && handleSmall(A.small)) return;
   if(/ (разбор|подведи итог|подвести итог|итоги дня) /.test(s)) return bot("Давай подведём итоги дня.", [act("Открыть разбор", {op:"review"})]);
   const mentionsActivity = RITM.parse(text).some(e => e.type && TYPES[e.type].unit !== "event");
   const isQuestion = /\?|^ (что|какой|какие|покажи|план|расскажи)/.test(text.trim().toLowerCase() + " ") || /^ (что|какой|какие|покажи|план) /.test(s);
@@ -1458,6 +1464,91 @@ function morningBrief(){
   return true;
 }
 
+/* ---------- погода: город один раз, прогноз из Open-Meteo, без геолокации ---------- */
+const WX_CODE = c => c === 0 ? "ясно" : c <= 2 ? "малооблачно" : c === 3 ? "пасмурно" : c <= 48 ? "туман" : c <= 57 ? "морось" : c <= 67 ? "дождь" : c <= 77 ? "снег" : c <= 82 ? "ливень" : c <= 86 ? "снегопад" : "гроза";
+const WX_WET = c => (c >= 51 && c <= 67) || (c >= 80 && c <= 99) || (c >= 71 && c <= 77);
+const getCity = () => settings.city && settings.city.lat != null ? settings.city : null;
+let wxBusy = false;
+function wxCache(){ const c = LS.get("weather"); return c && getCity() && c.city === getCity().name ? c : null; }
+async function refreshWeather(force){
+  const city = getCity(); if(!city || wxBusy || !navigator.onLine) return;
+  const c = wxCache(); if(!force && c && Date.now() - c.at < 2*3600*1000) return;
+  wxBusy = true;
+  try{
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&wind_speed_unit=ms&timezone=auto&forecast_days=3`;
+    const r = await fetch(u); if(!r.ok) throw new Error("wx " + r.status);
+    const j = await r.json();
+    LS.set("weather", {at:Date.now(), city:city.name, hourly:j.hourly, daily:j.daily});
+    if(tab === "today") render();
+  }catch(e){ console.warn("weather", e); }
+  wxBusy = false;
+}
+// сводка за день: диапазон температур, осадки и сухие часы для прогулки
+function wxDay(dateIso){
+  const c = wxCache(); if(!c || !c.hourly) return null;
+  const H = c.hourly, hours = [];
+  for(let i = 0; i < H.time.length; i++) if(H.time[i].slice(0, 10) === dateIso) hours.push({h:+H.time[i].slice(11, 13), t:H.temperature_2m[i], p:H.precipitation_probability[i] ?? 0, c:H.weather_code[i], w:H.wind_speed_10m[i] ?? 0});
+  if(hours.length < 12) return null;
+  const di = c.daily.time.indexOf(dateIso), tmax = di >= 0 ? c.daily.temperature_2m_max[di] : Math.max(...hours.map(x => x.t)), tmin = di >= 0 ? c.daily.temperature_2m_min[di] : Math.min(...hours.map(x => x.t));
+  const day = hours.filter(x => x.h >= 8 && x.h <= 21);
+  const bad = x => x.p >= 50 || WX_WET(x.c) || x.t < -15 || x.t > 33 || x.w >= 12;
+  const ok = h => { const x = hours.find(y => y.h === h); return x && !bad(x); };
+  const wetFrom = (day.find(x => x.p >= 50 || WX_WET(x.c)) || {}).h ?? null;
+  const dryWin = []; for(let h = 8; h <= 20; h++) if(ok(h) && ok(h + 1)) dryWin.push(h);
+  const noon = hours.find(x => x.h === 13) || day[0];
+  return {hours, tmax, tmin, wetFrom, dryWin, bad, ok, desc: WX_CODE(noon.c), wind: Math.max(...day.map(x => x.w)), allWet: day.every(bad)};
+}
+const wxT = n => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(Math.round(n));
+function wxLine(dateIso){
+  const d = wxDay(dateIso); if(!d) return "";
+  let s = `${wxT(d.tmin)}…${wxT(d.tmax)}°, ${d.desc}`;
+  if(d.allWet) s += ", весь день неуютно для улицы";
+  else if(d.wetFrom != null) s += `, осадки ${d.wetFrom <= 8 ? "с утра" : "с " + pad(d.wetFrom) + ":00"}`;
+  if(d.wind >= 10) s += `, ветер до ${Math.round(d.wind)} м/с`;
+  return s;
+}
+const OUTDOOR = new Set(["walk", "run", "bike", "nature", "outing"]);
+// плановое занятие на улице попадает на плохую погоду: что можно сделать
+function wxConflicts(S){
+  const out = [], d = wxDay(iso(new Date())); if(!d) return out;
+  for(const it of S.undone){
+    if(!OUTDOOR.has(it.cat) || !it.time) continue;
+    const h = +it.time.slice(0, 2); if(h < (new Date().getHours())) continue;
+    if(d.ok(h) && d.ok(h + 1)) continue;
+    const alt = d.dryWin.filter(x => x >= new Date().getHours() + 1).sort((a, b) => Math.abs(a - h) - Math.abs(b - h))[0];
+    out.push({it, alt: alt != null ? pad(alt) + ":00" : null});
+  }
+  return out;
+}
+async function setCityByName(name){
+  const q = String(name || "").trim().replace(/^(в|г\.?|город)\s+/i, "").replace(/[.!]+$/, "").trim();
+  if(q.length < 2) return bot("Не разобрал название. Напиши город, например: «Казань».");
+  try{
+    const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=ru&format=json`); const j = await r.json();
+    const res = (j.results || []).sort((a, b) => (b.population || 0) - (a.population || 0))[0];
+    if(!res){ bot(`Не нашёл город «${q}». Проверь написание или напиши ближайший крупный город.`); render(); return; }
+    settings.city = {name:res.name, lat:res.latitude, lon:res.longitude, region:res.admin1 || "", country:res.country || ""}; persistSettings(); LS.set("weather", null);
+    await refreshWeather(true);
+    const L = wxLine(iso(new Date()));
+    bot(`Запомнил: ${res.name}${res.admin1 && res.admin1 !== res.name ? ", " + res.admin1 : ""}. ${L ? "Сегодня: " + L + "." : "Прогноз подтянется чуть позже."} Если город не тот, напиши «мой город Х».`);
+  }catch(e){ bot("Не получилось связаться с сервисом погоды. Проверь интернет и напиши город ещё раз."); }
+  render(); scrollChat();
+}
+function askCity(){
+  bot("В каком городе ты живёшь? Нужно для погоды: советы про прогулки и тренировки на улице. Прогноз беру по названию города из открытого сервиса, геолокация не нужна.", [act("Не нужно", {op:"cityNo"})], {kind:"city"});
+}
+function weatherAnswer(){
+  if(!getCity()){ askCity(); return; }
+  const today = iso(new Date()), tm = iso(addDays(new Date(), 1)), a = wxLine(today), b = wxLine(tm);
+  if(!a && !b){ refreshWeather(true).then(() => { const x = wxLine(today); bot(x ? `Сегодня в ${getCity().name}: ${x}.` : "Прогноз пока не загрузился, попробуй чуть позже."); render(); }); return; }
+  const d = wxDay(today), tip = d ? (d.allWet ? "На улице сегодня неуютно: лучше домашняя разминка или зал." : d.dryWin.length ? `Для прогулки лучше всего около ${pad(d.dryWin[Math.floor(d.dryWin.length / 2)])}:00.` : "") : "";
+  bot(`${getCity().name}. Сегодня: ${a || "нет данных"}.${b ? " Завтра: " + b + "." : ""} ${tip}`.trim());
+}
+function cityFromText(text){
+  const m = /(?:^|\s)(?:живу в|я живу в|мой город|я из|город)\s+([а-яёa-z\- ]{2,30})$/i.exec(String(text).trim().replace(/[.!]+$/, ""));
+  return m ? m[1] : null;
+}
+
 /* ---------- утренний ритуал: итог сна, энергия и план дня по состоянию ---------- */
 function ritualState(){
   const now = new Date(), ck = curKey(), ti = todayI(), w = getWeek(ck), day = w.days[ti] || {};
@@ -1502,14 +1593,22 @@ function renderRitual(){
     const nx = S.undone[0];
     mode = `<div class="rmode"><b>Идём по плану.</b> ${nx ? `Первое: «${esc(nx.t)}»${nx.time ? " в " + nx.time : ""}.` : "На сегодня ничего не запланировано, можно взять совет ниже."}</div>`;
   }
+  let wx = "";
+  if(getCity()){ const l = wxLine(today);
+    if(l){ wx = `<div class="note rwx">Погода: ${esc(l)}</div>`;
+      for(const cf of wxConflicts(S).slice(0, 2)) wx += `<div class="rmode"><b>${esc(cf.it.t)} в ${cf.it.time}:</b> ожидается плохая погода для улицы. ${cf.alt ? "Сухо около " + cf.alt + "." : "Сухого окна нет."}<div class="tools">${cf.alt ? `<button class="btn" data-rit="wxmove" data-id="${esc(cf.it.id)}" data-t="${cf.alt}">Перенести на ${cf.alt}</button>` : ""}<button class="btn" data-rit="wxswap" data-id="${esc(cf.it.id)}">Заменить на домашнюю разминку</button></div></div>`; } }
+  else wx = `<div class="note rwx"><button class="btn" data-rit="city">Добавить город для погоды</button></div>`;
   const main = S.undone.slice(0, 3).map((i, k) => `<li class="${k ? "" : "first"}"><b>${i.time || "—"}</b><span>${esc(i.t)}</span></li>`).join("");
-  c.innerHTML = `<div class="bhead"><h2>Утро</h2><span class="note">30 секунд</span></div>${sleepLine}${scale}${mode}${main ? `<span class="label">Главное на сегодня</span><ul class="rmain">${main}</ul>` : ""}<div class="tools">${btns}<button class="btn" data-rit="done">Готово</button></div>`;
+  c.innerHTML = `<div class="bhead"><h2>Утро</h2><span class="note">30 секунд</span></div>${sleepLine}${scale}${wx}${mode}${main ? `<span class="label">Главное на сегодня</span><ul class="rmain">${main}</ul>` : ""}<div class="tools">${btns}<button class="btn" data-rit="done">Готово</button></div>`;
 }
 function ritualClick(ds){
   if(!ds.rit) return false;
   if(ds.rit === "done"){ LS.set("ritualDone", iso(new Date())); render(); return true; }
   if(ds.rit === "lighten"){ const r = lightenToday(); toast(`Облегчил: перенёс ${r.moved}, заменил ${r.swapped}`); bot(`Облегчил день: перенёс ${r.moved}, заменил на лёгкую прогулку ${r.swapped}. Если станет лучше, можно вернуть.`); render(); return true; }
   if(ds.rit === "bed"){ const S = ritualState(), tm = hmMinus(usualBedtime().hm, 30); mutate(S.ck, w => w.items.push({id:uid(), day:S.ti, cat:"unplug", t:"Лечь пораньше, без экрана", time:tm, done:false})); toast("Добавил: лечь в " + tm); return true; }
+  if(ds.rit === "city"){ askCity(); tab = "chat"; render(); scrollChat(); return true; }
+  if(ds.rit === "wxmove"){ const S = ritualState(); mutate(S.ck, w => { const x = w.items.find(i => i.id === ds.id); if(x) x.time = ds.t; }); toast("Перенёс на " + ds.t); return true; }
+  if(ds.rit === "wxswap"){ const S = ritualState(); mutate(S.ck, w => { const x = w.items.find(i => i.id === ds.id); if(x){ x.cat = "mobility"; x.t = "Домашняя разминка, 20 мин"; } }); toast("Заменил на домашнюю разминку"); return true; }
   if(ds.rit === "push"){ const sg = suggestionsToday().find(x => x.idea); if(sg){ const S = ritualState(); mutate(S.ck, w => w.items.push({id:uid(), day:S.ti, cat:sg.cat, t:sg.idea.t, time:"", done:false})); toast("Добавил: " + sg.idea.t); } else toast("Сегодня всё по целям"); return true; }
   return false;
 }
@@ -2007,7 +2106,7 @@ function handleSmall(small){
   if(small.includes("insult")){ bot("Прости, если я что-то не так понял. Напиши иначе, а я запомню. Подсказки — по слову «помощь»."); return true; }
   if(small.includes("help")){ bot(HELP_TEXT); return true; }
   if(small.includes("joke")){ bot(pick(JOKES)); return true; }
-  if(small.includes("weather")){ bot("Погоду я не знаю, но если на улице сухо — отличный повод прогуляться."); return true; }
+  if(small.includes("weather")){ weatherAnswer(); return true; }
   if(small.includes("love")){ bot("Взаимно! Давай заботиться о тебе вместе."); return true; }
   return false;
 }
@@ -2217,7 +2316,8 @@ function maybePreempt(){
   }
   if(!getWeek(ck).items.some(i => i.day === ti && /Лечь пораньше/.test(i.t))) acts.push(earlyBedAct());
   acts.push(act("Не нужно", {op:"keep"}));
-  bot(`Завтра ${DFULL[tm].toLowerCase()}. По твоим данным в такие дни энергия ниже в среднем на ${wd.drop.toFixed(1).replace(".", ",")} балла${wd.why ? ": " + wd.why : ""}.${maj.length ? ` А в плане «${maj[0].t}».` : ""} Подготовимся заранее?`, acts, {kind:"preempt"});
+  const wxN = wxLine(iso(addDays(new Date(), 1)));
+  bot(`Завтра ${DFULL[tm].toLowerCase()}. По твоим данным в такие дни энергия ниже в среднем на ${wd.drop.toFixed(1).replace(".", ",")} балла${wd.why ? ": " + wd.why : ""}.${maj.length ? ` А в плане «${maj[0].t}».` : ""}${wxN ? ` Погода: ${wxN}.` : ""} Подготовимся заранее?`, acts, {kind:"preempt"});
   return true;
 }
 function streaks(){
