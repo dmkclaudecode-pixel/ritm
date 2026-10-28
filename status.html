@@ -17,7 +17,7 @@ button,input{font:inherit;font-size:13px;padding:6px 10px;border-radius:8px;bord
 </style></head><body><main>
 <h1>Статус сборок</h1><div class="sub" id="upd">загрузка…</div>
 <div id="list"></div>
-<div class="card"><div class="meta">Страница сама обновляется, пока открыта, и не использует ничего, кроме открытого API GitHub. Без токена лимит 60 запросов в час, поэтому опрос раз в 3 минуты. С токеном (только чтение, хранится у вас в браузере) обновление раз в 20 секунд.</div>
+<div class="card"><div class="meta">Страница сама обновляется, пока открыта, и не использует ничего, кроме открытого API GitHub. Данные запрашиваются раз в 15 секунд: если ничего не изменилось, GitHub отвечает «не изменилось» и такой запрос не считается в лимит. Таймеры и полосы идут каждую секунду. Если лимит всё же кончится, вставьте токен (только чтение, хранится у вас в браузере).</div>
 <div class="row"><input id="tok" placeholder="GitHub-токен (необязательно)" type="password"><button id="save">Сохранить</button><button id="now">Обновить</button></div></div>
 </main>
 <script>
@@ -26,19 +26,32 @@ const REPO="dmkclaudecode-pixel/ritm", API="https://api.github.com/repos/"+REPO;
 const TYPICAL={"Собрать знания":90,"Собрать статистику":40,"Собрать APK":6};
 const $=s=>document.querySelector(s); let tok=""; try{tok=localStorage.getItem("gh")||""}catch(e){} $("#tok").value=tok;
 const hdr=()=>tok?{Authorization:"Bearer "+tok}:{};
-const j=u=>fetch(u,{headers:hdr()}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const j=u=>fetch(u,{headers:hdr(),cache:"no-cache"}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
 const fmt=s=>{s=Math.max(0,Math.round(s));const m=Math.floor(s/60);return m>=60?Math.floor(m/60)+" ч "+m%60+" мин":m+" мин "+s%60+" с"};
+let DATA=[];
 async function tick(){
   try{
     const runs=(await j(API+"/actions/runs?per_page=20")).workflow_runs, seen={}, latest=[];
     for(const r of runs){if(!seen[r.name]){seen[r.name]=1;latest.push(r)}}
-    const out=[];
+    const next=[];
     for(const r of latest.filter(r=>r.name!=="pages build and deployment")){
-      let steps=[];
-      try{steps=(await j(API+"/actions/runs/"+r.id+"/jobs")).jobs.flatMap(x=>x.steps||[])}catch(e){}
+      let steps=[]; const old=DATA.find(d=>d.r.id===r.id);
+      if(old&&old.r.status==="completed"&&r.status==="completed")steps=old.steps;
+      else try{steps=(await j(API+"/actions/runs/"+r.id+"/jobs")).jobs.flatMap(x=>x.steps||[])}catch(e){}
+      next.push({r,steps});
+    }
+    DATA=next; draw();
+    $("#upd").textContent="данные получены в "+new Date().toLocaleTimeString("ru-RU");
+  }catch(e){$("#upd").textContent=(e.message==="403"?"лимит запросов GitHub исчерпан, подождите или добавьте токен":"ошибка: "+e.message)}
+}
+function draw(){
+  const out=[];
+  for(const {r,steps:st0} of DATA){
+    {
+      let steps=st0;
       steps=steps.filter(s=>!/^(Set up job|Post |Complete job)/.test(s.name)&&!/^Run actions\//.test(s.name));
       const done=steps.filter(s=>s.status==="completed").length, n=Math.max(steps.length,1);
-      const cur=steps.find(s=>s.status==="in_progress");
+      const cur=r.status==="completed"?null:steps.find(s=>s.status==="in_progress");
       let frac=done/n;
       if(cur&&cur.started_at){const t=Object.entries(TYPICAL).find(([k])=>cur.name.startsWith(k)); const el=(Date.now()-new Date(cur.started_at))/60000; frac+=Math.min(.95,el/(t?t[1]:20))/n}
       const cls=r.status!=="completed"?"run":r.conclusion==="success"?"ok":"bad";
@@ -50,10 +63,9 @@ async function tick(){
       <div class="meta">${Math.round(frac*100)}%${cur?" · сейчас: "+cur.name:""}</div>
       <ul class="steps">${steps.map(s=>`<li class="${s.status==="completed"?(s.conclusion==="failure"?"f":"d"):s.status==="in_progress"?"r":"p"}">${s.name}</li>`).join("")}</ul></div>`);
     }
-    $("#list").innerHTML=out.join("")||"<div class='card'>Сборок пока нет</div>";
-    $("#upd").textContent="обновлено в "+new Date().toLocaleTimeString("ru-RU");
-  }catch(e){$("#upd").textContent=(e.message==="403"?"лимит запросов GitHub исчерпан, подождите или добавьте токен":"ошибка: "+e.message)}
+  }
+  $("#list").innerHTML=out.join("")||"<div class='card'>Сборок пока нет</div>";
 }
-let timer; const loop=()=>{clearTimeout(timer);tick();timer=setTimeout(loop,tok?20000:180000)};
+let timer; const loop=()=>{clearTimeout(timer);tick();timer=setTimeout(loop,tok?10000:15000)}; setInterval(draw,1000);
 $("#save").onclick=()=>{tok=$("#tok").value.trim();try{localStorage.setItem("gh",tok)}catch(e){}loop()};$("#now").onclick=loop;loop();
 </script></body></html>
