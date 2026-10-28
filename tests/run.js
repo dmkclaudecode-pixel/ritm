@@ -26,11 +26,11 @@ for(const [t, exp] of NLU){
 { const sm = require("./semantic.js"); bad += sm.fails.length; fails.push(...sm.fails); }
 { const c = require("./core.test.js"); ok += c.ok; bad += c.fails.length; fails.push(...c.fails); }
 { const vm = require("vm"), fs = require("fs");   // синтаксис всех файлов интерфейса
-  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","catalog3.js","lexicon.js","engine.js","mood.js","dialog.js","embed.js","onto.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
+  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","catalog3.js","lexicon.js","engine.js","mood.js","dialog.js","embed.js","onto.js","trainlog.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
-require("./stress.js"); require("./food.js"); require("./mood.js"); require("./onto.js");
+require("./stress.js"); require("./food.js"); require("./mood.js"); require("./onto.js"); require("./trainlog_test.js");
 { const cp = require("child_process"); for(const a of [[], ["--noise"]]){ const x = cp.spawnSync(process.execPath, [__dirname + "/gen.js", "8000", ...a], {encoding:"utf8"}); console.log("Генератор" + (a.length ? " с шумом" : "") + ": " + x.stdout.split("\n")[0]); if(x.status) process.exitCode = 1; } }
 { const cp = require("child_process"); console.log("\nСвежие наборы (информационно, не тренируемся на них):");
-  for(const f of ["mood_a", "mood_b", "mood_c", "mood_d", "food_unknown", "context"]){ const x = cp.spawnSync(process.execPath, [__dirname + "/fresh/" + f + ".js"], {encoding:"utf8"}); console.log("  " + f + ": " + (x.stdout.match(/\d+\/\d+( \(\d+%\))?/) || ["?"])[0]); } }
+  for(const f of ["mood_a", "mood_b", "mood_c", "mood_d", "food_unknown", "food_strict", "context"]){ const x = cp.spawnSync(process.execPath, [__dirname + "/fresh/" + f + ".js"], {encoding:"utf8"}); console.log("  " + f + ": " + (x.stdout.match(/\d+\/\d+( \(\d+%\))?/) || ["?"])[0]); } }
 process.exit(bad || process.exitCode ? 1 : 0);

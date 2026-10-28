@@ -152,7 +152,7 @@ export function handleCorrection(c){
   mutateQuiet(L.key, w => { const day = w.days[L.day]; if(!day) return;
     const es = (day.log||[]).filter(e => L.ids.includes(e.id)); const e = es[es.length-1]; if(!e) return;
     if(c.op === "time") for(const x of es) x.time = c.time;
-    if(c.op === "type"){ e.type = c.type; e.name = CATS[c.type].n; RITM.remember(e.text || c.what, c.type, null); }
+    if(c.op === "type"){ if(RITM.trainlog) RITM.trainlog.label(e.text || c.what, "type", c.type); e.type = c.type; e.name = CATS[c.type].n; RITM.remember(e.text || c.what, c.type, null); }
     if(c.op === "amount"){
       const u = c.unit || "", n = c.n;
       if(e.type === "water" || /стакан|литр|мл|^л$/.test(u)) e.ml = /литр|^л$/.test(u) ? n*1000 : /стакан/.test(u) ? n*250 : (n <= 10 && !/мл/.test(u) ? n*250 : n);

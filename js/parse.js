@@ -62,6 +62,7 @@ export function respondRules(text){
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
   const MD = RITM.mood.analyze(text); RITM.mood.track(MD); DLG.push("user", text, {mood: MD});
+  if(RITM.trainlog) RITM.trainlog.record(text, {mood: MD.dominant, mi: MD.intensity});
   { const cf = cityFromText(text); if(cf){ setCityByName(cf); return; }
     const cb = ctxBot();
     if(cb.m && cb.m.kind === "city" && cb.m.chosen == null && (cb.explicit || Date.now() - cb.m.at < 3*3600*1000) && text.trim().split(/\s+/).length <= 4 && !/\?/.test(text)){

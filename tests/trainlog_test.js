@@ -1,0 +1,12 @@
+global.window = global; const mem = {}; global.localStorage = {getItem: k => mem[k] || null, setItem(k, v){ mem[k] = v; }, removeItem(k){ delete mem[k]; }};
+require("../trainlog.js"); const L = RITM.trainlog; let ok = 0; const bad = [];
+const t = (n, c) => { if(c) ok++; else bad.push(n); };
+L.record("пробежался по набережной", {mood: "neutral"}); L.record("устал", {mood: "tired"});
+t("запись", L.stats().n === 2 && L.stats().labeled === 0);
+L.label("пробежался по набережной", "type", "run"); t("метка к существующей", L.stats().labeled === 1 && L.all()[0].y.type === "run");
+L.label("новая фраза", "type", "walk"); t("метка создаёт запись", L.stats().n === 3 && L.stats().labeled === 2);
+for(let i = 0; i < 3100; i++) L.record("ф" + i);
+t("потолок записей", L.stats().n === 3000);
+t("jsonl", L.exportJsonl().split("\n").length === 3000);
+L.clear(); t("очистка", L.stats().n === 0);
+console.log(`журнал обучения: ${ok} ок, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;

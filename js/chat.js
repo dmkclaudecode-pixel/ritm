@@ -229,7 +229,7 @@ export function runAction(msgId, i){
   else if(a.op === "setMin"){ mutateQuiet(a.key, w => { const day = w.days[a.d]; if(!day) return; const r = (day.log||[]).find(x => x.id === a.id); if(r){ r.min = a.min; delete r.mg; } }); normsMemo = null; reply = `Исправил: ${fmtDur(a.min)}.`; }
   else if(a.op === "keep"){ reply = pick(["Хорошо, оставляю как есть.","Понял, ничего не меняю."]); }
   else if(a.op === "type"){
-    const pend = (m.pending||[])[a.idx]; if(pend){ const wasFz = pend.fuzzy; pend.type = a.type; pend.changed = true; pend.wasUnknown = true; pend.fuzzy = false; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend); dropMiss(pend.text);
+    const pend = (m.pending||[])[a.idx]; if(pend){ const wasFz = pend.fuzzy; pend.type = a.type; if(RITM.trainlog) RITM.trainlog.label(pend.text || pend.name, "type", a.type); pend.changed = true; pend.wasUnknown = true; pend.fuzzy = false; if(a.noLearn){ pend.noLearn = true; pend.name = CATS[a.type].n; } fillDefaults(pend); dropMiss(pend.text);
       if(wasFz && pend.fuzzyWord) RITM.remember(pend.fuzzyWord, a.type, a.keepName ? pend.name : null);
       if(wasFz && a.keepName){ if(pend.future) addPlanFromChat(pend, new Date(pend.date)); else { const ln = logFromChat([pend]); if(ln.length) reply = `Отметил в плане: ${ln.map(i=>"«"+i.t+"»").join(", ")}. `; }
         reply = `Записал${pend.future ? " в план" : ""}: ${lc(pend.name)}. ` + (reply||"") + "Запомнил, как ты это пишешь." + (pend.future ? "" : " " + (commentFor(pend)||"")); }
