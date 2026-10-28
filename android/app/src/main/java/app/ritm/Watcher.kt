@@ -164,7 +164,7 @@ object Watcher {
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val replyFlags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val replyPi = PendingIntent.getBroadcast(ctx, 52, Intent(ctx, WatchReceiver::class.java).setAction("reply").putExtra("id", id), replyFlags)
-        val remote = RemoteInput.Builder("reply").setLabel("Ответить Ритму").build()
+        val remote = RemoteInput.Builder("reply").setLabel("Ответить в Rhythm").build()
         val n = NotificationCompat.Builder(ctx, "ritm_chat")
             .setSmallIcon(R.drawable.ic_notify)
             .setColor(0xFF0F7A73.toInt())

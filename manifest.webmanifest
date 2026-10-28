@@ -1,7 +1,7 @@
 {
   "id": "/ritm/",
-  "name": "Ритм недели",
-  "short_name": "Ритм",
+  "name": "Rhythm",
+  "short_name": "Rhythm",
   "description": "Планировщик недели: движение, сон, свет, общение и отдых.",
   "lang": "ru",
   "start_url": "./",

@@ -15,7 +15,7 @@ import androidx.core.app.RemoteInput
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Сообщения от Ритма днём: пуш с вопросом, ответ прямо из шторки попадает в чат. */
+/** Сообщения от Rhythm днём: пуш с вопросом, ответ прямо из шторки попадает в чат. */
 object Checkins {
     private const val PREFS = "ritm"
     private const val CHANNEL = "ritm_chat"
@@ -27,7 +27,7 @@ object Checkins {
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Сообщения от Ритма", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Сообщения от Rhythm", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "Вопросы днём: что делаешь, обед, напоминания о планах"
             })
         }
@@ -97,7 +97,7 @@ object Checkins {
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val replyFlags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val replyPi = PendingIntent.getBroadcast(ctx, 140, Intent(ctx, ReplyReceiver::class.java).putExtra("nid", nid), replyFlags)
-        val remote = RemoteInput.Builder(KEY_REPLY).setLabel("Ответить Ритму").build()
+        val remote = RemoteInput.Builder(KEY_REPLY).setLabel("Ответить в Rhythm").build()
         val action = NotificationCompat.Action.Builder(R.drawable.ic_notify, "Ответить", replyPi)
             .addRemoteInput(remote).setAllowGeneratedReplies(true).build()
         val n = NotificationCompat.Builder(ctx, CHANNEL)

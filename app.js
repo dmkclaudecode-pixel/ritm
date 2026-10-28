@@ -416,7 +416,7 @@ function buildSnapshot(){
     const list = its.slice(0,4).map(i=>(i.time? i.time+" ":"")+i.t).join("; ");
     days[dateOf(ck,d)] = {
       morning: its.length ? {title:`Сегодня ${its.length} ${plural(its.length,"дело","дела","дел")}`, text: list + (its.length>4 ? " и ещё "+(its.length-4) : "") + ". И 15 минут дневного света до обеда."}
-                          : {title:"Сегодня свободный день", text:"Откройте Ритм недели: приложение подберёт, чем заняться."},
+                          : {title:"Сегодня свободный день", text:"Откройте Rhythm: приложение подберёт, чем заняться."},
       review: {title:"Пора подвести итоги дня", text:`Сделано ${its.filter(i=>i.done).length} из ${its.length}. Две минуты на разбор — и план на завтра под ваш день.`},
       evening: {title: undone.length ? `Осталось ${undone.length} ${plural(undone.length,"дело","дела","дел")}` : "Как прошёл день?",
                 text: (undone.length ? "Не отмечено: "+undone.slice(0,3).map(i=>i.t).join("; ")+". " : "") + "Отметьте сон, энергию и настроение." + (miss.length ? " До целей недели: "+miss.join(", ")+"." : "") + " Экраны выключить к "+settings.screensOff+"."}
@@ -543,7 +543,7 @@ function renderMore(){
     $("nReviewNote").textContent = `В ${reviewTime()}, за 30 минут до ${ub.auto ? "вашего обычного отбоя по данным сна ("+ub.hm+")" : "отбоя в "+ub.hm}`; }
 }
 
-const TITLES = {chat:"Ритм", today:"Сегодня", review:"Разбор дня", week:"Неделя", stats:"Итоги", more:"Ещё"};
+const TITLES = {chat:"Rhythm", today:"Сегодня", review:"Разбор дня", week:"Неделя", stats:"Итоги", more:"Ещё"};
 function render(){
   applyRecurring(curKey()); applyRecurring(iso(addDays(new Date(curKey()+"T00:00:00"),7)));
   for(const t of Object.keys(TITLES)) $("tab-"+t).hidden = t !== tab;
@@ -570,10 +570,10 @@ function gcalUrl({title, date, time, minutes=15, details="", daily=false}){
 function renderReminders(){
   $("remMorning").value = settings.morning; $("remEvening").value = settings.evening;
   const today = new Date();
-  $("gMorning").href = gcalUrl({title:"Ритм недели: план на день", date:today, time:settings.morning, minutes:10, daily:true, details:"Откройте Ритм недели: дела на сегодня и советы. 15 минут дневного света до обеда.\n"+APP_URL});
-  $("gReview").href = gcalUrl({title:"Ритм недели: разбор дня", date:today, time:reviewTime(), minutes:10, daily:true, details:"Две минуты: отметьте, что и сколько делали, и получите советы и план на завтра.\n"+APP_URL});
+  $("gMorning").href = gcalUrl({title:"Rhythm: план на день", date:today, time:settings.morning, minutes:10, daily:true, details:"Откройте Rhythm: дела на сегодня и советы. 15 минут дневного света до обеда.\n"+APP_URL});
+  $("gReview").href = gcalUrl({title:"Rhythm: разбор дня", date:today, time:reviewTime(), minutes:10, daily:true, details:"Две минуты: отметьте, что и сколько делали, и получите советы и план на завтра.\n"+APP_URL});
   $("gReviewNote").textContent = "В " + reviewTime() + ", за 30 минут до сна";
-  $("gEvening").href = gcalUrl({title:"Ритм недели: отметить день", date:today, time:settings.evening, minutes:10, daily:true, details:"Отметьте сделанное, сон, свет, энергию и настроение. Экраны выключить к "+settings.screensOff+".\n"+APP_URL});
+  $("gEvening").href = gcalUrl({title:"Rhythm: отметить день", date:today, time:settings.evening, minutes:10, daily:true, details:"Отметьте сделанное, сон, свет, энергию и настроение. Экраны выключить к "+settings.screensOff+".\n"+APP_URL});
 }
 $("remMorning").onchange = e => { if(e.target.value){ settings.morning = e.target.value; persistSettings(); renderReminders(); toast("Время сохранено. Добавьте напоминание в календарь заново"); } };
 $("remEvening").onchange = e => { if(e.target.value){ settings.evening = e.target.value; persistSettings(); renderReminders(); toast("Время сохранено. Добавьте напоминание в календарь заново"); } };
@@ -601,7 +601,7 @@ $("icsWeek").onclick = async () => {
   const key = curKey();
   if(!getWeek(key).items.some(i=>!i.done)){ toast("На этой неделе нет несделанных дел"); return; }
   const text = buildIcs(key), name = "ritm-"+key+".ics";
-  try{ const file = new File([text], name, {type:"text/calendar"}); if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Ритм недели"}); return; } }catch(e){ if(e && e.name==="AbortError") return; }
+  try{ const file = new File([text], name, {type:"text/calendar"}); if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Rhythm"}); return; } }catch(e){ if(e && e.name==="AbortError") return; }
   download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
 };
 
@@ -630,7 +630,7 @@ $("importFile").onchange = async e => {
   const f = e.target.files && e.target.files[0]; e.target.value = ""; if(!f) return;
   try{ const data = JSON.parse(await f.text()); if(!data || data.app!=="ritm" || !data.entries) throw 0;
     for(const [k,v] of Object.entries(data.entries)) LS.set(k,v); settings = loadSettings(); render(); toast("Данные восстановлены");
-  }catch(err){ toast("Это не копия Ритма недели. Выберите файл ritm-backup-….json"); }
+  }catch(err){ toast("Это не копия Rhythm. Выберите файл ritm-backup-….json"); }
 };
 
 /* ---------- actions ---------- */
@@ -662,7 +662,7 @@ document.addEventListener("click", e => {
   else if(ritualClick(ds)){}
   else if(ds.sc){ mutate(curKey(), w => { const d = todayI(), v = +ds.v; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.sc] = w.days[d][ds.sc]===v ? null : v; }); }
   else if(ds.light){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{}), light:true}; }); toast("Отмечено: дневной свет"); }
-  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="healthbg") NATIVE.requestHealthBg(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
+  else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="healthbg") NATIVE.requestHealthBg(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Rhythm» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
   else if(ds.steps){ settings.stepsGoal = Math.max(2000, Math.min(20000, settings.stepsGoal + +ds.steps)); persistSettings(); render(); }
   else if(ds.early){ mutate(curKey(), w => w.items.push({id:uid(), day:todayI(), cat:"unplug", t:"Лечь пораньше, без экрана", time:settings.screensOff, done:false})); toast("Добавлено на вечер"); }
   else if(ds.nt){ noticedAnswer(ds.nid, ds.nt === "yes"); }
@@ -705,7 +705,7 @@ function openItem(key, it){
   let catManual = !!it.id;
   const catChips = () => typeChipsHtml(draft.cat, k => !["intake"].includes(TYPES[k].g) && k !== "sleep");
   const dayChips = () => DW.map((w,d) => `<button type="button" class="chip ${draft.day===d?"on":""}" data-day="${d}">${w} ${addDays(ws,d).getDate()}</button>`).join("");
-  const calHref = () => gcalUrl({title:draft.t || CATS[draft.cat].n, date:addDays(ws,draft.day), time:draft.time, minutes:30, details:"Ритм недели\n"+APP_URL});
+  const calHref = () => gcalUrl({title:draft.t || CATS[draft.cat].n, date:addDays(ws,draft.day), time:draft.time, minutes:30, details:"Rhythm\n"+APP_URL});
   openSheet(`<h2>${it.id ? "Изменить дело" : "Новое дело"}</h2>
     <div class="field"><label class="label" for="fT">Что делаем</label><input id="fT" type="text" value="${esc(draft.t)}" placeholder="Например, прогулка в парке" autocomplete="off"></div>
     <div class="field"><span class="label">Тип <span class="note" id="fGuess"></span></span><div id="fCat">${catChips()}</div></div>
@@ -819,7 +819,7 @@ function renderReplyBar(){
   if(!m){ el.hidden = true; el.innerHTML = ""; return; }
   const tx = String(m.text || "").replace(/\s+/g, " ").trim();
   el.hidden = false;
-  el.innerHTML = `<div class="rq"><b>${m.who === "me" ? "Вы" : "Ритм"}</b><span>${esc(tx.length > 90 ? tx.slice(0, 90) + "…" : tx)}</span></div><button type="button" id="replyX" aria-label="Отменить ответ">✕</button>`;
+  el.innerHTML = `<div class="rq"><b>${m.who === "me" ? "Вы" : "Rhythm"}</b><span>${esc(tx.length > 90 ? tx.slice(0, 90) + "…" : tx)}</span></div><button type="button" id="replyX" aria-label="Отменить ответ">✕</button>`;
 }
 function setReply(id){
   replyId = id || null; renderReplyBar();
@@ -1918,13 +1918,13 @@ function fmtTime(ms){ const d = new Date(ms); const t = new Date(); const same =
 function renderChat(){
   $("subtitle").textContent = "Пиши как другу: что делал и что планируешь";
   let arr = getChat();
-  if(!arr.length){ bot("Привет! Я Ритм. Пиши мне обычными словами, что делал или что планируешь. Например: «выпил кофе в 9:30», «сегодня бассейн в 18», «что сегодня?». Я всё запишу, подскажу и днём иногда буду спрашивать, как дела.", [act("Что я умею", {op:"help"})]); arr = getChat(); }
+  if(!arr.length){ bot("Привет! Я Rhythm. Пиши мне обычными словами, что делал или что планируешь. Например: «выпил кофе в 9:30», «сегодня бассейн в 18», «что сегодня?». Я всё запишу, подскажу и днём иногда буду спрашивать, как дела.", [act("Что я умею", {op:"help"})]); arr = getChat(); }
   const view = arr.slice(-120);
   let html = "", lastDay = "";
   for(const m of view){
     const dd = new Date(m.at).toDateString();
     if(dd !== lastDay){ lastDay = dd; const d = new Date(m.at); html += `<div class="cday">${dd === new Date().toDateString() ? "Сегодня" : d.getDate()+" "+MONG[d.getMonth()]}</div>`; }
-    const rq = m.reply ? `<div class="rq" data-rq="${esc(m.reply.id)}"><b>${m.reply.who === "me" ? "Вы" : "Ритм"}</b>${esc(String(m.reply.text || "").length > 70 ? String(m.reply.text).slice(0, 70) + "…" : (m.reply.text || ""))}</div>` : "";
+    const rq = m.reply ? `<div class="rq" data-rq="${esc(m.reply.id)}"><b>${m.reply.who === "me" ? "Вы" : "Rhythm"}</b>${esc(String(m.reply.text || "").length > 70 ? String(m.reply.text).slice(0, 70) + "…" : (m.reply.text || ""))}</div>` : "";
     html += `<div class="msg ${m.who}" data-mid="${esc(m.id)}"><div class="bub">${rq}${esc(m.text).replace(/\n/g,"<br>")}</div>`;
     if(m.acts && m.acts.length) html += `<div class="macts">${m.acts.map((a,i) => m.chosen != null ? (i === m.chosen ? `<span class="chosen">${esc(a.l)}</span>` : "") : `<button class="btn" data-ma="${m.id}" data-mi="${i}">${esc(a.l)}</button>`).join("")}</div>`;
     html += `<span class="mt">${fmtTime(m.at)}</span></div>`;
@@ -2097,7 +2097,7 @@ function handleSmall(small){
   }
   if(small.includes("hello")){ const g = h < 5 ? "Не спится?" : h < 12 ? "Доброе утро!" : h < 18 ? "Привет!" : "Добрый вечер!"; bot(g + " " + planText(new Date())); return true; }
   if(small.includes("howareyou")){ bot(pick(["У меня всё отлично, слежу за твоим ритмом. А ты как? Как самочувствие?","Нормально, спасибо! А у тебя как день?"])); return true; }
-  if(small.includes("who")){ bot("Я Ритм — твой помощник по режиму дня. Записываю, что ты делаешь, подсказываю, планирую неделю и напоминаю про сон, воду и перерывы. Работаю на телефоне, без интернета и без ИИ в облаке."); return true; }
+  if(small.includes("who")){ bot("Я Rhythm — твой помощник по режиму дня. Записываю, что ты делаешь, подсказываю, планирую неделю и напоминаю про сон, воду и перерывы. Работаю на телефоне, без интернета и без ИИ в облаке."); return true; }
   if(small.includes("thanks")){ bot(pick(["Пожалуйста!","Обращайся!","Всегда рад помочь."])); return true; }
   if(small.includes("bye")){ const rv = ((getWeek(curKey()).days[todayI()]||{}).review||{}).done;
     if(h >= 18 && !rv){ bot("Спокойной ночи! Пока не лёг, давай за две минуты подведём итоги дня?", [act("Разобрать день", {op:"review"}), act("Завтра", {op:"keep"})]); }
@@ -3688,7 +3688,7 @@ if(NATIVE){
       "Вечерний вопрос: " + (d.evening||"—") + " (" + on(d.enabled) + "), ближайший " + d.nextEvening,
       "Разбор дня: " + (d.review||"—") + " (" + on(d.reviewEnabled) + "), ближайший " + d.nextReview + ". В приложении сейчас: " + reviewTime() + ".",
       "Уведомления Android: " + (d.notif ? "разрешены" : "ЗАПРЕЩЕНЫ"),
-      "Экономия батареи: " + (d.batteryUnrestricted ? "без ограничений" : "включена, Android может задерживать напоминания (Настройки → Приложения → Ритм недели → Батарея → Без ограничений)")].join("\n");
+      "Экономия батареи: " + (d.batteryUnrestricted ? "без ограничений" : "включена, Android может задерживать напоминания (Настройки → Приложения → Rhythm → Батарея → Без ограничений)")].join("\n");
     if(d.review && d.review !== reviewTime()){ lastReviewSync = ""; syncNative(); $("nDiagOut").textContent += "\nВремя разбора не совпало, отправил заново. Нажмите ещё раз."; } };
   $("nTestCheckin").onclick = () => { try{ NATIVE.testCheckin(); }catch(e){} };
   $("nWatch").onclick = e => { const b = e.target.closest("[data-watch]"); if(!b) return; settings.watchMin = +b.dataset.watch; persistSettings(); render(); toast("Сохранено"); };
@@ -3704,7 +3704,7 @@ if(NATIVE){
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredPrompt = e; $("installBtn").hidden = false; });
 $("installBtn").onclick = async () => { if(!deferredPrompt) return; deferredPrompt.prompt(); try{ await deferredPrompt.userChoice; }catch(e){} deferredPrompt = null; $("installBtn").hidden = true; };
-window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; toast("Ритм недели установлен"); });
+window.addEventListener("appinstalled", () => { $("installBtn").hidden = true; toast("Rhythm установлен"); });
 if(!NATIVE && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 document.addEventListener("visibilitychange", () => { if(!document.hidden){ dismissed = new Set(); render(); } });
 
