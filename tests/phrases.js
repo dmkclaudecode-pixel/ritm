@@ -5,7 +5,7 @@ const PARSE = [
   ["сходили с девушкой в бассейн", [{type:"swim"}, {type:"social", derived:true}]],
   ["поиграл в доту с друзьями 2 часа", [{type:"gaming", min:120}, {type:"social", min:120}]],
   ["гуляли с мужем 40 минут", [{type:"walk", min:40}, {type:"social", min:40}]],
-  ["работал с коллегами", [{type:"social"}]],
+  ["работал с коллегами", [{type:"work"}]],
   // еда и напитки в компании: и напиток, и общение
   ["Сходили попили кофе с коллегой", [{type:"caffeine"}, {type:"social", min:20, derived:true}]],
   ["пообедали с коллегами", [{type:"meal"}, {type:"social", min:45}]],
@@ -207,7 +207,7 @@ const PARSE = [
   ["тренировался час", [{unknown:true, ask:"train", min:60}]],
   ["потренил", [{unknown:true, ask:"train"}]],
   ["занимался спортом", [{unknown:true, ask:"train"}]],
-  ["поиграл с сыном", [{unknown:true, ask:"play"}]],
+  ["поиграл с сыном", [{type:"social"}]],
   // незнакомое
   ["кидал бумеранг 20 минут", [{unknown:true, min:20}]],
   // несколько дел сразу

@@ -1,7 +1,7 @@
 // Прогон тестовых фраз: node tests/run.js  (код выхода 1, если что-то сломалось)
 const store = {}; global.localStorage = {getItem:k=>store[k]??null, setItem:(k,v)=>store[k]=v};
 global.window = global;
-require("../catalog.js"); require("../catalog2.js"); require("../food.js"); require("../food2.js"); require("../parser.js"); require("../nlu.js");
+require("../catalog.js"); require("../catalog2.js"); require("../catalog3.js"); require("../lexicon.js"); require("../food.js"); require("../food2.js"); require("../engine.js"); require("../parser.js"); require("../nlu.js");
 const {PARSE, NLU} = require("./phrases.js");
 RITM.ctx = {now:"14:30", workEnd:"19:00", commute:0, lunch:"13:30", bed:"23:00", wake:"08:00"};
 let ok = 0, bad = 0; const fails = [];
@@ -23,9 +23,10 @@ for(const [t, exp] of NLU){
   if(exp.question != null && a.question !== exp.question) pass = false;
   if(pass) ok++; else { bad++; fails.push(`NLU «${t}»\n   ждали: ${JSON.stringify(exp)}\n   вышло: ${JSON.stringify({crisis:a.crisis, states:a.states, small:a.small, corr:a.correction, topics:a.topics, meta:a.meta})}`); }
 }
+{ const sm = require("./semantic.js"); bad += sm.fails.length; fails.push(...sm.fails); }
 { const c = require("./core.test.js"); ok += c.ok; bad += c.fails.length; fails.push(...c.fails); }
 { const vm = require("vm"), fs = require("fs");   // синтаксис всех файлов интерфейса
-  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
+  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","catalog3.js","lexicon.js","engine.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
 require("./stress.js"); require("./food.js");

@@ -187,6 +187,16 @@ function fuzzyMatch(s){
   return {entry:best.entry, type:best.type, name:best.entry ? best.entry.n : null, score:best.a.length - 2, fuzzy:true, alias:best.a, tok:best.tok};
 }
 
+// смысловой угадыватель: тип по основам и кускам слов (engine.js); null, если не уверен
+const NO_SEM = new Set(["sleep","other","intimacy"]);
+function semantic(s){
+  const c = core(s) || s.trim(); if(!c || c.split(" ").length > 8 || /(^| )(не|нет|ни|без)( |$)/.test(c) || /спал|выспал|(^| )сон( |$)|дремал|ночь|ночью/.test(c) || GENERIC_TRAIN.test(" " + c + " ")) return null;
+  const L = learned(); R.engineExtra = Object.entries(L).filter(([, v]) => v && v.type && v.type !== "none").map(([k, v]) => [k, v.type]);
+  const r = R.engine.classify(c, t => !NO_SEM.has(t)); if(!r.length) return null;
+  const top = r[0], second = r[1] || {p:0};
+  if(top.p < 0.75 || top.cover < 0.5 || top.p - second.p < 0.3 || top.stems < 1) return null;
+  return {entry:null, type:top.type, name:null, score:3, sem:true, p:top.p, alias:"~"+c};
+}
 // ищем занятие: сначала то, что вы уже объясняли, потом ваши занятия, потом база, потом общие основы, потом без приставок и с опечатками
 function findActivity(text){
   const s = norm(text), c = core(text), L = learned();
@@ -199,6 +209,11 @@ function findActivity(text){
   }
   const fz = (!res || (!res.entry && res.score <= 6)) ? fuzzyMatch(s) : null;
   if(fz && (!res || (fz.entry && fz.alias.length >= 5 && fz.score >= res.score))) res = fz;
+  // смысловой слой: незнакомое слово или слабая догадка по опечатке — спрашиваем модель по смыслу
+  if(R.engine && (!res || res.fuzzy || (!res.entry && res.score <= 6)) && !(res && (res.none || NO_SEM.has(res.type)))){
+    const sm = semantic(s);
+    if(sm && (!res || res.fuzzy || sm.p >= 0.9)){ res = sm; }
+  }
   // общие слова без конкретики: «тренировка», «поиграл»
   if(GENERIC_TRAIN.test(s) && (!res || (res.type === "strength" && !res.entry && /трениров|тренил|трен/.test(res.alias||"")))) return {ambiguous:"train", type:null, score:0};
   if(res && res.type === "gaming" && GENERIC_PLAY.has(res.alias) && !/(комп|консол|приставк|плойк|телефон|игру в|steam|стим|доту|онлайн|катк)/.test(s)) return {ambiguous:"play", type:null, score:0};
