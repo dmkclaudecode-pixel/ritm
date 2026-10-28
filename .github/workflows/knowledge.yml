@@ -1,0 +1,27 @@
+name: Сборка знаний для движка (embeddings, Wikidata, ConceptNet, RuWordNet)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Библиотеки
+        run: pip install numpy navec ruwordnet
+      - name: RuWordNet (скачать базу; если недоступна, шаг пропускается)
+        continue-on-error: true
+        run: ruwordnet download
+      - name: Собрать знания
+        run: python tools/build_knowledge.py knowledge
+      - name: Положить результат в ветку knowledge-data
+        run: |
+          git config user.name "knowledge-bot"; git config user.email "bot@users.noreply.github.com"
+          mkdir -p /tmp/kd && cp -r knowledge/. /tmp/kd/
+          git checkout --orphan knowledge-data && git rm -rf . >/dev/null 2>&1 || true
+          cp -r /tmp/kd/. . && git add -A && git commit -m "Знания для движка (автосборка)" && git push -f origin knowledge-data
