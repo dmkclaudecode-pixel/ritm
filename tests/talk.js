@@ -1,6 +1,6 @@
 // Тесты разговора: сценарии из нескольких реплик. Проверяем акты, тон, отсутствие повторов и «вопрос в каждой реплике».
 global.window = global; global.localStorage = {getItem: () => null, setItem(){}};
-require("../engine.js"); require("../mood.js"); require("../dialog.js"); require("../onto.js"); require("../talk.js");
+require("../engine.js"); require("../mood.js"); require("../dialog.js"); require("../followup.js"); require("../onto.js"); require("../talk.js");
 RITM.mood.extend(require("../data/mood_lex.json")); RITM.mood.useModel(require("../data/mood_nb.json"));
 const M = RITM.mood, D = RITM.dialog, T = RITM.talk; let ok = 0; const bad = [];
 const t = (n, c, i) => { if(c) ok++; else bad.push(n + (i ? " → " + i : "")); };
@@ -57,5 +57,36 @@ t("не больше 2 вопросов из 4 подряд", many.every((_, i) 
   q = run(["слушал плейлист любимой группы весь день"]); t("музыка", q[0].topic === "music", q[0].topic);
   T.TOPICS.forEach(x => { if(!x.q.length) bad.push("пустые вопросы: " + x.k); });
   global.localStorage = keep;
+}
+// --- третий блок: ответ на ответ (followup.js)
+{
+  const F = RITM.followup;
+  const seq = (pairs) => { const ctx = new D.Context(); let k = 0; const rnd = () => (k = (k * 7 + 3) % 10) / 10, out = [];
+    for(const [who, line] of pairs){ if(who === "B"){ ctx.push("bot", line, {asked: /\?\s*$/.test(line), act: "question"}); continue; }
+      const mood = M.analyze(line); ctx.push("user", line, {mood, topic: (T.topicOf(line) || {}).k}); const x = T.reply({text: line, mood, ctx, rnd}); ctx.push("bot", x.text, {asked: x.asked, act: x.act}); out.push(x); }
+    return out; };
+  t("тип вопроса: срок", F.qKind("Сколько удалось поспать?") === "amount");
+  t("тип вопроса: предложение", F.qKind("Поставить в план на завтра?") === "offer");
+  t("тип вопроса: выбор", F.qKind("Хочется чего-то активного или спокойного?") === "choice");
+  t("тип вопроса: причина", F.qKind("Что вымотало?") === "what");
+  t("тип вопроса: самочувствие", F.qKind("Как себя чувствуешь?") === "feeling");
+  t("часы: пять часов", F.hours("часов пять") === 5 && F.hours("2 дня") === 48 && F.hours("недели две") === 336 && F.hours("полчаса") === .5);
+  t("ответ: да/нет", F.answerKind("да, давай") === "yes" && F.answerKind("не хочу") === "no" && F.answerKind("пять часов") === "content");
+  let o = seq([["B", "Тяжёлое утро. Сколько удалось поспать?"], ["U", "часов пять"]]);
+  t("сон 5 часов: оценка, не «продолжай»", /мало/i.test(o[0].text) && !/Продолжай|Слушаю/.test(o[0].text), o[0].text);
+  o = seq([["B", "Поставить в план на завтра?"], ["U", "да, давай"]]); t("согласие на предложение", o[0].intent === "accept", JSON.stringify(o[0]));
+  o = seq([["B", "Поставить в план на завтра?"], ["U", "нет, не надо"]]); t("отказ от предложения", o[0].intent === "decline", JSON.stringify(o[0]));
+  o = seq([["B", "Неприятно. Давно болит?"], ["U", "три дня"]]); t("боль три дня: совет к врачу", /врач/.test(o[0].text), o[0].text);
+  o = seq([["B", "Ты сейчас в безопасности?"], ["U", "не знаю"]]); t("«не знаю» в вопросе о безопасности: линия помощи", /112|8-800/.test(o[0].text), o[0].text);
+  o = seq([["B", "Что тревожит больше — вопросы или результат?"], ["U", "результат"]]); t("выбор из двух", /результат/i.test(o[0].text), o[0].text);
+  o = seq([["B", "Что на работе сейчас самое важное?"], ["U", "дедлайн по отчёту"]]); t("ответ на открытый вопрос признаём", (o[0].act === "ack" || o[0].act === "mood") && !/Продолжай/.test(o[0].text), o[0].text);
+  o = seq([["B", "Как ты сегодня?"], ["U", "паршиво"]]); t("плохо — поддержка, не «отлично»", !/Отлично|Здорово/.test(o[0].text), o[0].text);
+  o = seq([["B", "Как день?"], ["U", "а ты как?"]]); t("встречный вопрос не глотаем", o[0].act === "andyou" || o[0].act === "whatsup", o[0].act);
+  { const ctx = new D.Context(); ctx.push("user", "на работе опять завал", {mood: M.analyze("на работе опять завал"), topic: "work"});
+    const x = T.reply({text: "уже вторую неделю", mood: M.analyze("уже вторую неделю"), ctx, span: true, rnd: () => .1});
+    t("срок без вопроса бота: реакция по теме", /многовато|не первый/.test(x.text), x.text); }
+  // длинная беседа из ответов: не больше одного вопроса подряд
+  o = seq([["B", "Что смотрел?"], ["U", "сериал"], ["U", "про врачей"], ["U", "ну так"], ["U", "ага"]]);
+  t("подряд вопросов не больше одного", o.every((x, i) => !(i && x.asked && o[i - 1].asked)), JSON.stringify(o.map(x => x.asked)));
 }
 console.log(`разговор (2): ${ok} ок всего, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;

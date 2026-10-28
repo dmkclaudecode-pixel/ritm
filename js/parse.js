@@ -84,6 +84,14 @@ export function respondRules(text){
       if(x.act === "invite" || inChat) chatUntil = Date.now() + 20*60000;
       return bot(x.text);
     } }
+  // короткий ответ на вопрос бота («часов пять», «две недели», «да, давай») — реакция по типу вопроса
+  { const lbT = DLG.last("bot"), soft2 = pre.every(e => !e.type || e.fuzzy || e.unknown || e.sem);
+    // «уже вторую неделю», «пару дней» — срок, а не занятие: никогда не записываем
+    const span = !/\d/.test(s) && /^ (уже |вот |ну |около |примерно |почти )?((первую|вторую|третью|целую|всю|всего|одну|две|три|четыре|пять|пару|несколько|эту|ту|прошлую) )?(недел\S+|месяц\S*|дня|дней|день|год|года|лет|сутки|вечер|утро)( подряд| уже| назад)? $/.test(s);
+    if(RITM.followup && (span || lbT && lbT.meta.asked && Date.now() - lbT.t < 10*60000) && !A.states.length && A.words <= 6 && !/\?/.test(text) && (soft2 || span)){
+      const x = RITM.talk.reply({text, mood: MD, ctx: DLG, span}); DLG.push("bot", x.text, {asked: x.asked, act: x.act});
+      return bot(x.text);
+    } }
   if(!A.states.length && moodReply(MD, A, s, pre)) return;
   if(workBreakReply(text, s, pre)) return;
   if(nudgeChatReply(text, s, pre)) return;
@@ -161,7 +169,11 @@ export function respondRules(text){
   if(foodStatement(text, s, pre)) return;
   if(routineStatement(text)) return;
   // feelings: «устал», «болит голова», «не выспался»
-  if(A.states.length){ const done = handleStates(A.states); if(done && !hasAct && !pre.some(e => e.ask)) return; if(!pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event") && moodReply(MD, A, s, pre)) return; }
+  if(A.states.length){ const done = handleStates(A.states);
+    // жалоба на состояние («на работе опять завал») — не занятие: без цифр и глаголов дела не записываем работу
+    const stateOnly = !/\d/.test(s) && A.words <= 7 && !/ (работал|поработал|отработал|проработал|занимался|занималась|делал|делала|сидел|сидела|пахал|трудился|учил|учился) /.test(s) && pre.every(e => !e.type || e.fuzzy || e.type === "work" || e.type === "study");
+    if(done && A.states.some(x => x.k === "badsleep")){ const q = "Сколько удалось поспать?"; DLG.push("bot", q, {asked: true, act: "question"}); bot(q); }
+    if(done && (!hasAct || stateOnly) && !pre.some(e => e.ask)) return; if(!pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event") && moodReply(MD, A, s, pre)) return; }
   if(A.question && !hasAct && !pre.some(e=>e.type)){ __set_ruleMiss(true); noteMiss(text, "question"); return talkFallback(text); }
   // activities: past → journal, future → plan
   const msgDay = dayFromText(text);

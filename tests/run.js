@@ -26,7 +26,7 @@ for(const [t, exp] of NLU){
 { const sm = require("./semantic.js"); bad += sm.fails.length; fails.push(...sm.fails); }
 { const c = require("./core.test.js"); ok += c.ok; bad += c.fails.length; fails.push(...c.fails); }
 { const vm = require("vm"), fs = require("fs");   // синтаксис всех файлов интерфейса
-  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","catalog3.js","lexicon.js","engine.js","mood.js","dialog.js","talk.js","embed.js","onto.js","trainlog.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
+  for(const f of ["core.js","parser.js","nlu.js","catalog.js","catalog2.js","catalog3.js","lexicon.js","engine.js","mood.js","dialog.js","followup.js","talk.js","embed.js","onto.js","trainlog.js","food.js","food2.js","sw.js"]){ try{ new vm.Script(fs.readFileSync(__dirname + "/../" + f, "utf8"), {filename:f}); ok++; }catch(e){ bad++; fails.push(`SYNTAX ${f}: ${e.message}`); } } }
 console.log(fails.join("\n"));
 console.log(`\nИтого: ${ok} прошло, ${bad} не прошло из ${ok + bad}`);
 require("./stress.js"); require("./food.js"); require("./mood.js"); require("./onto.js"); require("./talk.js"); require("./trainlog_test.js");

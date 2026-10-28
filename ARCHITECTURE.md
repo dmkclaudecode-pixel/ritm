@@ -71,5 +71,8 @@
 - `trainlog.js` — журнал «фраза → разбор → правка пользователя» на устройстве (ключ `ritm:trainlog`, до 3000 записей, входит в резервную копию).
 - Проверки: `tests/fresh/*.js` — свежие наборы (информационно). Правило: набор, по которому подгоняли словарь, больше не считается свежим; для честных цифр пишется новый (последний: `mood_e`).
 
+## Ответ на ответ (followup.js)
+`RITM.followup.react({text, ctx, mood, topic, tp, span})`: бот спросил — человек коротко ответил. `qKind` определяет тип вопроса бота (offer, choice, amount, feeling, what, yesno), `answerKind` — да/нет/содержание, `hours` вынимает срок. Реакция зависит от типа, числа (сон 5 ч → «мало»), настроения и темы; `intent` (accept/decline/choice:…) отдаётся наверх для будущих действий. Срок без вопроса («уже вторую неделю») помечается `span` и не записывается как занятие (`js/parse.js`). Оценка на эталоне: `node tools/gold_eval.js -p 40` (золотой слой диалогов — `tools/gold/*.txt`, формат в README).
+
 ## Разговор (talk.js)
 `RITM.talk.reply({text, mood, ctx})` → {text, act, asked, topic}. Акты: selfneg, andyou, whatsup, botq, advice, ack, mood (эмпатия через `dialog.compose`), event, topic, clarify, invite, short. Правила тона: без вопроса два хода подряд, тема держится по контексту (`Context.topic`), фразы не повторяются (`Context.said`). Подключение: `js/parse.js` — `direct()` до разбора занятий, `moodReply` для сильной эмоции без дела, `chattyReply` вместо шаблонных «Принято». Тесты: `tests/talk.js` (сценарии из нескольких реплик).
