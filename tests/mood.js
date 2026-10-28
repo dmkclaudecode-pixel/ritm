@@ -1,6 +1,7 @@
 // Тесты модуля настроения и диалога: фразы → ожидаемая эмоция/полярность; контекст; конструктор; уточнения.
 global.window = global; global.localStorage = {getItem: () => null, setItem(){}};
 require("../mood.js"); require("../dialog.js");
+require("../engine.js"); RITM.mood.extend(require("../data/mood_lex.json"));
 const M = RITM.mood, D = RITM.dialog;
 let ok = 0, bad = [];
 const t = (name, cond, info) => { if(cond) ok++; else bad.push(name + (info ? " → " + info : "")); };

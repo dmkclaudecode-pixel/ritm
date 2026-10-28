@@ -14,3 +14,4 @@ import * as m11 from "./native.js";
 
 for(const m of [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11]) if(m.init) m.init();
 try{ if(window.RITM && RITM.onto) RITM.onto.load("data/onto.json"); }catch(e){ /* онтология необязательна */ }
+try{ if(window.RITM && RITM.mood) RITM.mood.loadLex("data/mood_lex.json"); }catch(e){ /* лексикон необязателен */ }

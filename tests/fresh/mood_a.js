@@ -1,4 +1,4 @@
-global.window=global;global.localStorage={getItem:()=>null,setItem(){}};require('../../mood.js');
+global.window=global;global.localStorage={getItem:()=>null,setItem(){}};require('../../engine.js');require('../../mood.js');RITM.mood.extend(require('../../data/mood_lex.json'));
 const S=[ // [текст, допустимые эмоции, знак]
 ["день был просто отвратительный","sad,anger,disgust,stressed","-"],["меня переполняет счастье","joy,love","+"],["ничего не радует","sad","-"],["сил моих нет уже","tired","-"],
 ["как же меня достали эти совещания","anger,stressed","-"],["боюсь завтрашнего экзамена","anxious,fear","-"],["классный выдался вечер","joy,calm","+"],["я выжат как лимон","tired","-"],

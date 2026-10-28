@@ -1,5 +1,5 @@
 // Свежий набор B (ни разу не подгонялся): разговорные фразы с эмоцией. Замораживается: после замеров переходит в «обучающие».
-global.window=global;global.localStorage={getItem:()=>null,setItem(){}};require('../../mood.js');
+global.window=global;global.localStorage={getItem:()=>null,setItem(){}};require('../../engine.js');require('../../mood.js');RITM.mood.extend(require('../../data/mood_lex.json'));
 const S=[
 ["ну и бардак у меня в голове","stressed,anxious,sad","-"],["сегодня просто мечта а не день","joy","+"],["выдохся к вечеру","tired","-"],["хочу выть от этой работы","sad,anger,stressed","-"],
 ["как же хорошо дома","calm,joy,love","+"],["сердце колотится, боюсь","anxious,fear","-"],["обнял бы весь мир","love,joy","+"],["всё идёт наперекосяк, руки опускаются","sad,stressed,tired","-"],
