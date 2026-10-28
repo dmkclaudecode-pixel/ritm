@@ -127,6 +127,8 @@ const NOT_MINE = [
   / (задержал|задержали|отменили|перенесли|опоздал|опоздала|опоздали|сломал|сломалась|сломался|отключили|не взял|не взяла|не ответил|не ответила) /,
   / (заказал|заказала|купил|купила|получил|получила|спросил|спросила|написал|написала|ответил|ответила) /
 ];
+const THIRD = /^ (у )?(кот\S*|кошк\S*|собак\S*|пес\S*|пёс\S*|щен\S*|котенок|котёнок|попугай\S*|мам\S+|пап\S+|бабушк\S*|дедушк\S*|брат\S*|сестр\S*|друг\S*|друз\S*|подруг\S*|коллег\S*|начальник\S*|муж\S*|жен\S+|сын\S*|доч\S*|ребен\S*|ребён\S*|малыш\S*|он|она|они|него|нее|неё|соседк\S*|сосед\S*|родител\S*) /;
+const FIRST = / (я|мне|меня|мной|сам|сама|у меня|себя|нам|нас|мы) /;
 function analyze(text){
   const s = N(text);
   const out = {s, words: words(s), crisis:false, states:[], small:[], correction:null, question:false, topics:[]};
@@ -138,6 +140,9 @@ function analyze(text){
     if(new RegExp(" (не|ничего не|вовсе не|совсем не) " + st.re.source.replace(/^ /, "")).test(s) && !new RegExp(st.re.source).test(s.replace(/ (не|ничего не|вовсе не|совсем не) \S+/g, " "))) continue;
     out.states.push(x);
   }
+  // «кот заболел», «у мамы болит голова» — не про самого человека: состояния не ставим
+  out.subj3 = THIRD.test(s) && !FIRST.test(s);
+  if(out.states.length && out.subj3){ out.states = []; out.third = true; }
   if(out.states.some(x=>x.k==="good") && out.states.length > 1) out.states = out.states.filter(x=>x.k!=="good");
   for(const [k, re] of SMALL) if(re.test(s)) out.small.push(k);
   out.correction = correction(s);

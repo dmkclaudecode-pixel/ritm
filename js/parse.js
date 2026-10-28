@@ -79,7 +79,8 @@ export function respondRules(text){
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
   { const inChat = Date.now() < chatUntil, soft = !/\d/.test(s) && pre.every(e => !e.type || e.fuzzy || e.unknown || e.sem);
-    if(RITM.talk && (RITM.talk.direct(text) || (inChat && soft && !A.states.length))){
+    const third = A.subj3 && !/\d/.test(s) && pre.every(e => e.neg || !e.type || e.fuzzy || e.unknown || e.sem);   // рассказ про других, а не запись дела
+    if(RITM.talk && (RITM.talk.direct(text) || third || (inChat && soft && !A.states.length))){
       const x = RITM.talk.reply({text, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act});
       if(x.act === "invite" || inChat) chatUntil = Date.now() + 20*60000;
       return bot(x.text);
@@ -184,6 +185,13 @@ export function respondRules(text){
     for(const e of sl){ entries.splice(entries.indexOf(e), 1); logSleepWords(e, text); }
     if(sl.length && !entries.length) return; }
   if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return bot(chattyReply(null));
+  if(!entries.length && RITM.talk && RITM.followup){
+    // ничего не распознано: это разговор, а не запись — отвечаем разговорным движком; подсказку про формат добавляем только если он сам не понял
+    __set_ruleMiss(true); noteMiss(text, "nothing");
+    const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act});
+    const hint = ["clarify", "short", "vague"].includes(x.act) ? " Если это дело, напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), или спроси «что сегодня?»." : "";
+    return bot(x.text + hint);
+  }
   if(!entries.length){ __set_ruleMiss(true); noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
   const cb0 = ctxBot(), lastBot = cb0.m;
   const ctxKind = lastBot && (cb0.explicit || Date.now() - lastBot.at < 3*3600*1000) ? lastBot.kind : null;

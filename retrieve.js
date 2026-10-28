@@ -49,7 +49,7 @@ function pick(q, th, opt){
     // похвала — только в позитивном контексте, сочувствие — только в негативном
     if(e.tone === "p" && val < .15) continue; if(e.tone === "n" && val > -.1) continue;
     // настроение не должно меняться на противоположное
-    if(Math.abs(val) >= .3 && Math.abs(e.val || 0) >= .3 && Math.sign(val) !== Math.sign(e.val)) continue;
+    if(Math.abs(val) >= .15 && Math.abs(e.val || 0) >= .15 && Math.sign(val) !== Math.sign(e.val)) continue;
     if(q.botq){ const ql = cosBag(qbq, e.bb), qe = dot(qbv, e.bv); if(!(e.b && e.b.length) || ql < .2 || (q.kind && e.kind && q.kind !== e.kind) || (shEq === 0 && usim < HU + .1)) continue; }
     else { if(e.b && e.b.length) continue; if(usim < HU) continue; }
     const s = .22 * lex + .22 * Math.max(0, sem) + .26 * qq + .08 * (q.kind && q.kind === e.kind ? 1 : 0) + .04 * (q.ak && q.ak === e.ak ? 1 : 0) + (q.botq ? .08 * shEq : 0) + .1 * (1 - Math.min(1, Math.abs(val - (e.val || 0)))) + .04 * (dom && dom === e.dom ? 1 : 0) + .04 * (q.topic && q.topic === e.topic ? 1 : 0);

@@ -11,8 +11,12 @@ for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".txt")).sort()) {
     if (!lines.length) return;
     const h = lines[0].match(/^## (.+?) \| (\w+)$/);
     if (!h) return errs.push(`${f} блок ${bi + 1}: нет заголовка`);
-    const turns = [];
+    const turns = []; let variants = null, ctxTurn = null;
     for (const l of lines.slice(1)) {
+      let mv = l.match(/^U\*: (.+)$/);                                    // варианты реплики человека через « / »: разворачиваем в отдельные диалоги
+      if (mv) { variants = mv[1].split(" / ").map(x => x.trim()).filter(Boolean); turns.push({ who: "U", text: variants[0], act: null }); continue; }
+      mv = l.match(/^Q: (.+)$/);                                          // реплика бота перед ответом (контекст)
+      if (mv && !turns.length) { ctxTurn = { who: "B", text: mv[1], act: null }; continue; }
       const m = l.match(/^([UB]): (.+?)(?: \[act=(\w+)\])?$/);
       if (!m) { errs.push(`${f} блок ${bi + 1}: плохая строка «${l}»`); continue; }
       if (m[3] && !ACTS.has(m[3])) errs.push(`${f}: неизвестный акт ${m[3]}`);
@@ -21,7 +25,9 @@ for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".txt")).sort()) {
     }
     if (!turns.length || turns[0].who !== "U") errs.push(`${f} блок ${bi + 1}: должен начинаться с U`);
     for (let i = 1; i < turns.length; i++) if (turns[i].who === turns[i - 1].who) errs.push(`${f} блок ${bi + 1}: подряд две реплики одного автора`);
-    out.push({ file: f, topic: h[1], mood: h[2], turns });
+    const base = ctxTurn ? [ctxTurn].concat(turns) : turns;
+    if (variants) for (const v of variants) { const t = base.map(x => ({ ...x })); t[ctxTurn ? 1 : 0].text = v; out.push({ file: f, topic: h[1], mood: h[2], turns: t }); }
+    else out.push({ file: f, topic: h[1], mood: h[2], turns: base });
   });
 }
 const n = out.length, pairs = out.reduce((s, d) => s + d.turns.filter(t => t.who === "B").length, 0);
