@@ -25,7 +25,7 @@ function fit(data, minc){
     for(const l of labels) spread = Math.max(spread, Math.abs(lp[l] - mean));
     if(spread >= .5) W[f] = labels.map(l => +(lp[l] - mean).toFixed(2));     // храним отклонения от среднего: слабые признаки отбрасываем
   }
-  return {labels, prior: labels.map(l => +Math.log(cls[l] / N).toFixed(3)), W};
+  return {labels, prior: labels.map(() => 0), W};   // равные априорные вероятности: классы в данных очень несбалансированы (нейтральных в разы больше)
 }
 function predict(m, text){
   const sc = m.prior.slice(); for(const f of new Set(feats(text))){ const w = m.W[f]; if(w) for(let i = 0; i < sc.length; i++) sc[i] += w[i]; }
@@ -34,7 +34,8 @@ function predict(m, text){
 }
 let model = fit(tr, 3), ok = 0, byL = {};
 for(const r of te){ const p = predict(model, r.t); const hit = p.label === r.l; ok += hit; (byL[r.l] = byL[r.l] || [0, 0])[0] += hit; byL[r.l][1]++; }
-console.log(`проверка на ${te.length} отложенных текстах: ${(100 * ok / te.length).toFixed(1)}%`);
+const macro = Object.values(byL).reduce((a, [h, n]) => a + h / n, 0) / Object.keys(byL).length;
+console.log(`проверка на ${te.length} отложенных текстах: точность ${(100 * ok / te.length).toFixed(1)}%, средняя по классам ${(100 * macro).toFixed(1)}%`);
 console.log(Object.entries(byL).map(([l, [a, b]]) => `${l} ${(100 * a / b).toFixed(0)}% (${b})`).join(", "));
 model = fit(rows, 3); model.labels = model.labels;
 fs.mkdirSync(path.dirname(out), {recursive: true}); fs.writeFileSync(out, JSON.stringify(model));
