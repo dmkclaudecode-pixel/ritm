@@ -18,6 +18,12 @@ def norm_turns(x):
         return [t.strip() for t in out if t and t.strip()]
     return []
 
+def split_sents(t):
+    """turn → предложения (модель перевода теряет всё после первого предложения)"""
+    t = re.sub(r"\s+", " ", str(t)).strip()
+    parts = [x.strip() for x in re.split(r"(?<=[.!?])\s+(?=[A-Z\"'(])", t) if x.strip()]
+    return parts or ([t] if t else [])
+
 def fetch(out):
     os.makedirs(out, exist_ok=True)
     from huggingface_hub import list_repo_files, hf_hub_download
@@ -61,7 +67,7 @@ def fetch(out):
             log(kind, repo, "диалогов:", len(dialogs) - n0)
             if len(dialogs) > n0: got = True; break
         if not got: log("ВНИМАНИЕ: нет данных для", kind)
-    sents = sorted({t for d in dialogs for t in d["turns"]})
+    sents = sorted({x for d in dialogs for t in d["turns"] for x in split_sents(t)})
     json.dump(dialogs, open(os.path.join(out, "dialogs_en.json"), "w", encoding="utf-8"), ensure_ascii=False)
     json.dump(sents, open(os.path.join(out, "sentences.json"), "w", encoding="utf-8"), ensure_ascii=False)
     log("диалогов", len(dialogs), "уникальных предложений", len(sents))
@@ -107,9 +113,13 @@ def merge(fetched, shards_dir, out):
     for d in dialogs:
         ru = []
         for t in d["turns"]:
-            r = tr.get(t)
-            if r is None or not good(r, t): ru = None; break
-            ru.append(r.strip())
+            rs = []
+            for x in split_sents(t):
+                r = tr.get(x)
+                if r is None or not good(r, x): rs = None; break
+                rs.append(r.strip())
+            if not rs: ru = None; break
+            ru.append(" ".join(rs))
         if not ru: dropped += 1; continue
         kept.append({"src": d["src"], "emotion": d["emotion"], "turns": ru})
     log("переведено предложений", len(tr), "диалогов оставлено", len(kept), "отброшено", dropped)
