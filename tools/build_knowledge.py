@@ -29,6 +29,7 @@ def http(url, data=None, headers=None, timeout=120):
 # ---------- Wikidata ----------
 def sparql(q, tries=3):
     for i in range(tries):
+        if i: q = re.sub(r'LIMIT (\d+)', lambda m: 'LIMIT ' + str(max(100, int(m.group(1)) // 2)), q)
         try:
             raw = http("https://query.wikidata.org/sparql?" + urllib.parse.urlencode({"query": q, "format": "json"}), headers={"Accept": "application/sparql-results+json"}, timeout=180)
             return json.loads(raw)["results"]["bindings"]
@@ -58,25 +59,30 @@ def wikidata():
 # ---------- ConceptNet ----------
 CN_REL = {"IsA", "UsedFor", "AtLocation", "RelatedTo", "HasContext", "MadeOf", "PartOf", "CapableOf", "HasSubevent", "HasPrerequisite", "Causes", "Synonym", "FormOf", "DerivedFrom"}
 def conceptnet(words, limit_words=1500):
-    out = {}; ok = 0
-    for w in words[:limit_words]:
-        try:
-            raw = http("https://api.conceptnet.io/query?" + urllib.parse.urlencode({"node": f"/c/ru/{w}", "other": "/c/ru", "limit": 60}), timeout=60)
-            edges = json.loads(raw).get("edges", [])
-        except Exception as e:
-            time.sleep(2); continue
-        rel = {}
-        for e in edges:
-            r = e["rel"]["label"]
-            if r not in CN_REL: continue
-            s, t = e["start"], e["end"]
-            other = t if s.get("@id", "").startswith(f"/c/ru/{w}") else s
-            lbl = other.get("label", "").lower()
-            if not lbl or lbl == w or not re.search(r"[а-яё]", lbl): continue
-            rel.setdefault(r, []).append([lbl, round(float(e.get("weight", 1)), 2)])
-        if rel: out[w] = rel; ok += 1
-        time.sleep(0.9)   # лимит API
-    log(f"  conceptnet: связи найдены для {ok} из {min(len(words), limit_words)} слов")
+    """ConceptNet из официального дампа (одним потоком), оставляем только русские связи: API по одному слову оказался недоступен."""
+    import gzip
+    url = "https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
+    out = {}; n = 0; seen = 0
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r, gzip.GzipFile(fileobj=r) as gz:
+            for line in gz:
+                seen += 1
+                if b"/c/ru/" not in line: continue
+                parts = line.decode("utf-8", "ignore").split("\t")
+                if len(parts) < 5: continue
+                rel, a, b = parts[1].replace("/r/", ""), parts[2], parts[3]
+                if rel not in CN_REL or not a.startswith("/c/ru/") or not b.startswith("/c/ru/"): continue
+                try: w = float(json.loads(parts[4]).get("weight", 1))
+                except Exception: w = 1.0
+                wa, wb = a.split("/")[3].replace("_", " "), b.split("/")[3].replace("_", " ")
+                if wa == wb: continue
+                out.setdefault(wa, {}).setdefault(rel, []).append([wb, round(w, 2)]); n += 1
+    except Exception as e:
+        log(f"  conceptnet ОШИБКА дампа: {type(e).__name__}: {e}")
+    for w in out:
+        for r in out[w]: out[w][r] = sorted(out[w][r], key=lambda x: -x[1])[:12]
+    log(f"  conceptnet: прочитано {seen} строк, русских связей {n}, слов {len(out)}")
     json.dump(out, open(os.path.join(OUT, "conceptnet.json"), "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
 
 # ---------- Navec: урезанные векторы ----------
