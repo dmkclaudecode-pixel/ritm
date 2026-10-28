@@ -96,48 +96,62 @@ def convs(limit=1_500_000):
     log(f"  реплик: {n}")
     if n: dump("collocations.json", pmi_pairs(pairs, single, max(total, 1), 12, 60000))
 
-# ---------- эмоции по словам ----------
+# ---------- эмоции и тональность по словам ----------
+CEDR = {0: "joy", 1: "sadness", 2: "surprise", 3: "fear", 4: "anger"}
+def lift_table(wl, lab, minc, minlift, skip=()):
+    tot = sum(lab.values()); out = {}
+    for w, c in wl.items():
+        s = sum(c.values())
+        if s < minc: continue
+        best = None
+        for L, k in c.items():
+            if L in skip or k < max(3, minc // 2): continue
+            lf = (k / s) / (lab[L] / tot)
+            if lf >= minlift and (not best or lf > best[1]): best = [L, round(lf, 2), s]
+        if best: out[w] = best
+    return out
 def emotions():
-    log("Эмоции по словам")
-    d = "/tmp/emo"; subprocess.run(["git", "clone", "--depth", "1", "https://github.com/searayeah/russian-sentiment-emotion-datasets", d], check=False)
-    files = [f for f in glob.glob(d + "/**/*", recursive=True) if f.endswith((".csv", ".tsv", ".jsonl", ".json"))]
-    log("  файлов: " + str(len(files)) + " (" + ", ".join(os.path.basename(f) for f in files[:10]) + ")")
+    log("Эмоции и тональность по словам")
     import csv; csv.field_size_limit(10**7)
-    wl = collections.defaultdict(collections.Counter); lab = collections.Counter(); n = 0
-    for f in files:
-        try:
-            if f.endswith((".csv", ".tsv")):
-                rows = list(itertools.islice(csv.DictReader(open(f, encoding="utf-8", errors="ignore"), delimiter="\t" if f.endswith(".tsv") else ","), 300000))
-            elif f.endswith(".jsonl"): rows = [json.loads(l) for l in open(f, encoding="utf-8") if l.strip()]
-            else:
-                j = json.load(open(f, encoding="utf-8")); rows = j if isinstance(j, list) else []
-        except Exception as e: log(f"  {os.path.basename(f)}: {e}"); continue
-        if not rows or not isinstance(rows[0], dict): continue
-        keys = [k for k in rows[0] if isinstance(k, str)]
-        log(f"  {os.path.basename(f)}: колонки {keys[:8]}; пример: {str(list(rows[0].values())[:3])[:120]}")
-        tk = next((k for k in keys if k.lower() in ("text", "sentence", "comment", "content", "review")), None)
-        lk = next((k for k in keys if k.lower() in ("label", "sentiment", "emotion", "labels", "class")), None)
-        EMO_COLS = [k for k in keys if k.lower() in ("joy", "sadness", "surprise", "fear", "anger", "no_emotion")]
-        if not tk or not (lk or EMO_COLS): continue
-        for r in rows:
-            if lk: L = str(r[lk])
-            else: L = ",".join(k for k in EMO_COLS if str(r.get(k)) in ("1", "1.0", "True")) or "none"
-            if not r.get(tk): continue
-
-            for lb in (L.split(",") if not lk else [L]):
-                for w in set(lem(x)[0] for x in words(str(r[tk])) if len(x) > 2): wl[w][lb] += 1
-                lab[lb] += 1
-            n += 1
-    log(f"  текстов: {n}; метки: {dict(lab.most_common(12))}")
-    if n:
-        tot = sum(lab.values()); out = {}
-        for w, c in wl.items():
-            s = sum(c.values())
-            if s < 8: continue
-            lift = {L: round((c[L] / s) / (lab[L] / tot), 2) for L in c if c[L] >= 4}
-            best = max(lift.items(), key=lambda x: x[1], default=None)
-            if best and best[1] >= 1.8: out[w] = [best[0], best[1], s]
-        dump("emo_words.json", out)
+    d = "/tmp/emo"; subprocess.run(["git", "clone", "--depth", "1", "https://github.com/searayeah/russian-sentiment-emotion-datasets", d], check=False)
+    by = {os.path.basename(f): f for f in glob.glob(d + "/**/*", recursive=True) if os.path.isfile(f)}
+    result = {}
+    # 1. CEDR: пять эмоций на предложение
+    wl = collections.defaultdict(collections.Counter); lab = collections.Counter()
+    for name in ("cedr-main-train.csv", "cedr-main-test.csv"):
+        if name not in by: continue
+        for r in csv.DictReader(open(by[name], encoding="utf-8", errors="ignore")):
+            ids = [int(x) for x in re.findall(r"\d", r.get("labels", ""))]
+            ls = [CEDR[i] for i in ids if i in CEDR] or ["none"]
+            ws = set(lem(x)[0] for x in words(r.get("text", "")) if len(x) > 2)
+            for L in ls:
+                lab[L] += 1
+                for w in ws: wl[w][L] += 1
+    log(f"  CEDR: {sum(lab.values())} меток {dict(lab)}")
+    result["emo"] = lift_table(wl, lab, 6, 2.2, skip=("none",))
+    # 2. RuSentiment: positive/negative
+    wl = collections.defaultdict(collections.Counter); lab = collections.Counter()
+    for name in ("rusentiment_random_posts.csv", "rusentiment_preselected_posts.csv", "rusentiment_test.csv"):
+        if name not in by: continue
+        for r in csv.DictReader(open(by[name], encoding="utf-8", errors="ignore")):
+            L = r.get("label"); 
+            if L not in ("positive", "negative", "neutral"): continue
+            lab[L] += 1
+            for w in set(lem(x)[0] for x in words(r.get("text", "")) if len(x) > 2): wl[w][L] += 1
+    log(f"  RuSentiment: {dict(lab)}")
+    result["sent"] = lift_table(wl, lab, 10, 1.7, skip=("neutral",))
+    # 3. словарь оценок слов (формат неизвестен заранее: пишем в отчёт первые строки и читаем «слово;среднее;…»)
+    if "words_all_full_rating.csv" in by:
+        raw = open(by["words_all_full_rating.csv"], encoding="utf-8", errors="ignore").read().splitlines()
+        log("  words_all_full_rating, первые строки: " + " || ".join(raw[:3])[:300])
+        rating = {}
+        for line in raw[1:]:
+            parts = [x.strip('"') for x in line.split(";")]
+            try: rating[lem(parts[0].lower())[0]] = float(parts[1].replace(",", "."))
+            except Exception: pass
+        log(f"  оценок слов: {len(rating)}"); result["rating"] = rating
+    log(f"  итого: эмоции {len(result.get('emo', {}))}, тональность {len(result.get('sent', {}))}")
+    dump("emo_words.json", result)
 
 for step in (recipes, convs, emotions):
     try: step()
