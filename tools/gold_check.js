@@ -2,7 +2,7 @@
 // Проверка и статистика золотого слоя: node tools/gold_check.js [--json out.jsonl]
 const fs = require("fs"), path = require("path");
 const dir = path.join(__dirname, "gold");
-const ACTS = new Set("ack mood advice question event topic clarify define andyou whatsup invite short meta vague".split(" "));
+const ACTS = new Set("ack mood advice question event topic clarify define andyou whatsup invite short meta vague offer".split(" "));
 const out = []; const errs = [];
 for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".txt")).sort()) {
   const blocks = fs.readFileSync(path.join(dir, f), "utf8").split(/\n\s*\n/);
