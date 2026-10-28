@@ -131,7 +131,7 @@ details.base input{font:inherit;font-size:16px;padding:9px 12px;border-radius:10
 /* chat */
 .chatbar{display:none;position:fixed;left:0;right:0;bottom:calc(62px + env(safe-area-inset-bottom,0px));z-index:14;background:var(--bg);border-top:1px solid var(--line);padding:8px max(12px,env(safe-area-inset-right,0px)) 8px max(12px,env(safe-area-inset-left,0px));flex-direction:column;gap:8px}
 body.inchat .chatbar{display:flex}
-body.inchat .wrap{padding-bottom:calc(200px + env(safe-area-inset-bottom,0px))}
+body.inchat .wrap{padding-bottom:calc(250px + env(safe-area-inset-bottom,0px))}
 body.inchat .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 .chatquick{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;max-width:560px;width:100%;margin:0 auto}
 .chatquick::-webkit-scrollbar{display:none}
@@ -140,9 +140,20 @@ body.inchat .toast{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 .chatform textarea{flex:1;font:inherit;font-size:16px;line-height:1.35;padding:10px 14px;border-radius:20px;border:1px solid var(--line);background:var(--surface);color:var(--ink);resize:none;max-height:120px;min-width:0}
 .send{width:44px;height:44px;border-radius:50%;border:0;background:var(--accent);color:var(--surface);display:grid;place-items:center;flex:none}
 .send svg{width:20px;height:20px}
-.chatlog{display:flex;flex-direction:column;gap:10px}
+.chatlog{display:flex;flex-direction:column;gap:10px;overflow-x:clip}
 .cday{align-self:center;font-size:.74rem;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin:6px 0}
-.msg{display:flex;flex-direction:column;gap:4px;max-width:86%}
+.msg{display:flex;flex-direction:column;gap:4px;max-width:86%;position:relative;touch-action:pan-y}
+.msg::after{content:"\21A9";position:absolute;right:-34px;top:calc(50% - 16px);width:28px;height:28px;border-radius:50%;background:var(--line);color:var(--ink);display:grid;place-items:center;font-size:16px;opacity:var(--p,0);transform:scale(calc(.5 + var(--p,0)*.5));pointer-events:none}
+.msg.me::after{right:-34px}
+.rq{display:block;border-left:3px solid var(--accent);padding:2px 8px;margin:0 0 6px;font-size:.82rem;line-height:1.3;opacity:.85;border-radius:3px;cursor:pointer}
+.rq b{display:block;font-size:.76rem}
+.msg.me .rq{border-left-color:var(--surface)}
+.replybar{display:flex;align-items:center;gap:8px;max-width:560px;width:100%;margin:0 auto;padding:6px 10px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
+.replybar[hidden]{display:none}
+.replybar .rq{flex:1;min-width:0;margin:0;opacity:1;cursor:default;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.replybar .rq span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.replybar button{flex:none;border:0;background:transparent;color:var(--muted);font-size:20px;line-height:1;padding:4px 8px}
+.msg.flash .bub{outline:2px solid var(--accent);outline-offset:2px;transition:outline .3s}
 .msg.me{align-self:flex-end;align-items:flex-end}
 .msg.bot{align-self:flex-start}
 .bub{padding:10px 13px;border-radius:16px;font-size:.95rem;line-height:1.42;overflow-wrap:anywhere}

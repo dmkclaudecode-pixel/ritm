@@ -789,7 +789,41 @@ const MAJOR = new Set(["strength","run","bike","swim","cardio","sport"]);
 const getChat = () => LS.get("chat") || [];
 function saveChat(arr){ LS.set("chat", arr.slice(-CHAT_MAX)); }
 function pushMsg(m){ const arr = getChat(); const msg = {id:uid(), at:Date.now(), ...m}; arr.push(msg); saveChat(arr); return msg; }
-const bot = (text, acts, extra) => pushMsg({who:"bot", text, acts:acts||null, ...(extra||{})});
+let lastLogAttached = 0;
+// первое сообщение бота после записи хранит ссылку на неё: на него можно ответить поправкой
+const bot = (text, acts, extra) => { const x = {...(extra||{})}; const LL = LS.get("lastLog");
+  if(LL && LL.at !== lastLogAttached && Date.now() - LL.at < 2500 && !x.log){ x.log = {key:LL.key, day:LL.day, ids:LL.ids}; lastLogAttached = LL.at; }
+  return pushMsg({who:"bot", text, acts:acts||null, ...x}); };
+/* ---------- ответ на конкретное сообщение (свайп влево, как в мессенджерах) ---------- */
+let replyId = null;
+const replyTarget = () => replyId ? (getChat().find(x => x.id === replyId) || null) : null;
+// сообщение бота, на которое отвечаем: выбранное свайпом или, как раньше, последнее
+function ctxBot(){
+  const t = replyTarget();
+  if(t && t.who === "bot") return {m:t, explicit:true};
+  const lb = getChat().filter(m => m.who === "bot").slice(-1)[0];
+  return {m:lb, explicit:false};
+}
+// запись, к которой относится сообщение: у бота — прикреплённая, у пользователя — из ответа бота сразу за ним
+function logRefOf(msg){
+  if(!msg) return null;
+  if(msg.who === "bot") return msg.log || null;
+  const arr = getChat(), i = arr.findIndex(x => x.id === msg.id);
+  for(let j = i + 1; j < arr.length && j <= i + 3; j++) if(arr[j].who === "bot" && arr[j].log) return arr[j].log;
+  return null;
+}
+const explicitLog = () => logRefOf(replyTarget());
+function renderReplyBar(){
+  const el = $("replyBar"), m = replyTarget();
+  if(!m){ el.hidden = true; el.innerHTML = ""; return; }
+  const tx = String(m.text || "").replace(/\s+/g, " ").trim();
+  el.hidden = false;
+  el.innerHTML = `<div class="rq"><b>${m.who === "me" ? "Вы" : "Ритм"}</b><span>${esc(tx.length > 90 ? tx.slice(0, 90) + "…" : tx)}</span></div><button type="button" id="replyX" aria-label="Отменить ответ">✕</button>`;
+}
+function setReply(id){
+  replyId = id || null; renderReplyBar();
+  if(id){ try{ navigator.vibrate && navigator.vibrate(12); }catch(e){} try{ $("chatInput").focus(); }catch(e){} }
+}
 // выбор фразы без повторов: помним последние варианты из каждого набора
 const PICKED = (() => { try{ return JSON.parse(localStorage.getItem("ritm:picked")||"{}"); }catch(e){ return {}; } })();
 const pick = arr => {
@@ -1092,7 +1126,7 @@ function respondRules(text){
   const A = RITM.analyze(text);
   if(A.crisis) return bot(CRISIS_TEXT, null, {kind:"crisis"});
   if(routineAnswer(text)) return;
-  if(A.correction && LS.get("lastLog") || (A.correction && A.correction.op === "what")) return handleCorrection(A.correction);
+  if(A.correction && (LS.get("lastLog") || explicitLog()) || (A.correction && A.correction.op === "what")) return handleCorrection(A.correction);
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
@@ -1182,8 +1216,8 @@ function respondRules(text){
     if(sl.length && !entries.length) return; }
   if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return bot(chattyReply(null));
   if(!entries.length){ ruleMiss = true; noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
-  const lastBot = getChat().filter(m=>m.who==="bot").slice(-1)[0];
-  const ctxKind = lastBot && Date.now() - lastBot.at < 3*3600*1000 ? lastBot.kind : null;
+  const cb0 = ctxBot(), lastBot = cb0.m;
+  const ctxKind = lastBot && (cb0.explicit || Date.now() - lastBot.at < 3*3600*1000) ? lastBot.kind : null;
 
   const past = [], future = [], unknown = [], negs = [], clar = [], fuzzies = [];
   for(const e of entries){
@@ -1350,8 +1384,8 @@ const CANCEL_RE = / (не будет|не пойду|не поеду|не пол
 const DONE_RE = / (сделал|сделала|сделано|готово|сходил|сходила|отзанимался|отзанималась|сделал уже|уже сделал|выполнил|выполнила|получилось|отлично прошло|норм прошло|хорошо прошло|прошло|был|была|позанимался|потренировался|потренил|отходил|отплавал|отбегал|закрыл) /;
 const STILL_RE = / (в силе|иду|пойду|буду|еду|поеду|собираюсь|все в силе|всё в силе|по плану|да|ага|конечно|ок|окей|угу|да конечно|естественно) /;
 function contextReply(text, s, A, pre){
-  const lastBot = getChat().filter(m => m.who === "bot").slice(-1)[0];
-  if(!lastBot || lastBot.chosen != null || Date.now() - lastBot.at > 3*3600*1000) return false;
+  const cb1 = ctxBot(), lastBot = cb1.m;
+  if(!lastBot || lastBot.chosen != null || (!cb1.explicit && Date.now() - lastBot.at > 3*3600*1000)) return false;
   const f = refOf(lastBot); if(!f) return false;
   // упомянуто другое занятие — это уже не ответ про этот пункт (замену разберёт общий разбор)
   if(pre.some(e => e.type && !e.fuzzy && e.type !== f.it.cat && TYPES[e.type].unit === "min")) return false;
@@ -1728,7 +1762,8 @@ function renderChat(){
   for(const m of view){
     const dd = new Date(m.at).toDateString();
     if(dd !== lastDay){ lastDay = dd; const d = new Date(m.at); html += `<div class="cday">${dd === new Date().toDateString() ? "Сегодня" : d.getDate()+" "+MONG[d.getMonth()]}</div>`; }
-    html += `<div class="msg ${m.who}"><div class="bub">${esc(m.text).replace(/\n/g,"<br>")}</div>`;
+    const rq = m.reply ? `<div class="rq" data-rq="${esc(m.reply.id)}"><b>${m.reply.who === "me" ? "Вы" : "Ритм"}</b>${esc(String(m.reply.text || "").length > 70 ? String(m.reply.text).slice(0, 70) + "…" : (m.reply.text || ""))}</div>` : "";
+    html += `<div class="msg ${m.who}" data-mid="${esc(m.id)}"><div class="bub">${rq}${esc(m.text).replace(/\n/g,"<br>")}</div>`;
     if(m.acts && m.acts.length) html += `<div class="macts">${m.acts.map((a,i) => m.chosen != null ? (i === m.chosen ? `<span class="chosen">${esc(a.l)}</span>` : "") : `<button class="btn" data-ma="${m.id}" data-mi="${i}">${esc(a.l)}</button>`).join("")}</div>`;
     html += `<span class="mt">${fmtTime(m.at)}</span></div>`;
   }
@@ -1841,7 +1876,8 @@ function handleStates(states){
 // last logged batch, for corrections
 function rememberLastLog(key, day, ids){ LS.set("lastLog", {key, day, ids, at:Date.now()}); }
 function lastLogEntries(){
-  const L = LS.get("lastLog"); if(!L || Date.now() - L.at > 24*3600*1000) return null;
+  const ex = explicitLog();
+  const L = ex ? {...ex, at:Date.now()} : LS.get("lastLog"); if(!L || Date.now() - L.at > 24*3600*1000) return null;
   const w = getWeek(L.key), day = (w.days[L.day]||{}); const es = (day.log||[]).filter(e => L.ids.includes(e.id));
   return es.length ? {L, w, es} : null;
 }
@@ -1889,9 +1925,9 @@ function handleCorrection(c){
 const JOKES = ["Почему штанга не ходит на вечеринки? Её всё время кто-то поднимает.","Мой план на день: проснуться. Дальше импровизация.","Пробежка утром — как будильник, только вместо кнопки «ещё 5 минут» есть только «ещё 5 километров».","Вода: 0 калорий, 100% пользы и ни одного побочного эффекта, кроме походов в туалет."];
 function handleSmall(small){
   const h = new Date().getHours();
-  const lastBot = getChat().filter(m=>m.who==="bot").slice(-1)[0];
+  const cb2 = ctxBot(), lastBot = cb2.m;
   if(small.includes("yes") || small.includes("no")){
-    if(lastBot && lastBot.acts && lastBot.chosen == null && Date.now() - lastBot.at < 60*60*1000){
+    if(lastBot && lastBot.acts && lastBot.chosen == null && (cb2.explicit || Date.now() - lastBot.at < 60*60*1000)){
       if(small.includes("yes")){ const i = lastBot.acts.findIndex(a => !["keep","rskip","typechoose"].includes(a.a.op)); if(i >= 0){ runAction(lastBot.id, i); return true; } }
       else { const i = lastBot.acts.findIndex(a => a.a.op === "keep" || a.a.op === "rskip" || a.a.op === "notact"); if(i >= 0){ runAction(lastBot.id, i); return true; } const arr = getChat(); const m = arr.find(x=>x.id===lastBot.id); m.chosen = -1; saveChat(arr); bot("Хорошо, не буду."); return true; }
     }
@@ -2299,8 +2335,10 @@ let ruleMiss = false;
 function handleUser(text, pushMe){
   text = (text||"").trim(); if(!text) return;
   ciNoteAnswer();
-  if(pushMe !== false) pushMsg({who:"me", text});
+  const tg = replyTarget();
+  if(pushMe !== false) pushMsg({who:"me", text, ...(tg ? {reply:{id:tg.id, who:tg.who, text:String(tg.text || "").slice(0, 140)}} : {})});
   try{ respond(text); }catch(err){ console.error(err); bot("Что-то пошло не так, попробуй написать иначе."); }
+  if(replyId){ replyId = null; renderReplyBar(); }
   render(); scrollChat();
 }
 try{ localStorage.removeItem("ritm:claudeKey"); localStorage.removeItem("ritm:claudeUsage"); }catch(e){}
@@ -2374,9 +2412,12 @@ function askRoutine(force){
   return true;
 }
 function routineAnswer(text){
-  const r = getRoutine(); if(!r.pending) return false;
-  const last = getChat().filter(m=>m.who==="bot").slice(-1)[0];
-  if(!last || last.kind !== "routine:" + r.pending || Date.now() - last.at > 12*3600*1000) return false;
+  const r = getRoutine(), cb3 = ctxBot();
+  // ответ свайпом на вопрос про распорядок — это ответ именно на него, даже если он не последний
+  if(cb3.explicit && /^routine:/.test(cb3.m.kind || "") && ROUTINE_QS.some(x => x.k === cb3.m.kind.slice(8))) r.pending = cb3.m.kind.slice(8);
+  if(!r.pending) return false;
+  const last = cb3.m;
+  if(!last || last.kind !== "routine:" + r.pending || (!cb3.explicit && Date.now() - last.at > 12*3600*1000)) return false;
   const s = nrm(text);
   if(/\?/.test(text) || /^ (что|какой|какие|как|сколько|покажи|перенеси|убери|отмени|привет|спасибо) /.test(s)) return false;
   if(/ (пропуст|не знаю|потом|не хочу|не скажу|позже) /.test(s)){ r.asked[r.pending] = true; r.pending = null; saveRoutine(r); bot("Хорошо, пропустим. Если захочешь, расскажи потом: «я работаю с 10 до 19», «встаю в 8»."); return true; }
@@ -3335,6 +3376,34 @@ pullNative();
 if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); render(); }
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
+$("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) setReply(null); });
+(function swipeReply(){
+  const log = $("chatLog"); let el = null, sx = 0, sy = 0, dx = 0, mode = 0;   // mode: 0 ждём, 1 свайп, -1 это прокрутка
+  const TH = 56;
+  const reset = animate => { if(!el) return; const x = el; x.style.transition = animate ? "transform .18s" : ""; x.style.transform = ""; x.style.setProperty("--p", 0); if(animate) setTimeout(() => { x.style.transition = ""; }, 220); el = null; };
+  log.addEventListener("touchstart", e => {
+    const m = e.target.closest(".msg"); if(!m || e.touches.length !== 1) return;
+    el = m; sx = e.touches[0].clientX; sy = e.touches[0].clientY; dx = 0; mode = 0;
+  }, {passive:true});
+  log.addEventListener("touchmove", e => {
+    if(!el || mode < 0) return;
+    const t = e.touches[0], ddx = t.clientX - sx, ddy = t.clientY - sy;
+    if(mode === 0){
+      if(Math.abs(ddy) > 10 && Math.abs(ddy) >= Math.abs(ddx)){ mode = -1; reset(false); return; }
+      if(ddx < -10 && Math.abs(ddx) > Math.abs(ddy) * 1.3) mode = 1; else return;
+    }
+    dx = Math.max(-96, Math.min(0, ddx)); const k = Math.min(1, -dx / TH);
+    el.style.transform = `translateX(${dx}px)`; el.style.setProperty("--p", k);
+    if(e.cancelable) e.preventDefault();
+  }, {passive:false});
+  const end = () => { if(!el) return; const id = el.dataset.mid, hit = mode === 1 && dx <= -TH; reset(true); mode = 0; if(hit && id) setReply(id); };
+  log.addEventListener("touchend", end, {passive:true});
+  log.addEventListener("touchcancel", () => { reset(true); mode = 0; }, {passive:true});
+  // на компьютере — двойной щелчок по сообщению
+  log.addEventListener("dblclick", e => { const m = e.target.closest(".msg"); if(m && m.dataset.mid) setReply(m.dataset.mid); });
+  // тап по цитате — прыжок к исходному сообщению
+  log.addEventListener("click", e => { const q = e.target.closest("[data-rq]"); if(!q) return; const o = log.querySelector(`[data-mid="${CSS.escape(q.dataset.rq)}"]`); if(o){ o.scrollIntoView({block:"center", behavior:"smooth"}); o.classList.add("flash"); setTimeout(() => o.classList.remove("flash"), 1200); } });
+})();
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 // крючок для автотестов (без влияния на работу)
 window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
