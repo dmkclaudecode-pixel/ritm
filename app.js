@@ -958,6 +958,11 @@ function runAction(msgId, i){
   else if(a.op === "walkNo"){ const b = LS.get("walkNo") || {}; b[a.hour] = (b[a.hour]||0) + 1; LS.set("walkNo", b); reply = (b[a.hour] >= 2 ? "Понял, в это время больше не буду спрашивать." : "Понял, не записываю. Если такое повторится в это время ещё раз, перестану спрашивать."); }
   else if(a.op === "rhythmOff"){ settings.rhythm = false; settings.morning = a.m; settings.evening = a.e; persistSettings(); if(NATIVE && settings.notify) try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} reply = `Вернул ${a.m} и ${a.e}. Сам их больше менять не буду.`; }
   else if(a.op === "openMiss"){ tab = "more"; render(); setTimeout(() => { const el = $("missCard"); if(el) el.scrollIntoView({behavior:"smooth", block:"start"}); }, 50); reply = "Открыл список. Подскажите, что это было: «Занятие…» или «Не занятие»."; }
+  else if(a.op === "nudgeWork"){ const hist = nudgeHistory(); const n = hist.find(x => x.id === a.id); if(n){ nativeNudgeReply(n.id, "work", "", 0); const wm = LS.get("workMarks") || {}, dk = iso(new Date()); wm[dk] = {...(wm[dk] || {}), [n.pkg]:1}; LS.set("workMarks", wm); } reply = `Понял, ${a.label} по работе. Сегодня про него не напоминаю.`; }
+  else if(a.op === "workOkUndo"){ if(settings.workOk) delete settings.workOk[a.pkg]; persistSettings(); syncWatch(); reply = `Хорошо, ${a.label} в рабочее время снова проверяю.`; }
+  else if(a.op === "appWork"){ const ty = LS.get("appTypes") || {}; ty[a.pkg] = "work"; LS.set("appTypes", ty); syncWatch(); reply = `Теперь ${a.label} — это «Работа и учёба», в развлечения не считаю. Поменять можно в разделе приложений.`; }
+  else if(a.op === "appLimit"){ settings.appLimit = {...(settings.appLimit || {}), [a.pkg]: a.min}; persistSettings(); syncWatch(); reply = `Для ${a.label} теперь напоминаю после ${a.min} минут подряд.`; }
+  else if(a.op === "watchLess"){ settings.watchMin = Math.min(120, (settings.watchMin ?? 40) + 20); persistSettings(); syncWatch(); reply = `Теперь напоминаю про приложения реже: после ${settings.watchMin} минут подряд.`; }
   else if(a.op === "habitNo"){ const hn = LS.get("habitNo") || {}; hn[a.type] = (hn[a.type] || 0) + 1; LS.set("habitNo", hn); reply = hn[a.type] >= 3 ? "Понял, про это больше не спрашиваю." : "Хорошо, не записываю."; }
   else if(a.op === "habitYes"){ const hn = LS.get("habitNo") || {}; hn[a.type] = 0; LS.set("habitNo", hn); const e = {type:a.type, name:a.name, text:a.name, dayOffset:0, time:a.time}; fillDefaults(e); logFromChat([e]); reply = `Записал: ${lc(a.name)} в ${a.time}.`; }
   else if(a.op === "logQuick"){ const e = {type:a.type, name:a.name, text:a.text || a.name, dayOffset:0}; fillDefaults(e); logFromChat([e]); reply = `Записал: ${lc(a.name)} (${describe(e) || fmtDur(e.min || 0)}).`; }
@@ -1130,6 +1135,7 @@ function respondRules(text){
   if(/ (что ты (обо|про) мне знаешь|мой распорядок|мой график|что знаешь обо мне) /.test(s)) return bot(routineSummary());
   if(/ (расскажу о себе|давай познакомимся|спроси меня|задай вопросы|узнай меня) /.test(s)){ if(!askRoutine(true)) bot(routineSummary()); return; }
   const pre = RITM.parse(text);
+  if(nudgeChatReply(text, s, pre)) return;
   if(followUp(text, s, pre)) return;
   // «а вода из кофе не считается?» — вопрос о правилах подсчёта
   if(/ (считается|считаются|засчитывается|учитывается|учитываешь|считаешь|идет в счет|входит в норму) /.test(s) && / (кофе|чай|чая|напит\S*|сок|суп\S*|кофеин\S*) /.test(s) && / (вод\S*|жидкост\S*|норм\S*|воды) /.test(s)){
@@ -1745,10 +1751,10 @@ function pullNative(){
   for(const x of all){
     if(x.f){ let ref = null; const tm = /«(.+?)»/.exec(x.f.text || "");
       if(tm && /^(before|after)$/.test(x.f.kind)){ const fd = new Date(x.t), fk = dateKeyOf(fd), fdi = dayIdxOf(fd), it = getWeek(fk).items.find(i => i.day === fdi && i.t === tm[1]); if(it) ref = {key:fk, id:it.id}; }
-      pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t, ...(ref ? {ref} : {})}); ciNoteFired(x.f); }
+      pushMsg({who:"bot", text:x.f.text, kind:x.f.kind, at:x.t, ...(ref ? {ref} : {}), ...(x.f.nid ? {nid:x.f.nid} : {})}); ciNoteFired(x.f); }
     else { pushMsg({who:"me", text:x.m.text, at:x.m.at}); if(x.m.ctx !== "nudge") handleUser(x.m.text, false); }
   }
-  if(all.length) render();
+  if(all.length){ try{ nudgeReview(); }catch(e){ console.error(e); } render(); }
 }
 
 // ---------- chat screen ----------
@@ -2103,6 +2109,8 @@ function personalInsights(){
   // вода → энергия
   r = compare(days, x => x.water == null ? null : x.water >= settings.waterGoal * 0.8, x => x.energy, 3, [SLP]);
   if(r && r.diff >= 0.5) add(r.diff*40, `Когда ты пьёшь достаточно воды, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "water");
+  { const nf = LS.get("nudgeFeel") || {}, top = Object.entries(nf).sort((x, y) => y[1] - x[1])[0]; r = null;
+    if(top && top[1] >= 3) add(12, `Когда ты залипаешь в телефоне, чаще всего причина — ${FEEL_WORD[top[0]]} (${top[1]} раз по твоим ответам). Лучше работать с ней, чем с лимитами.`, "screen"); }
   // режим: разброс времени отбоя → энергия
   r = null;
   const beds = days.filter(x => x.bedM != null).map(x => x.bedM);
@@ -2528,6 +2536,122 @@ function applyRecurring(key, force){
   if(changed) saveWeek(key, w); LS.set(flag, true);
 }
 
+/* ---------- ответы на напоминания о телефоне: реакция, выводы, поправки ---------- */
+const NUDGE_KINDS = new Set(["nudge", "nudge-result"]);
+function nudgeContext(){
+  const cb = ctxBot(); let m = cb.m;
+  if(!NATIVE) return null;
+  // без выбора сообщения: ближайшее напоминание выше по чату, если после него вы ещё ничего не писали
+  if(!cb.explicit){ const arr = getChat(); m = null;
+    let i0 = arr.length - 1; if(arr[i0] && arr[i0].who === "me") i0--;   // последнее «я» — это сам ответ
+    for(let i = i0; i >= 0 && i >= i0 - 5; i--){ const x = arr[i]; if(x.who === "me") break; if(NUDGE_KINDS.has(x.kind)){ m = x; break; } } }
+  if(!m || !NUDGE_KINDS.has(m.kind)) return null;
+  if(!cb.explicit && Date.now() - m.at > 60*60*1000) return null;
+  const hist = nudgeHistory();
+  const rec = (m.nid && hist.find(n => n.id === m.nid)) || hist.slice().reverse().find(n => Math.abs(n.at - m.at) < 3*60000) || null;
+  return rec ? {m, rec, explicit:cb.explicit} : null;
+}
+function classifyNudgeReply(s, rec){
+  const mm = / (\d{1,3}) ?мин/.exec(s);
+  const min = mm ? Math.min(120, +mm[1]) : / (пять) минут /.test(s) ? 5 : / (десять) минут /.test(s) ? 10 : / (пятнадцать) минут /.test(s) ? 15 : / (полчаса|пол часа) /.test(s) ? 30 : / (час|часик) /.test(s) ? 60 : 0;
+  if(/ (зачем|почему|с чего|что значит|откуда ты знаешь|как ты узнал|как ты видишь|на каком основании) /.test(s)) return {kind:"why"};
+  if(/ (не по работе|не по делу|не для работы|не работа|не рабочее|не рабочий) /.test(s)) return {kind:"comply"};
+  if(/ (по работе|по делу|для работы|рабоч\S+|работаю|по учебе|учусь|учеба|созвон\S*|митинг\S*|для дела|нужно для|надо для|по заданию|клиент\S*|заказчик\S*|документац\S*|читаю статью) /.test(s)) return {kind:"work"};
+  if(rec && rec.reason === "work" && /^ (да|ага|угу|конечно|точно|естественно|ну да) /.test(s)) return {kind:"work"};
+  if(/ (жду|в очереди|в метро|еду|в дороге|в транспорте|в пробке|в поезде|в самолете|у врача|в приемной|в такси) /.test(s)) return {kind:"wait", min:min || 45};
+  if(/ (устал\S*|скучно|скука|тревож\S*|стресс\S*|нервнич\S*|не могу уснуть|не спится|нет сил|грустно|тоскливо|одиноко|тяжело|выгорел\S*|заняться нечем|не знаю чем заняться|лень) /.test(s)){
+    const f = / (скучно|скука|заняться нечем|не знаю чем заняться) /.test(s) ? "bored" : / (тревож\S*|стресс\S*|нервнич\S*) /.test(s) ? "stress" : / (не могу уснуть|не спится) /.test(s) ? "sleepless" : / (грустно|тоскливо|одиноко) /.test(s) ? "sad" : "tired";
+    return {kind:"feeling", feel:f};
+  }
+  if(min || / (отстань|не мешай|не хочу|потом|еще чуть|еще немного|еще минут\S*|дай еще|погоди|подожди|позже|не сейчас) /.test(s)) return {kind:"refuse", min:min || 15};
+  if(/ (ладно|ок|окей|хорошо|понял|поняла|выключаю|закрываю|закрою|убираю|ухожу|сейчас закрою|договорились|да|верно|правда|согласен|согласна|точно|ты прав\S*|завязываю|хватит|нет) /.test(s)) return {kind:"comply"};
+  return {kind:null};
+}
+const FEEL_WORD = {tired:"усталость", bored:"скука", stress:"тревога и стресс", sleepless:"бессонница", sad:"грусть"};
+function nativeNudgeReply(id, kind, text, snooze){ try{ return NATIVE.nudgeReply ? NATIVE.nudgeReply(id, kind, text, snooze || 0) : ""; }catch(e){ return ""; } }
+function nudgeChatReply(text, s, pre){
+  const cx = nudgeContext(); if(!cx) return false;
+  const c = classifyNudgeReply(s, cx.rec); if(!c.kind) return false;
+  const nw = s.trim().split(/\s+/).length;
+  // без явного «ответа» берём только короткие и понятные реплики, иначе это обычная запись
+  if(!cx.explicit && (nw > 10 || pre.some(e => e.type && e.min && c.kind !== "refuse" && c.kind !== "wait" && !e.fuzzy && !/(работ|учеб|учус)/.test(s)))) return false;
+  const rec = cx.rec, id = rec.id, label = rec.label || "приложение", pkg = rec.pkg;
+  const hm = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+  if(c.kind === "why"){
+    const lim = appInfo({p:pkg}).limit, why = ({
+      session:`Ты был в ${label} около ${rec.min} минут за последний час, а мой порог для него — ${lim || settings.watchMin || 40} минут подряд.`,
+      late:`Было уже за ${settings.screensOff}, а ты ${rec.min} минут сидел в ${label}. Экран перед сном сдвигает засыпание.`,
+      work:`Сейчас рабочее время, а ${label} был открыт ${rec.min} минут из последнего часа.`,
+      day:`Развлекательных экранов за сегодня набралось больше твоего лимита (${fmtDur(settings.screenLimit)}).`
+    })[rec.reason] || `В ${label} набралось ${rec.min} минут.`;
+    bot(why + " Если это неверно или слишком строго, скажи, и я поправлю.", [act("Это по работе", {op:"nudgeWork", id, label}), act(`Напоминать реже`, {op:"watchLess"}), act("Понятно", {op:"keep"})]);
+    return true;
+  }
+  if(c.kind === "work"){
+    nativeNudgeReply(id, "work", text, 0);
+    const wm = LS.get("workMarks") || {}, dk = iso(new Date()); wm[dk] = {...(wm[dk] || {}), [pkg]:1}; LS.set("workMarks", wm);
+    bot(`Понял, ${label} по работе. Сегодня про него не напоминаю и в развлечения не считаю.`);
+    try{ nudgeReview(); }catch(e){}
+    return true;
+  }
+  if(c.kind === "wait"){
+    nativeNudgeReply(id, "wait", text, c.min);
+    bot(`Понял, в дороге или в ожидании можно. Проверю через ${c.min} минут (около ${hm(new Date(Date.now() + c.min*60000))}), а не через 15.`);
+    return true;
+  }
+  if(c.kind === "refuse"){
+    nativeNudgeReply(id, "refuse", text, c.min);
+    bot(`Хорошо, ещё ${c.min} минут. Загляну около ${hm(new Date(Date.now() + c.min*60000))} и посмотрю, закрыл ли ты ${label}.`);
+    return true;
+  }
+  if(c.kind === "comply"){
+    nativeNudgeReply(id, "comply", text, 0);
+    bot(`Договорились. Загляну через 15 минут. Если получится без ${label}, я это отмечу.`);
+    return true;
+  }
+  if(c.kind === "feeling"){
+    nativeNudgeReply(id, "feeling", text, 20);
+    const nf = LS.get("nudgeFeel") || {}; nf[c.feel] = (nf[c.feel] || 0) + 1; LS.set("nudgeFeel", nf);
+    const tip = ({tired:"Когда сил нет, телефон кажется отдыхом, но не восстанавливает. Лучше 5 минут без экрана: вода, окно, пара вдохов.", bored:"От скуки лента затягивает сильнее всего. Выбери что-то из короткого: прогулка на 10 минут, звонок близким, музыка и уборка.", stress:"В тревоге лента только подкидывает новые поводы. Попробуй 2 минуты медленного дыхания, выдох подлиннее вдоха, а потом решим, что с этим делать.", sleepless:"Экран ночью ещё сильнее отодвигает сон. Отложи телефон, притуши свет, лучше бумажная книга или тихая музыка.", sad:"Если грустно, поговорить с живым человеком лучше, чем листать ленту. Хочешь, я напомню написать кому-то из близких?"})[c.feel];
+    bot(`Спасибо, что сказал. ${tip} Проверю через 20 минут, как ты.`);
+    if(nf[c.feel] === 3) bot(`Заметил: уже ${nf[c.feel]} раза, когда ты залипаешь в телефоне, причина — ${FEEL_WORD[c.feel]}. Это важнее, чем сами минуты: займёмся причиной, а не лимитами.`);
+    return true;
+  }
+  return false;
+}
+// выводы и поправки по истории реакций на напоминания
+function nudgeReview(){
+  if(!NATIVE || !NATIVE.nudges) return false;
+  const hist = nudgeHistory().filter(n => n.at > Date.now() - 30*864e5), P = LS.get("nudgeProposed") || {}, now = Date.now();
+  const by = {};
+  for(const n of hist){ const o = by[n.pkg] = by[n.pkg] || {label:n.label, workDays:new Set(), work:0, ignored7:0};
+    if(n.response === "work"){ o.work++; o.workDays.add(iso(new Date(n.at))); }
+    if(n.outcome === "ignored" && n.at > now - 7*864e5) o.ignored7++; }
+  const seen = (k, days) => P[k] && now - P[k] < days*864e5, mark = k => { P[k] = now; LS.set("nudgeProposed", P); };
+  for(const [pkg, o] of Object.entries(by)){
+    // «по работе» минимум в два разных дня: в рабочее время это приложение больше не считаем отвлечением
+    if(o.workDays.size >= 2 && !(settings.workOk && settings.workOk[pkg]) && !seen("ok:" + pkg, 30)){
+      settings.workOk = {...(settings.workOk || {}), [pkg]:1}; persistSettings(); mark("ok:" + pkg); syncWatch();
+      bot(`Ты уже ${o.workDays.size} ${plural(o.workDays.size, "раз", "раза", "раз")} в разные дни говорил, что ${o.label} по работе. Запомнил: в рабочее время про него больше не спрашиваю «по делу ли».`, [act("Вернуть вопросы", {op:"workOkUndo", pkg, label:o.label}), act("Хорошо", {op:"keep"})]);
+      return true;
+    }
+    // часто «по работе» и приложение числится развлечением: предлагаем сменить тип
+    if(o.work >= 4 && appGroup({p:pkg}) !== "work" && !seen("type:" + pkg, 30)){
+      mark("type:" + pkg);
+      bot(`${o.label} ты уже ${o.work} ${plural(o.work, "раз", "раза", "раз")} называл рабочим. Считать его работой и учёбой, а не развлечением? Тогда его минуты уйдут из экранного времени.`, [act("Да, это работа", {op:"appWork", pkg, label:o.label}), act("Нет, оставить", {op:"keep"})]);
+      return true;
+    }
+    // напоминания не действуют: предлагаем поменять лимит
+    if(o.ignored7 >= 3 && !seen("ign:" + pkg, 5)){
+      mark("ign:" + pkg);
+      const cur = appInfo({p:pkg}).limit || settings.watchMin || 40, up = Math.min(180, cur + 20);
+      bot(`Про ${o.label} я напомнил уже ${o.ignored7} ${plural(o.ignored7, "раз", "раза", "раз")} за неделю, и ты оставался в нём. Значит, либо порог слишком строгий, либо напоминания не работают. Что поменять?`,
+        [act(`Порог ${up} минут`, {op:"appLimit", pkg, label:o.label, min:up}), act("Напоминать реже", {op:"watchLess"}), act("Оставить как есть", {op:"keep"})]);
+      return true;
+    }
+  }
+  return false;
+}
 /* ---------- app watcher settings & history ---------- */
 let lastWatchSync = "";
 function syncWatch(){
@@ -2541,7 +2665,7 @@ function syncWatch(){
   const seen = new Map(); for(const p of Object.keys(KNOWN_APPS)) seen.set(p, {p, c:-1});
   for(const day of Object.values(health.apps||{})) for(const a of day.apps||[]) seen.set(a.p, a);
   for(const a of seen.values()){ const inf = appInfo(a); limits[a.p] = inf.limit; notes[a.p] = inf.why; if(inf.limit > 0) ent.add(a.p); else ent.delete(a.p); }
-  const cfg = {limits, notes, enabled: !!(settings.notify && (settings.watchMin ?? 40) > 0 && health.usage), sessionMin: settings.watchMin ?? 40, dayLimit: settings.screenLimit, ent:[...ent], nonEnt,
+  const cfg = {limits, notes, enabled: !!(settings.notify && (settings.watchMin ?? 40) > 0 && health.usage), sessionMin: settings.watchMin ?? 40, dayLimit: settings.screenLimit, ent:[...ent], nonEnt, workOk:Object.keys(settings.workOk || {}),
     wake: wakeFor(todayI()), off: settings.screensOff, workDays: Array.isArray(r.workDays) ? r.workDays : [], workFrom: r.work ? r.work.from : "", workTo: r.work ? r.work.to : ""};
   const s = JSON.stringify(cfg); if(s !== lastWatchSync){ lastWatchSync = s; try{ NATIVE.setWatch(s); }catch(e){} }
 }
@@ -2587,7 +2711,8 @@ function appInfo(a){
   const overridden = (LS.get("appTypes")||{})[a.p];
   const risk = own && !overridden ? own[0] : base.risk, why = own && !overridden ? own[1] : base.why;
   const b = settings.watchMin ?? 40;
-  const limit = risk === "high" ? Math.max(20, b - 10) : risk === "medium" ? b : risk === "low" ? b * 2 : 0;
+  let limit = risk === "high" ? Math.max(20, b - 10) : risk === "medium" ? b : risk === "low" ? b * 2 : 0;
+  const ov = settings.appLimit && settings.appLimit[a.p]; if(ov && limit > 0) limit = ov;
   return {group:g, risk, why, limit};
 }
 /* ---------- screen time by app (Android app, usage access) ---------- */
@@ -2744,7 +2869,8 @@ const offHour = () => { const [h,m] = settings.screensOff.split(":").map(Number)
 function phoneDay(ds){
   const d = appsFor(ds); if(!d) return null;
   const by = {}; let ent = 0;
-  const apps = (d.apps||[]).map(a => ({...a, grp:appGroup(a)}));
+  const wm = (LS.get("workMarks") || {})[ds] || {};   // приложения, про которые вы сказали «это по работе»
+  const apps = (d.apps||[]).map(a => ({...a, grp: wm[a.p] ? "work" : appGroup(a)}));
   for(const a of apps){ by[a.grp] = (by[a.grp]||0) + a.m; if(APP_GROUPS[a.grp] && APP_GROUPS[a.grp].ent) ent += a.m; }
   const off = offHour(), hrs = d.hours || [];
   let late = 0; for(let h=0; h<24; h++){ const v = hrs[h]||0; if(h+1 <= off) continue; late += h >= off ? v : v * (h+1-off); }
@@ -3406,7 +3532,7 @@ $("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) s
 })();
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 // крючок для автотестов (без влияния на работу)
-window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
+window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, nudgeReview, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
 // поправка записи одним касанием: сколько на самом деле
 document.addEventListener("click", e => {
   const t = e.target.closest && e.target.closest("[data-ledit]"); if(t){

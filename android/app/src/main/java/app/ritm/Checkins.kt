@@ -139,10 +139,10 @@ object Checkins {
         try { NotificationManagerCompat.from(ctx).notify(nid, done) } catch (e: SecurityException) { }
     }
 
-    fun addBot(ctx: Context, text: String, kind: String) = synchronized(lock) {
+    fun addBot(ctx: Context, text: String, kind: String, nid: String? = null) = synchronized(lock) {
         val arr = try { JSONArray(prefs(ctx).getString("fired", "[]")) } catch (e: Exception) { JSONArray() }
         val now = System.currentTimeMillis()
-        arr.put(JSONObject().put("id", "b$now").put("at", now).put("firedAt", now).put("text", text).put("kind", kind))
+        arr.put(JSONObject().put("id", "b$now").put("at", now).put("firedAt", now).put("text", text).put("kind", kind).also { if (nid != null) it.put("nid", nid) })
         prefs(ctx).edit().putString("fired", arr.toString()).apply()
     }
 

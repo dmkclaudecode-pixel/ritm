@@ -89,6 +89,13 @@ object Watcher {
         return Pair(total.mapValues { it.value / 60000 }, current)
     }
 
+    /** Приложение, про которое пользователь несколько раз сказал «это по работе»: в рабочее время не придираемся. */
+    private fun workOk(c: JSONObject, pkg: String): Boolean {
+        val arr = c.optJSONArray("workOk") ?: return false
+        for (i in 0 until arr.length()) if (arr.getString(i) == pkg) return true
+        return false
+    }
+
     private fun inWindow(c: JSONObject): Boolean {
         val now = LocalTime.now()
         val wake = try { LocalTime.parse(c.optString("wake", "08:00")) } catch (e: Exception) { LocalTime.of(8, 0) }
@@ -133,7 +140,7 @@ object Watcher {
         when {
             min >= lim -> { reason = "session"; text = "Друг, ты в $name уже около $min минут за последний час. " + (if (note.isNotEmpty()) "$note " else "") + "Давай сделаем перерыв: встань, попей воды, пройдись пару минут." }
             late && min >= 15 -> { reason = "late"; text = "Уже ${nowT.toString().take(5)}, а ты в $name ($min мин за последний час). Экран перед сном мешает заснуть. Завязываем?" }
-            atWork && min >= 20 -> { reason = "work"; text = "Ты же сейчас на работе, а в $name уже $min минут. Это точно по делу?" }
+            atWork && min >= 20 && !workOk(c, pkg) -> { reason = "work"; text = "Ты же сейчас на работе, а в $name уже $min минут. Это точно по делу?" }
             entToday >= dayLimit && min >= 15 && pkg == current -> { reason = "day"; text = "На развлечения сегодня уже ${entToday / 60} ч ${entToday % 60} мин при лимите ${dayLimit / 60} ч. $name опять открыт. Может, на сегодня хватит?" }
             else -> return
         }
@@ -144,7 +151,7 @@ object Watcher {
             val trimmed = JSONArray(); val from = maxOf(0, arr.length() - 150); for (i in from until arr.length()) trimmed.put(arr.get(i))
             p.edit().putString("nudges", trimmed.toString()).putLong("lastNudge", now).putString("activeNudge", id).apply()
         }
-        Checkins.addBot(ctx, text, "nudge")
+        Checkins.addBot(ctx, text, "nudge", id)
         show(ctx, id, "Перерыв?", text)
         ctx.getSystemService(AlarmManager::class.java)
             .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, now + FOLLOW_UP, pi(ctx, 51, "follow") { it.putExtra("id", id) })
@@ -212,12 +219,42 @@ object Watcher {
                 prefs(ctx).edit().putString("watchExempt", ex.toString()).apply()
                 update(ctx, id) { it.put("outcome", "exempt") }
                 val msg = "Понял, это по работе. Сегодня больше не трогаю тебя из-за $name."
-                Checkins.addBot(ctx, msg, "nudge-result"); info(ctx, "Понял", msg)
+                Checkins.addBot(ctx, msg, "nudge-result", id); info(ctx, "Понял", msg)
             }
-            "comply" -> { val msg = "Договорились! Загляну через 15 минут."; Checkins.addBot(ctx, msg, "nudge-result"); info(ctx, "Договорились", msg) }
-            "refuse" -> { val msg = "Ладно, ещё немного, но я проверю через 15 минут."; Checkins.addBot(ctx, msg, "nudge-result"); info(ctx, "Хорошо", msg) }
-            else -> { val msg = "Записал. Проверю через 15 минут, как дела с $name."; Checkins.addBot(ctx, msg, "nudge-result"); info(ctx, "Записал", msg) }
+            "comply" -> { val msg = "Договорились! Загляну через 15 минут."; Checkins.addBot(ctx, msg, "nudge-result", id); info(ctx, "Договорились", msg) }
+            "refuse" -> {
+                val mm = Regex("(\\d{1,3})\\s*мин").find(text ?: "")?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(3, 120) ?: 15
+                ctx.getSystemService(AlarmManager::class.java).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + mm * 60_000L, pi(ctx, 51, "follow") { it.putExtra("id", id) })
+                val msg = "Ладно, ещё немного, но я проверю через $mm минут."; Checkins.addBot(ctx, msg, "nudge-result", id); info(ctx, "Хорошо", msg) }
+            else -> { val msg = "Записал. Проверю через 15 минут, как дела с $name."; Checkins.addBot(ctx, msg, "nudge-result", id); info(ctx, "Записал", msg) }
         }
+    }
+
+    fun find(ctx: Context, id: String): JSONObject? {
+        val arr = history(ctx)
+        for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); if (o.optString("id") == id) return o }
+        return null
+    }
+
+    /** Ответ из чата приложения: фиксируем реакцию, исключаем приложение на сегодня или переносим проверку. Текст в чат пишет JS. */
+    fun applyReply(ctx: Context, id: String, kind: String, text: String, snoozeMin: Int): String {
+        val rec = update(ctx, id) { it.put("response", kind); if (text.isNotEmpty()) it.put("reply", text) } ?: return ""
+        when (kind) {
+            "work" -> {
+                val ex = try { JSONObject(prefs(ctx).getString("watchExempt", "{}")) } catch (e: Exception) { JSONObject() }
+                ex.put(rec.optString("pkg"), LocalDate.now().toString())
+                prefs(ctx).edit().putString("watchExempt", ex.toString()).apply()
+                update(ctx, id) { it.put("outcome", "exempt") }
+            }
+            "comply", "refuse", "wait", "feeling" -> {
+                val delay = (if (snoozeMin > 0) snoozeMin else if (kind == "feeling") 20 else 15) * 60_000L
+                update(ctx, id) { it.put("outcome", "") }
+                ctx.getSystemService(AlarmManager::class.java)
+                    .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + delay, pi(ctx, 51, "follow") { it.putExtra("id", id) })
+            }
+        }
+        try { NotificationManagerCompat.from(ctx).cancel(NID) } catch (e: SecurityException) { }
+        return find(ctx, id)?.toString() ?: ""
     }
 
     fun followUp(ctx: Context, id: String) {
@@ -231,11 +268,11 @@ object Watcher {
             update(ctx, id) { it.put("outcome", "ignored").put("after", m) }
             val msg = if (promised) "Эй, ты обещал выключить, а $name всё ещё открыт: $m минут после нашего разговора. Давай всё-таки перерыв?"
                       else "Вижу, $name всё ещё открыт: ещё $m минут. Давай всё-таки сделаем перерыв?"
-            Checkins.addBot(ctx, msg, "nudge-result")
+            Checkins.addBot(ctx, msg, "nudge-result", id)
             show(ctx, id + "f", "Всё ещё в $name", msg)
         } else {
             update(ctx, id) { it.put("outcome", "obeyed").put("after", m) }
-            Checkins.addBot(ctx, if (promised) "Ты сдержал слово и отложил $name. Так держать!" else "Вижу, ты отложил $name. Молодец!", "nudge-result")
+            Checkins.addBot(ctx, if (promised) "Ты сдержал слово и отложил $name. Так держать!" else "Вижу, ты отложил $name. Молодец!", "nudge-result", id)
         }
     }
 }
