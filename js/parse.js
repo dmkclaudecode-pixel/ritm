@@ -51,13 +51,24 @@ function followUp(text, s, pre){
 }
 const DLG = new RITM.dialog.Context(14);
 let lastMD = null, lastText = "", chatUntil = 0;
-function talkFallback(text){ const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return bot(x.text); }
+// живой ответ: если включена облачная модель, отвечает она (с запасом на правила), иначе сразу правила
+const LLM_ACTS = new Set(["clarify", "short", "topic", "event", "mood", "question", "ack", "advice", "vague"]);
+function deliver(text, x, hint){
+  const L = RITM.llm;
+  if(!L || !L.enabled() || !LLM_ACTS.has(x.act) || /\d/.test(text)){ DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return bot(x.text + (hint || "")); }
+  const turns = DLG.turns.slice();
+  L.chat(turns, text).then(t => {
+    const out = t || x.text + (hint || ""); DLG.push("bot", t || x.text, {asked: t ? /\?\s*$/.test(t) : x.asked, act: x.act}); bot(out);
+    try{ window.dispatchEvent(new Event("ritm:chat")); }catch(e){ /* не в браузере */ }
+  });
+}
+function talkFallback(text){ const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); return deliver(text, x); }
 export function startChatMode(){ chatUntil = Date.now() + 20*60000; }
 // сильная эмоция без дела: отвечаем по настроению с учётом контекста беседы
 function moodReply(MD, A, s, pre){
   const only = pre.every(e => e.unknown || !e.type || e.fuzzy || (e.minGuess && MD.intensity >= .7 && A.words <= 6));
   if(!only || /\d/.test(s) || pre.some(e => e.time) || MD.intensity < .35 || A.words > 14 || A.question) return false;
-  const x = RITM.talk.reply({text: lastText, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act}); bot(x.text); return true;
+  const x = RITM.talk.reply({text: lastText, mood: MD, ctx: DLG}); deliver(lastText, x); return true;
 }
 export function respondRules(text){
   const s = nrm(text);
@@ -81,9 +92,9 @@ export function respondRules(text){
   { const inChat = Date.now() < chatUntil, soft = !/\d/.test(s) && pre.every(e => !e.type || e.fuzzy || e.unknown || e.sem);
     const third = A.subj3 && !/\d/.test(s) && pre.every(e => e.neg || !e.type || e.fuzzy || e.unknown || e.sem);   // рассказ про других, а не запись дела
     if(RITM.talk && (RITM.talk.direct(text) || third || (inChat && soft && !A.states.length))){
-      const x = RITM.talk.reply({text, mood: MD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act});
+      const x = RITM.talk.reply({text, mood: MD, ctx: DLG});
       if(x.act === "invite" || inChat) chatUntil = Date.now() + 20*60000;
-      return bot(x.text);
+      return deliver(text, x);
     } }
   // короткий ответ на вопрос бота («часов пять», «две недели», «да, давай») — реакция по типу вопроса
   { const lbT = DLG.last("bot"), soft2 = pre.every(e => !e.type || e.fuzzy || e.unknown || e.sem);
@@ -133,7 +144,7 @@ export function respondRules(text){
     return bot("Что слушаете?", [["learning","Подкаст","Подкаст"],["relax","Музыка","Музыку"],["reading","Аудиокнига","Аудиокнигу"]].map(([t, n, l]) => act(l, {op:"logQuick", type:t, name:n, text})).concat([act("Не надо записывать", {op:"keep"})]));
   }
   // «еду на работу», «жена приготовила ужин», «заказал пиццу»: не запись о деле (если нет цифр и явного времени)
-  if(A.notMine && !A.states.length && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ __set_ruleMiss(false); return bot(chattyReply(null)); }
+  if(A.notMine && !A.states.length && !pre.some(e => e.time && !e.approx) && !(A.small && A.small.length)){ __set_ruleMiss(false); return chattyDeliver(null); }
   const hasSureAct = pre.some(e => e.type && !e.fuzzy && TYPES[e.type].unit !== "event");
   if(A.meta === "tooEarly" && !hasSureAct){
     settings.statsHold = Math.max(settings.statsHold || 0, startedAt() + 14*86400000); persistSettings();
@@ -184,13 +195,13 @@ export function respondRules(text){
   { const sl = entries.filter(e => e.min && !/(вздремну(?!л)|подремлю|посплю|прилягу|буду спать)/i.test(e.text || "") && ((!e.type && /^(поспал|спал|вздремнул|подремал|дремал|заснул на|уснул на)/i.test(e.name || "")) || (e.type === "relax" && /(вздремнул|подремал|задремал|дремал)/i.test(e.text || ""))));
     for(const e of sl){ entries.splice(entries.indexOf(e), 1); logSleepWords(e, text); }
     if(sl.length && !entries.length) return; }
-  if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return bot(chattyReply(null));
+  if(!entries.length && RITM.findActivity(text) && RITM.findActivity(text).none) return chattyDeliver(null);
   if(!entries.length && RITM.talk && RITM.followup){
     // ничего не распознано: это разговор, а не запись — отвечаем разговорным движком; подсказку про формат добавляем только если он сам не понял
     __set_ruleMiss(true); noteMiss(text, "nothing");
-    const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act});
+    const x = RITM.talk.reply({text, mood: lastMD || {}, ctx: DLG}); 
     const hint = ["clarify", "short", "vague"].includes(x.act) ? " Если это дело, напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), или спроси «что сегодня?»." : "";
-    return bot(x.text + hint);
+    return deliver(text, x, hint);
   }
   if(!entries.length){ __set_ruleMiss(true); noteMiss(text, "nothing"); return bot("Я пока не понял. Напиши, что делал («прогулка 30 минут», «выпил кофе в 9:30»), что планируешь («завтра бассейн в 18») или спроси «что сегодня?»."); }
   const cb0 = ctxBot(), lastBot = cb0.m;
@@ -304,7 +315,7 @@ export function respondRules(text){
   for(const u of fzChatty) fuzzies.splice(fuzzies.indexOf(u), 1);
   if(chatty.length || fzChatty.length){ for(const u of chatty) unknown.splice(unknown.indexOf(u), 1);
     noteMiss(text, "chat");
-    if(!past.length && !future.length && !negs.length && !clar.length && !unknown.length && !fuzzies.length) bot(chattyReply(ctxKind)); }
+    if(!past.length && !future.length && !negs.length && !clar.length && !unknown.length && !fuzzies.length) chattyDeliver(ctxKind); }
   // неуверенная догадка (похоже на опечатку) — сначала спрашиваем
   for(const e of fuzzies){
     const what = lc(e.name) + (describe(e) && !e.minGuess ? " (" + describe(e) + ")" : "");
@@ -337,6 +348,10 @@ function isChatty(u, A){
   return !!A.conversational && w.length >= 2;
 }
 export const SKIP_OK = ["Ничего страшного, бывает.","Понял, без проблем.","Окей, случается.","Бывает, не страшно.","Жизнь вносит правки, это нормально.","Понял. Один пропуск ничего не ломает.","Окей, не беда."];
+function chattyDeliver(kind){
+  if(kind === "report" || kind === "insight" || !RITM.talk || !lastMD) return bot(chattyReply(kind));
+  const x = RITM.talk.reply({text: lastText, mood: lastMD, ctx: DLG}); return deliver(lastText, x);
+}
 function chattyReply(kind){
   if(kind === "report" || kind === "insight") return "Понял тебя. Ничего не меняю, просто продолжаю наблюдать.";
   if(RITM.talk && lastMD){ const x = RITM.talk.reply({text: lastText, mood: lastMD, ctx: DLG}); DLG.push("bot", x.text, {asked: x.asked, act: x.act}); return x.text; }

@@ -489,6 +489,16 @@ export function init(){
   try{ const file = new File([text], name, {type:"text/calendar"}); if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Rhythm"}); return; } }catch(e){ if(e && e.name==="AbortError") return; }
   download(name, text, "text/calendar"); if(!NATIVE) toast("Файл сохранён. Откройте его, чтобы добавить в календарь");
 };
+  const llmPaint = () => { const L = RITM.llm; if(!L || !$("llmNote")) return; const has = !!L.getKey(), on = L.enabled();
+    $("llmNote").textContent = !has ? "Ключ не задан: используется встроенный бот." : on ? "Включено: на живые реплики отвечает облачная модель." : "Выключено или нет интернета.";
+    $("llmToggle").textContent = L.getKey() && localStorage.getItem("ritm:llmOff") === "1" ? "Включить" : "Выключить"; };
+  if($("llmSave")){
+    $("llmSave").onclick = () => { const v = $("llmKey").value.trim(); if(!/^gsk_[\w-]{20,}$/.test(v)){ toast("Ключ должен начинаться с gsk_"); return; } RITM.llm.setKey(v); RITM.llm.setOff(false); $("llmKey").value = ""; llmPaint(); toast("Ключ сохранён"); };
+    $("llmToggle").onclick = () => { const off = localStorage.getItem("ritm:llmOff") !== "1"; RITM.llm.setOff(off); llmPaint(); };
+    $("llmClear").onclick = () => { RITM.llm.setKey(""); llmPaint(); toast("Ключ удалён"); };
+    llmPaint();
+  }
+  window.addEventListener("ritm:chat", () => { render(); scrollChat(); });
   $("autoBackupToggle").onclick = () => { settings.autoBackup = settings.autoBackup === false; persistSettings(); renderBackupNote(); toast(settings.autoBackup === false ? "Автокопия выключена" : "Автокопия включена"); maybeAutoBackup(); };
   $("exportBtn").onclick = () => {
   const data = backupData();

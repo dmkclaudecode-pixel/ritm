@@ -139,6 +139,13 @@
     <section class="card" id="missCard" hidden></section>
     <section class="card" id="actsCard"></section>
     <section class="card">
+      <h2>Живой разговор</h2>
+      <p class="note">Умные ответы в чате даёт облачная модель Groq (бесплатный тариф). Нужен свой ключ с console.groq.com. Он хранится только на этом телефоне. В модель уходят последние реплики чата, журнал дел не передаётся. Без ключа или без интернета бот отвечает по-старому.</p>
+      <p class="note" id="llmNote"></p>
+      <div class="tools"><input type="password" id="llmKey" placeholder="Ключ Groq (gsk_…)" autocomplete="off" style="flex:1;min-width:0"><button class="btn" id="llmSave">Сохранить</button></div>
+      <div class="tools"><button class="btn" id="llmToggle">Выключить</button><button class="btn" id="llmClear">Удалить ключ</button></div>
+    </section>
+    <section class="card">
       <h2>Резервная копия</h2>
       <p class="note">Данные хранятся только на этом телефоне. Раз в неделю приложение само кладёт копию в папку «Загрузки» (она переживёт переустановку). Можно сохранить и вручную.</p>
       <p class="note" id="backupNote"></p>
@@ -178,6 +185,7 @@
 <script src="mood.js"></script>
 <script src="dialog.js"></script>
 <script src="followup.js"></script>
+<script src="llm.js"></script>
 <script src="retrieve.js"></script>
 <script src="talk.js"></script>
 <script src="embed.js"></script>

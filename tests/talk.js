@@ -109,4 +109,12 @@ t("не больше 2 вопросов из 4 подряд", many.every((_, i) 
   t("подбор: нельзя повторять слова, которых нет у нас", !r2 || r2.best !== "Поздравляю! Проект — это серьёзно.", JSON.stringify(r2 && r2.best));
   idx.gate.tau = 2; Rt.load(idx);
 }
+// облачная модель: сборка запроса и чистка ответа (сеть не нужна)
+{ const L = require("../llm.js");
+  const m = L.buildMessages([{role: "user", text: "привет"}, {role: "bot", text: "Привет! Как дела?"}, {role: "user", text: "норм"}], "норм");
+  t("llm: система + чередование ролей", m[0].role === "system" && m.slice(1).map(x => x.role).join() === "user,assistant,user", JSON.stringify(m.slice(1)));
+  t("llm: ложное «записал» отбрасывается", L.clean("Хорошо, я записал это.") === null);
+  t("llm: мат и китайский отбрасываются", L.clean("Ну это пиздец") === null && L.clean("好的 понял") === null);
+  t("llm: не больше трёх предложений", L.clean("Раз. Два. Три. Четыре.") === "Раз. Два. Три.");
+  t("llm: без ключа выключена", L.enabled() === false); }
 console.log(`разговор (2): ${ok} ок всего, ${bad.length} ошибок`); bad.forEach(b => console.log("  ✗ " + b)); if(bad.length) process.exitCode = 1;
