@@ -283,13 +283,16 @@ export function respondRules(text){
     noteMiss(u.text || u.name, "unknown");
     // варианты кнопок: сначала то, что подсказывает смысловой движок, потом самые частые типы
     const eng = (RITM.engine ? RITM.engine.classify(RITM.coreText(u.text || u.name || "") || (u.text || u.name || ""), t => !["sleep","other","intimacy"].includes(t)) : []).filter(x => x.p >= 0.08).slice(0, 3).map(x => x.type);
-    const guesses = Array.from(new Set((/(развею|развея|размя|разомн|потян|подвиг|передохн|перерыв|пауз|встану|глаз)/.test(nrm(u.text || u.name || "")) ? ["pause"] : []).concat(eng, ["walk","strength","sport","hobby","relax","meal","work","other"]))).filter(t => TYPES[t]);
-    const m = bot(`Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
+    let guesses = Array.from(new Set((/(развею|развея|размя|разомн|потян|подвиг|передохн|перерыв|пауз|встану|глаз)/.test(nrm(u.text || u.name || "")) ? ["pause"] : []).concat(eng, ["walk","strength","sport","hobby","relax","meal","work","other"]))).filter(t => TYPES[t]);
+    const foodW = RITM.onto ? words(u.text || u.name || "").find(w => w.length > 3 && RITM.onto.lookup(w).isFood) : null;
+    if(foodW) guesses.unshift("meal");
+    const m = bot(foodW ? `«${u.name}» — похоже на еду («${foodW}»). Записать как приём пищи или это другое?` : `Не знаю, что такое «${u.name}». Подскажи, к чему это отнести, и я запомню:`,
       guesses.slice(0,6).map(t => act(CATS[t].n, {op:"type", idx:0, type:t})).concat([act("Другое…", {op:"typechoose", idx:0}), act("Это не занятие", {op:"notact", idx:0})]),
       {pending:[{...u, future: isFutureClause(u.text, text, u), date: (dayFromText(u.text) || msgDay || new Date()).getTime()}]});
     void m;
   });
 }
+const words = t => nrm(t).trim().split(" ").filter(Boolean);
 function isChatty(u, A){
   if(u.time || (u.qty && u.qty.length) || u.min) return false;
   const w = nrm(u.name).trim().split(" ").filter(Boolean);
