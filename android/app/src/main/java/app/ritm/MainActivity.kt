@@ -226,6 +226,7 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface fun setCheckins(json: String) = Checkins.set(this@MainActivity, json)
         @JavascriptInterface fun setWatch(json: String) = Watcher.configure(this@MainActivity, json)
+        @JavascriptInterface fun setWidget(json: String) = WidgetProvider.set(this@MainActivity, json)
         @JavascriptInterface fun nudges(): String = Watcher.history(this@MainActivity).toString()
         @JavascriptInterface fun nudgeReply(id: String, kind: String, text: String, snoozeMin: Int): String = Watcher.applyReply(this@MainActivity, id, kind, text, snoozeMin)
         @JavascriptInterface fun testWatch() = Watcher.check(this@MainActivity)

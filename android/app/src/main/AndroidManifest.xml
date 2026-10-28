@@ -59,6 +59,12 @@
             </intent-filter>
         </activity-alias>
 
+        <receiver android:name=".WidgetProvider" android:exported="true" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/ritm_widget_info" />
+        </receiver>
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".CheckinReceiver" android:exported="false" />
         <receiver android:name=".ReplyReceiver" android:exported="false" />

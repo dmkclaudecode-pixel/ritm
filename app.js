@@ -317,7 +317,7 @@ function placeCheckin(){   // вечером оценка дня идёт сра
   if(new Date().getHours() >= 17) plan.after(c); else sugg.after(c);
 }
 function renderToday(){
-  placeCheckin();
+  placeCheckin(); renderRitual();
   const ck = curKey(), ti = todayI(), w = getWeek(ck), d = new Date();
   $("subtitle").textContent = `${DFULL[ti]}, ${d.getDate()} ${MONG[d.getMonth()]}`;
   const its = w.items.filter(i => i.day===ti).sort((a,b) => (a.time||"99").localeCompare(b.time||"99"));
@@ -550,7 +550,7 @@ function render(){
   document.querySelectorAll("#tabbar button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   $("title").textContent = TITLES[tab];
   if(tab==="chat") renderChat(); else if(tab==="today") renderToday(); else if(tab==="review") renderReview(); else if(tab==="week") renderWeek(); else if(tab==="stats") renderStats(); else renderMore();
-  syncNative(); syncCheckins(); syncWatch();
+  syncNative(); syncCheckins(); syncWatch(); try{ syncWidget(); }catch(e){}
   document.body.classList.toggle("inchat", tab === "chat");
 }
 
@@ -659,6 +659,7 @@ document.addEventListener("click", e => {
   else if(ds.add){ openItem(ds.week || curKey(), {id:null, day:+ds.add, cat:"walk", t:"", time:""}); }
   else if(ds.jump){ const el = $("day"+ds.jump); if(el) el.scrollIntoView({behavior:"smooth", block:"start"}); }
   else if(ds.hab){ const k = curKey(); mutate(k, w => { const d = todayI(); const cur = ds.hab==="sleep" ? sleepOk(w,k,d) : !!(w.days[d]||{})[ds.hab]; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.hab] = !cur; }); }
+  else if(ritualClick(ds)){}
   else if(ds.sc){ mutate(curKey(), w => { const d = todayI(), v = +ds.v; w.days[d] = {...(w.days[d]||{})}; w.days[d][ds.sc] = w.days[d][ds.sc]===v ? null : v; }); }
   else if(ds.light){ mutate(curKey(), w => { const d = todayI(); w.days[d] = {...(w.days[d]||{}), light:true}; }); toast("Отмечено: дневной свет"); }
   else if(ds.native){ try{ if(ds.native==="health") NATIVE.requestHealth(); else if(ds.native==="healthbg") NATIVE.requestHealthBg(); else if(ds.native==="appsettings") NATIVE.openAppSettings(); else if(ds.native==="usage"){ NATIVE.requestUsage(); toast("Найдите «Ритм недели» в списке и включите доступ"); } else { NATIVE.refreshHealth(); toast("Обновляю…"); } }catch(e){} }
@@ -1453,8 +1454,64 @@ function morningBrief(){
   else if(short) L.push("Сна меньше твоей нормы. Сегодня без кофе после " + settings.caffeineCutoff + " и лучше лечь пораньше. А как самочувствие на самом деле? Отметь энергию, так я лучше пойму, сколько сна тебе нужно.");
   else if(n.sl) L.push(pick(["Хорошо выспался — отличный день, чтобы сделать что-то важное.","Выспался, это база. Удачного дня!","Нормальная ночь, так держать."]));
   else if(n.causes.length) L.push("Кстати, " + n.causes[0].text + "." + personalLink(n.causes[0].k));
-  bot(L.filter(Boolean).join("\n"), [act("Как настроение? Отметить", {op:"tab", tab:"today"})], {kind:"brief"});
+  bot(L.filter(Boolean).join("\n"), [act("Утренний ритуал", {op:"tab", tab:"today"})], {kind:"brief"});
   return true;
+}
+
+/* ---------- утренний ритуал: итог сна, энергия и план дня по состоянию ---------- */
+function ritualState(){
+  const now = new Date(), ck = curKey(), ti = todayI(), w = getWeek(ck), day = w.days[ti] || {};
+  const n = nightFacts(), sl = n.sl, need = sleepNeed().min, energy = day.energy ?? null;
+  const shortSleep = !!(sl && sl.min < need - 60);
+  const low = (energy != null && energy <= 2) || !!day.sick || (energy == null && shortSleep);
+  const great = energy != null && energy >= 4 && (!sl || sl.min >= need - 30) && !day.sick;
+  const its = w.items.filter(i => i.day === ti).sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
+  const undone = its.filter(i => !i.done), upMajor = undone.filter(i => MAJOR.has(i.cat) && (!i.time || i.time >= nowHM()));
+  return {ck, ti, w, day, sl, need, energy, shortSleep, mode: low ? "light" : great ? "push" : "normal", its, undone, upMajor, n};
+}
+function lightenToday(){
+  const S = ritualState(); let moved = 0, swapped = 0;
+  for(const it of S.upMajor){
+    const bd = bestDayInWeek(S.ck, it.cat, Math.min(6, S.ti + 2), S.ti);
+    if(bd >= 0 && bd !== S.ti){ mutateQuiet(S.ck, w => { const x = w.items.find(i => i.id === it.id); if(x){ x.day = bd; } }); moved++; }
+    else { mutateQuiet(S.ck, w => { const x = w.items.find(i => i.id === it.id); if(x){ x.cat = "walk"; x.t = "Лёгкая прогулка, 20 мин"; } }); swapped++; }
+  }
+  mutateQuiet(S.ck, w => { w.days[S.ti] = {...(w.days[S.ti] || {}), lightDay:true}; });
+  return {moved, swapped};
+}
+function renderRitual(){
+  const c = $("ritualCard"); if(!c) return;
+  const h = new Date().getHours(), today = iso(new Date());
+  if(h < 5 || h >= 13 || LS.get("ritualDone") === today){ c.hidden = true; return; }
+  const S = ritualState();
+  if(!S.sl && S.energy == null && !S.its.length){ c.hidden = true; return; }
+  c.hidden = false;
+  const sleepLine = S.sl ? `<div class="rsleep"><b>${fmtDur(S.sl.min)}</b><span class="note">сон · твоя норма ${fmtDur(S.need)} · ${S.sl.min >= S.need - 15 ? "хватает" : S.sl.min >= S.need - 60 ? "чуть меньше нормы" : "заметно меньше нормы"}</span></div>` : `<p class="note">Сон за ночь пока не записан: напиши в чат «лёг в 23, встал в 7».</p>`;
+  const scale = `<div class="scale"><span class="label">Как себя чувствуешь?</span><div class="row">${[1,2,3,4,5].map(n => `<button class="${S.energy === n ? "on" : ""}" data-sc="energy" data-v="${n}" aria-label="Энергия ${n} из 5">${n}</button>`).join("")}</div></div>`;
+  let mode = "", btns = "";
+  const cut = S.shortSleep ? "13:00" : settings.caffeineCutoff;
+  if(S.mode === "light"){
+    mode = `<div class="rmode light"><b>Сегодня лёгкий день.</b> ${S.shortSleep ? "Сна меньше нормы, и организм это чувствует. " : "Энергии немного. "}Тяжёлое лучше сдвинуть, сделать ставку на прогулку, воду и ранний отбой. Кофе только до ${cut}.${S.upMajor.length ? ` В плане ${S.upMajor.length === 1 ? "тяжёлая тренировка «" + esc(S.upMajor[0].t) + "»" : S.upMajor.length + " тяжёлых тренировки"}: могу перенести или заменить на лёгкую прогулку.` : ""}</div>`;
+    if(S.upMajor.length) btns += `<button class="btn primary" data-rit="lighten">Облегчить день</button>`;
+    if(!S.w.items.some(i => i.day === S.ti && /Лечь пораньше/.test(i.t))) btns += `<button class="btn" data-rit="bed">Лечь на 30 минут раньше</button>`;
+  } else if(S.mode === "push"){
+    const top = S.undone.find(i => MAJOR.has(i.cat)) || S.undone[0];
+    mode = `<div class="rmode push"><b>Есть ресурс.</b> ${top ? `Хороший день для главного: «${esc(top.t)}»${top.time ? " в " + top.time : ""}.` : "Хороший день, чтобы добавить что-то важное из целей недели."}</div>`;
+    if(!S.undone.length) btns += `<button class="btn primary" data-rit="push">Подобрать на сегодня</button>`;
+  } else {
+    const nx = S.undone[0];
+    mode = `<div class="rmode"><b>Идём по плану.</b> ${nx ? `Первое: «${esc(nx.t)}»${nx.time ? " в " + nx.time : ""}.` : "На сегодня ничего не запланировано, можно взять совет ниже."}</div>`;
+  }
+  const main = S.undone.slice(0, 3).map((i, k) => `<li class="${k ? "" : "first"}"><b>${i.time || "—"}</b><span>${esc(i.t)}</span></li>`).join("");
+  c.innerHTML = `<div class="bhead"><h2>Утро</h2><span class="note">30 секунд</span></div>${sleepLine}${scale}${mode}${main ? `<span class="label">Главное на сегодня</span><ul class="rmain">${main}</ul>` : ""}<div class="tools">${btns}<button class="btn" data-rit="done">Готово</button></div>`;
+}
+function ritualClick(ds){
+  if(!ds.rit) return false;
+  if(ds.rit === "done"){ LS.set("ritualDone", iso(new Date())); render(); return true; }
+  if(ds.rit === "lighten"){ const r = lightenToday(); toast(`Облегчил: перенёс ${r.moved}, заменил ${r.swapped}`); bot(`Облегчил день: перенёс ${r.moved}, заменил на лёгкую прогулку ${r.swapped}. Если станет лучше, можно вернуть.`); render(); return true; }
+  if(ds.rit === "bed"){ const S = ritualState(), tm = hmMinus(usualBedtime().hm, 30); mutate(S.ck, w => w.items.push({id:uid(), day:S.ti, cat:"unplug", t:"Лечь пораньше, без экрана", time:tm, done:false})); toast("Добавил: лечь в " + tm); return true; }
+  if(ds.rit === "push"){ const sg = suggestionsToday().find(x => x.idea); if(sg){ const S = ritualState(); mutate(S.ck, w => w.items.push({id:uid(), day:S.ti, cat:sg.cat, t:sg.idea.t, time:"", done:false})); toast("Добавил: " + sg.idea.t); } else toast("Сегодня всё по целям"); return true; }
+  return false;
 }
 
 /* ---------- сон словами: «поспал 3 часа вечером», «ночью спал 5 часов» ---------- */
@@ -2032,10 +2089,10 @@ const afterStart = (key, dow) => addDays(new Date(key+"T00:00:00"), dow).getTime
 function history(n){ const out = [], t = new Date(); t.setHours(0,0,0,0); for(let i = n; i >= 0; i--) out.push(dayRecord(addDays(t, -i))); return out; }
 const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
 // сравнение «в дни, когда X» против «остальные дни» с поправкой на малую выборку
-function compare(days, cond, val, minN, by){
+function compare(days, cond, val, minN, by, raw){
   // причинность: из исхода вычитаем средние по день недели (и по доп. факторам), чтобы не путать «сон» с «понедельником»
   const dowOf = r => r.x ? r.y.dow : r.dow;
-  const factors = [dowOf].concat(by || []);
+  const factors = (raw ? [] : [dowOf]).concat(by || []);
   let rows = [];
   for(const x of days){ const c = cond(x), v = val(x); if(c == null || v == null) continue; rows.push({c, v, x}); }
   if(rows.length >= 21){
@@ -2111,11 +2168,57 @@ function personalInsights(){
   if(r && r.diff >= 0.5) add(r.diff*40, `Когда ты пьёшь достаточно воды, энергия выше на ${r.diff.toFixed(1).replace(".", ",")} балла.`, "water");
   { const nf = LS.get("nudgeFeel") || {}, top = Object.entries(nf).sort((x, y) => y[1] - x[1])[0]; r = null;
     if(top && top[1] >= 3) add(12, `Когда ты залипаешь в телефоне, чаще всего причина — ${FEEL_WORD[top[0]]} (${top[1]} раз по твоим ответам). Лучше работать с ней, чем с лимитами.`, "screen"); }
+  { const wds = weakDays(); r = null;
+    for(const wd of wds.slice(0, 2)){ r = wd.r; add(wd.drop * 30, `${DFULL[wd.dow]} у тебя слабый день: энергия ниже в среднем на ${wd.drop.toFixed(1).replace(".", ",")} балла (${wd.r.nA} таких дней).${wd.why ? " Что их отличает: " + wd.why + "." : ""} Тяжёлое лучше ставить на другие дни.`, "weekday"); }
+    r = null; }
   // режим: разброс времени отбоя → энергия
   r = null;
   const beds = days.filter(x => x.bedM != null).map(x => x.bedM);
   if(beds.length >= 5){ const avg = mean(beds), sd = Math.sqrt(mean(beds.map(b => (b-avg)**2))); if(sd >= 50) add(sd/2, `Время отбоя у тебя гуляет примерно на ±${fmtDur(Math.round(sd))}. Ровный режим — один из самых простых способов высыпаться.`, "rhythm"); }
   return out.sort((a,b) => b.score - a.score);
+}
+// слабые дни недели: когда энергия стабильно ниже и что их отличает (сон перед ним, шаги, экран, загрузка)
+function weakDays(){
+  if(!statsReady(21)) return [];
+  const days = history(84).filter(x => !x.sick), out = [];
+  const withE = days.filter(x => x.energy != null);
+  if(withE.length < 21) return out;
+  const DOWN = [["sleepMin", x => x.sleepMin, -1, d => `сон перед этим днём короче в среднем на ${fmtDur(Math.round(-d))}`],
+                ["steps", x => x.steps, -1, d => `шагов меньше примерно на ${fmtNum(Math.round(-d))}`],
+                ["screen", x => x.screenEnt, 1, d => `развлечений в телефоне больше на ${fmtDur(Math.round(d))}`],
+                ["planned", x => x.planned, 1, d => `в плане больше дел (на ${d.toFixed(1).replace(".", ",")} в среднем)`],
+                ["caf", x => x.caf, 1, d => `кофеина больше примерно на ${Math.round(d)} мг`]];
+  for(let dow = 0; dow < 7; dow++){
+    const r = compare(withE, x => x.dow === dow, x => x.energy, 3, null, true);
+    if(!r || r.diff > -0.6 || r.t < 1.7) continue;
+    let why = null, best = 0;
+    for(const [k, f, sign, txt] of DOWN){
+      const q = compare(days, x => x.dow === dow, f, 3, null, true);
+      if(q && q.diff * sign > 0 && q.t >= 1.7 && q.t > best){ best = q.t; why = txt(q.diff); }
+    }
+    out.push({dow, r, why, drop:-r.diff});
+  }
+  return out.sort((a, b) => b.drop - a.drop);
+}
+// накануне слабого дня: предупреждаю и предлагаю облегчить его
+function maybePreempt(){
+  const h = new Date().getHours(); if(h < 17 || h >= 22) return false;
+  const ck = curKey(), ti = todayI(), tm = (ti + 1) % 7, nextKey = ti === 6 ? iso(addDays(new Date(ck + "T00:00:00"), 7)) : ck;
+  const P = LS.get("preemptPosted") || {}, tag = nextKey + ":" + tm;
+  if(P[tag]) return false;
+  const wd = weakDays().find(x => x.dow === tm); if(!wd) return false;
+  const w2 = getWeek(nextKey), maj = w2.items.filter(i => i.day === tm && !i.done && MAJOR.has(i.cat));
+  P[tag] = Date.now(); LS.set("preemptPosted", P);
+  const acts = [];
+  for(const it of maj.slice(0, 1)){
+    const bd = bestDayInWeek(nextKey, it.cat, Math.min(6, tm + 1), tm);
+    if(bd >= 0 && bd !== tm) acts.push(act(`Перенести «${it.t}» ${DACC[bd]}`, {op:"move", key:nextKey, id:it.id, day:bd, t:it.t}));
+    acts.push(act("Заменить на лёгкую прогулку", {op:"swap", key:nextKey, id:it.id, type:"walk", name:"Лёгкая прогулка, 20 мин", t:it.t}));
+  }
+  if(!getWeek(ck).items.some(i => i.day === ti && /Лечь пораньше/.test(i.t))) acts.push(earlyBedAct());
+  acts.push(act("Не нужно", {op:"keep"}));
+  bot(`Завтра ${DFULL[tm].toLowerCase()}. По твоим данным в такие дни энергия ниже в среднем на ${wd.drop.toFixed(1).replace(".", ",")} балла${wd.why ? ": " + wd.why : ""}.${maj.length ? ` А в плане «${maj[0].t}».` : ""} Подготовимся заранее?`, acts, {kind:"preempt"});
+  return true;
 }
 function streaks(){
   const days = history(60).reverse(); // сегодня первым
@@ -2651,6 +2754,14 @@ function nudgeReview(){
     }
   }
   return false;
+}
+/* ---------- виджет на главном экране ---------- */
+let lastWidget = "";
+function syncWidget(){
+  if(!NATIVE || !NATIVE.setWidget) return;
+  const ck = curKey(), ti = todayI(), L = intakeOf((getWeek(ck).days[ti] || {}).log), st = stepsFor(dateOf(ck, ti));
+  const j = JSON.stringify({date:iso(new Date()), water:L.water, waterGoal:settings.waterGoal, mg:L.mg, mgMax:settings.caffeineMax, steps: st != null ? Math.round(st) : -1, stepsGoal:settings.stepsGoal});
+  if(j !== lastWidget){ lastWidget = j; try{ NATIVE.setWidget(j); }catch(e){} }
 }
 /* ---------- app watcher settings & history ---------- */
 let lastWatchSync = "";
@@ -3453,7 +3564,7 @@ window.__ritmNative = {
       LS.set("health", health); try{ suggestWalks(); }catch(e){} try{ syncWalkWatch(); }catch(e){} try{ applyRhythm(); }catch(e){} render();
     }catch(e){}
   },
-  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
+  onResume(){ try{ NATIVE.refreshHealth(); }catch(e){} pullNative(); maybeAutoBackup(); if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybePreempt() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); if(!checkOpen()) render(); scrollChat(); },
   onNotifPermission(ok){
     if(ok){ settings.notify = true; persistSettings(); try{ NATIVE.setReminders(settings.morning, settings.evening, true); }catch(e){} toast("Уведомления включены"); }
     else toast("Без разрешения уведомления не придут. Его можно дать в настройках Android");
@@ -3499,7 +3610,7 @@ document.addEventListener("visibilitychange", () => { if(!document.hidden){ dism
 
 render(); renderBackupNote(); setTimeout(maybeAutoBackup, 3000);
 pullNative();
-if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); render(); }
+if(getChat().length) { if(!maybeWeeklyReport() && !maybeMissReview() && !maybeForecast() && !maybePreempt() && !maybeHabit() && !morningBrief() && tab === "chat") askRoutine(); render(); }
 if(!checkOpen()) scrollChat();
 $("chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("chatInput").value; $("chatInput").value = ""; sendChat(v); });
 $("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) setReply(null); });
@@ -3532,7 +3643,7 @@ $("replyBar").addEventListener("click", e => { if(e.target.closest("#replyX")) s
 })();
 $("chatInput").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("chatForm").requestSubmit(); } });
 // крючок для автотестов (без влияния на работу)
-window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, nudgeReview, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
+window.__ritmT = {sleepTotal, sleepNeed, learnSleepNeed, logSleepWords, curKey, todayI, getWeek, pushMsg, render, morningBrief, nightFacts, weakDays, maybePreempt, syncWidget, nudgeReview, weekForecast, habitTimes, maybeHabit, compare, personalInsights, reverseNote};
 // поправка записи одним касанием: сколько на самом деле
 document.addEventListener("click", e => {
   const t = e.target.closest && e.target.closest("[data-ledit]"); if(t){

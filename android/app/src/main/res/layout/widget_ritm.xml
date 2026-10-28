@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Вода" android:textSize="11sp" android:textColor="@color/w_muted" />
+            <TextView android:id="@+id/w_water" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="—" android:textSize="17sp" android:textStyle="bold" android:textColor="@color/w_ink" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Кофеин" android:textSize="11sp" android:textColor="@color/w_muted" />
+            <TextView android:id="@+id/w_caf" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="—" android:textSize="17sp" android:textStyle="bold" android:textColor="@color/w_ink" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Шаги" android:textSize="11sp" android:textColor="@color/w_muted" />
+            <TextView android:id="@+id/w_steps" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="—" android:textSize="17sp" android:textStyle="bold" android:textColor="@color/w_ink" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+        <TextView android:id="@+id/w_btn_water" android:layout_width="0dp" android:layout_height="34dp" android:layout_weight="1"
+            android:gravity="center" android:text="+ вода" android:textSize="13sp" android:textStyle="bold"
+            android:textColor="@color/w_accent" android:background="@drawable/widget_btn" />
+        <TextView android:id="@+id/w_btn_coffee" android:layout_width="0dp" android:layout_height="34dp" android:layout_weight="1"
+            android:layout_marginStart="6dp" android:gravity="center" android:text="кофе" android:textSize="13sp" android:textStyle="bold"
+            android:textColor="@color/w_accent" android:background="@drawable/widget_btn" />
+        <TextView android:id="@+id/w_btn_tea" android:layout_width="0dp" android:layout_height="34dp" android:layout_weight="1"
+            android:layout_marginStart="6dp" android:gravity="center" android:text="чай" android:textSize="13sp" android:textStyle="bold"
+            android:textColor="@color/w_accent" android:background="@drawable/widget_btn" />
+    </LinearLayout>
+</LinearLayout>

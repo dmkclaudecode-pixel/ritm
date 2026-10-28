@@ -183,3 +183,15 @@ label.tog{display:flex}
 .weektools summary{cursor:pointer;font-weight:600;padding:2px 0}
 .weektools .sep{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
 .metric.kbju{margin-top:10px}
+
+.ritual h2{margin:0 0 4px}
+.ritual .rsleep{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+.ritual .rsleep b{font-size:1.15rem}
+.ritual .rmode{border-radius:12px;padding:10px 12px;margin:10px 0;background:var(--surface);border:1px solid var(--line);font-size:.93rem;line-height:1.4}
+.ritual .rmode.light{border-color:#d9a441}
+.ritual .rmode.push{border-color:var(--accent)}
+.ritual .rmain{margin:8px 0 0;padding:0;list-style:none}
+.ritual .rmain li{display:flex;gap:8px;align-items:baseline;padding:4px 0;font-size:.93rem}
+.ritual .rmain li b{min-width:44px;color:var(--muted);font-weight:600}
+.ritual .rmain li.first span{font-weight:600}
+.ritual .tools{margin-top:10px}
