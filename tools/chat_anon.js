@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Локальная подготовка своих реплик из экспорта мессенджера. Ничего не отправляет в сеть.
 //   node tools/chat_anon.js <экспорт> --me "Твоё Имя в чате" [--out my_phrases.txt] [--max 800]
-// Поддерживает: Telegram (result.json из «Экспорт истории чатов», JSON), WhatsApp (txt «Экспорт чата»).
+// Поддерживает: Telegram (result.json или messages*.html из «Экспорт истории чатов»), WhatsApp (txt «Экспорт чата»).
 // Оставляет ТОЛЬКО твои реплики. Заменяет телефоны, e-mail, ссылки, номера карт и длинные числа, @ники, даты, адреса-подсказки, имена из списка --names и слова с заглавной в середине фразы.
 // Выход: по одной фразе в строке. Просмотри файл глазами и убери всё лишнее, прежде чем кому-то показывать.
 const fs = require("fs");
@@ -12,7 +12,18 @@ const me = opt("--me").toLowerCase(), out = opt("--out") || "my_phrases.txt", ma
 const names = (opt("--names") || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 const raw = fs.readFileSync(file, "utf8");
 let msgs = [];
-if(/^\s*[{[]/.test(raw)){                                           // Telegram JSON
+if(/<div class="message /.test(raw)){                               // Telegram HTML (messages.html, messages2.html …)
+  const dec = t => t.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/&quot;/g, '"').replace(/&#x27;|&apos;/g, "'")
+                    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+  let from = "";
+  for(const blk of raw.split(/<div class="message /).slice(1)){
+    if(/^service/.test(blk)) continue;
+    const f = blk.match(/<div class="from_name">([\s\S]*?)<\/div>/); if(f) from = dec(f[1]).trim().toLowerCase();
+    if(!from.includes(me)) continue;
+    const t = blk.match(/<div class="text">([\s\S]*?)<\/div>/);
+    if(t && dec(t[1]).trim()) msgs.push(dec(t[1]));
+  }
+} else if(/^\s*[{[]/.test(raw)){                                           // Telegram JSON
   const j = JSON.parse(raw), chats = j.chats ? j.chats.list : [j];
   for(const c of chats) for(const m of c.messages || []){
     if(m.type !== "message") continue;
